@@ -77,7 +77,8 @@ local ClientSettings = {
     MaxMessagesPerSecond = 10,
     MaxQueuePerUser = 10,
     AutoReply = false,
-    PerUserMemory = false, -- New: Separate history per user
+    PerUserMemory = false, -- Separate history per user (works only if MemoryEnabled=true)
+    MemoryEnabled = true,  -- Включена ли память вообще
     BlacklistUserIds = {},
     Blacklist = {
         Permanent = {},
@@ -779,7 +780,7 @@ end
 -- Chat History Storage
 local ChatHistory = {}
 local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
--- MAX_HISTORY = кол-во ПАРА сообщений (user+assistant) которые хранятся
+-- MAX_HISTORY = количество ПАР сообщений (user+assistant) которые хранятся
 -- Итого сообщений в API = MAX_HISTORY * 2
 local MAX_HISTORY = 10
 
@@ -790,15 +791,23 @@ local function appendHistory(history, userMsg, assistantMsg)
     -- Обрезаем: каждая пара = 2 элемента, оставляем MAX_HISTORY пар
     local maxItems = MAX_HISTORY * 2
     while #history > maxItems do
-        table.remove(history, 1) -- удаляем самое старое
+        table.remove(history, 1)
     end
 end
 
+-- Возвращает таблицу истории для данного вызова.
+-- Если память выключена (MemoryEnabled=false) — возвращает nil.
+-- handleQueuedChat проверяет nil и не добавляет контекст.
 local function getHistory(settings, userId)
+    if not settings.MemoryEnabled then
+        return nil -- память выключена
+    end
     if settings.PerUserMemory then
+        -- Отдельная история для каждого игрока
         if not ChatHistory[userId] then ChatHistory[userId] = {} end
         return ChatHistory[userId]
     else
+        -- Одна общая история для всех
         if not ChatHistory["Global"] then ChatHistory["Global"] = {} end
         return ChatHistory["Global"]
     end
@@ -810,14 +819,20 @@ local function handleQueuedChat(item)
         return
     end
 
+    -- history = nil если память выключена
     local history = getHistory(settings, item.userId)
 
-    -- Собираем payload: system + вся история + новое сообщение
+    -- Собираем сообщения для API
     local apiMessages = {}
     table.insert(apiMessages, { role = "system", content = makeSystemPrompt(settings) })
-    for _, msg in ipairs(history) do
-        table.insert(apiMessages, msg)
+
+    -- Добавляем историю только если память включена
+    if history then
+        for _, msg in ipairs(history) do
+            table.insert(apiMessages, msg)
+        end
     end
+
     table.insert(apiMessages, { role = "user", content = item.cleaned })
 
     local model = getModel(settings)
@@ -826,17 +841,19 @@ local function handleQueuedChat(item)
     local payload = {
         model       = model,
         temperature = tonumber(settings.Temperature) or 0.7,
-        max_tokens  = tonumber(settings.MaxTokens) or 200,
+        max_tokens  = tonumber(settings.MaxTokens) or 512,
         messages    = apiMessages,
     }
 
     local text, err = providerRouter:chatCompletions(payload)
     if err or not text or text == "" then
-        return -- молчим в игровом чате при ошибке
+        return
     end
 
-    -- Сохраняем пару в историю
-    appendHistory(history, item.cleaned, text)
+    -- Сохраняем в историю только если память включена (history не nil)
+    if history then
+        appendHistory(history, item.cleaned, text)
+    end
 
     sendBotMessage(text)
 end
@@ -1004,14 +1021,16 @@ local function processChatMessage(player, rawMessage)
         return
     end
     
-    local queueKey = settings.PerUserMemory and player.UserId or "Global"
+    -- Ключ очереди всегда per-user: каждый игрок имеет свою очередь обработки
+    -- (независимо от настроек памяти — иначе сообщения разных игроков блокируют друг друга)
+    local queueKey = player.UserId
     local maxQueue = tonumber(settings.MaxQueuePerUser) or 3
     if maxQueue < 1 then maxQueue = 1 end
     local queued = enqueueChatItem(queueKey, {
-        userId = player.UserId,
+        userId      = player.UserId,
         displayName = player.DisplayName,
-        name = player.Name,
-        cleaned = cleaned,
+        name        = player.Name,
+        cleaned     = cleaned,
     }, maxQueue)
     if queued then
         runChatQueue(queueKey)
@@ -3298,13 +3317,32 @@ autoReplyToggle = makeToggleRow(
         updateChatListening()
     end
 )
+
+-- Тогл включения памяти (главный)
+makeToggleRow(
+    automation,
+    "Включить память",
+    "ИИ помнит предыдущие сообщения в разговоре. Если выключено — каждый ответ без контекста.",
+    ClientSettings.MemoryEnabled,
+    function(state)
+        ClientSettings.MemoryEnabled = state
+        -- При выключении — стираем старую историю чтобы не путать
+        if not state then
+            for k in pairs(ChatHistory) do ChatHistory[k] = nil end
+        end
+    end
+)
+
+-- Тогл режима памяти (работает только если память включена)
 makeToggleRow(
     automation,
     "Память по пользователям",
-    "Хранит отдельный контекст для каждого игрока.",
+    "Включено: отдельный контекст для каждого игрока. Выключено: один общий контекст для всех.",
     ClientSettings.PerUserMemory,
     function(state)
         ClientSettings.PerUserMemory = state
+        -- При смене режима — сбрасываем историю чтобы не мешать контексты
+        for k in pairs(ChatHistory) do ChatHistory[k] = nil end
     end
 )
 
