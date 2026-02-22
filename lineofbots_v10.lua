@@ -1148,31 +1148,29 @@ updateChatListening()
 -- Themes configuration
 local Themes = {
     LineOfBots = { -- ── Фирменная тема LineOfBots ──────────────────────────
-        -- Глубокий полуночный синий фон с электрическим акцентом
-        Window              = Color3.fromRGB(8, 10, 18),
-        Sidebar             = Color3.fromRGB(6, 8, 14),
-        SidebarSelected     = Color3.fromRGB(18, 26, 52),
+        Window              = Color3.fromRGB(13, 17, 35),      -- тёмно-синий, видимый фон
+        Sidebar             = Color3.fromRGB(9, 12, 26),       -- чуть темнее окна
+        SidebarSelected     = Color3.fromRGB(25, 45, 95),      -- яркое выделение
         WindowTransparency  = 0,
 
-        Card                = Color3.fromRGB(12, 16, 30),
+        Card                = Color3.fromRGB(18, 25, 52),      -- карточки чуть светлее окна
 
-        Text                = Color3.fromRGB(230, 235, 255),
-        TextDim             = Color3.fromRGB(110, 125, 170),
+        Text                = Color3.fromRGB(220, 230, 255),   -- мягкий белый с синевой
+        TextDim             = Color3.fromRGB(120, 145, 200),   -- приглушённый синий
 
-        Button              = Color3.fromRGB(14, 20, 38),
-        ButtonHover         = Color3.fromRGB(22, 32, 62),
+        Button              = Color3.fromRGB(22, 32, 68),
+        ButtonHover         = Color3.fromRGB(32, 50, 105),
 
-        -- Электрический синий акцент — фирменный цвет LineOfBots
-        ToggleOn            = Color3.fromRGB(60, 140, 255),
-        ToggleOff           = Color3.fromRGB(30, 35, 55),
+        ToggleOn            = Color3.fromRGB(55, 135, 255),    -- электрический синий
+        ToggleOff           = Color3.fromRGB(35, 45, 80),
 
-        Stroke              = Color3.fromRGB(40, 65, 140),
-        StrokeTransparency  = 0.5,
+        Stroke              = Color3.fromRGB(55, 90, 180),     -- видимая рамка
+        StrokeTransparency  = 0.55,
 
-        IconTint            = Color3.fromRGB(160, 185, 255),
-        InputBg             = Color3.fromRGB(10, 14, 26),
+        IconTint            = Color3.fromRGB(150, 185, 255),
+        InputBg             = Color3.fromRGB(11, 16, 36),
 
-        Accent              = Color3.fromRGB(60, 140, 255),
+        Accent              = Color3.fromRGB(55, 135, 255),    -- фирменный синий
     },
     Default = { -- Стандартная тёмная
         Window = Color3.fromRGB(20, 20, 20),
@@ -2321,14 +2319,14 @@ local function createInterface()
     sidebarDivider.Size = UDim2.new(0, 1, 1, 0)
     sidebarDivider.Parent = sidebar
 
-local sidebarTitle = makeTextLabel(sidebar, "LineOfBots", 16, "bold")
-sidebarTitle.Position = UDim2.new(0, 20, 0, 18)
-sidebarTitle.Size = UDim2.new(1, -20, 0, 18)
+local sidebarTitle = makeTextLabel(sidebar, "LineOfBots", 19, "bold")
+sidebarTitle.Position = UDim2.new(0, 16, 0, 16)
+sidebarTitle.Size = UDim2.new(1, -16, 0, 22)
 
-local sidebarSubtitle = makeTextLabel(sidebar, "v10 Shell", 12, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebar, "v10 Shell", 11, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
-sidebarSubtitle.Position = UDim2.new(0, 20, 0, 36)
-sidebarSubtitle.Size = UDim2.new(1, -20, 0, 14)
+sidebarSubtitle.Position = UDim2.new(0, 16, 0, 40)
+sidebarSubtitle.Size = UDim2.new(1, -16, 0, 14)
 
 sidebarTitle.Text = "LineOfBots"
 sidebarSubtitle.Text = "v10 Shell"
@@ -3327,9 +3325,10 @@ makeToggleRow(
     ClientSettings.MemoryEnabled,
     function(state)
         ClientSettings.MemoryEnabled = state
-        -- При выключении — стираем старую историю чтобы не путать
         if not state then
+            -- Стираем ВСЮ историю при выключении памяти
             for k in pairs(ChatHistory) do ChatHistory[k] = nil end
+            for i = #DirectChatHistory, 1, -1 do DirectChatHistory[i] = nil end
         end
     end
 )
@@ -3989,19 +3988,45 @@ do
 
             if ok2 then
                 local s2 = res2.StatusCode or res2.statusCode or 0
-                -- Лимиты возвращаются в заголовках ответа
+                -- Заголовки от Groq приходят в разном регистре в разных executor'ах
+                -- Перебираем все ключи заголовков case-insensitive
                 local headers = res2.Headers or res2.headers or {}
-                local remaining = headers["x-ratelimit-remaining-tokens"] or headers["X-Ratelimit-Remaining-Tokens"]
-                local limit     = headers["x-ratelimit-limit-tokens"]     or headers["X-Ratelimit-Limit-Tokens"]
-                local resetIn   = headers["x-ratelimit-reset-tokens"]     or headers["X-Ratelimit-Reset-Tokens"]
-
-                if remaining and limit then
-                    limitText = "Лимит: " .. tostring(limit) .. " токенов | Осталось: " .. tostring(remaining)
-                    if resetIn then
-                        limitText = limitText .. " | Сброс: " .. tostring(resetIn)
+                local function getHeader(name)
+                    local lower = name:lower()
+                    -- Прямое совпадение
+                    if headers[name] then return tostring(headers[name]) end
+                    -- Перебор всех ключей
+                    for k, v in pairs(headers) do
+                        if tostring(k):lower() == lower then
+                            return tostring(v)
+                        end
                     end
+                    return nil
+                end
+
+                -- Читаем лимиты по запросам (более стабильно чем по токенам)
+                local remainReq = getHeader("x-ratelimit-remaining-requests")
+                local limitReq  = getHeader("x-ratelimit-limit-requests")
+                local resetReq  = getHeader("x-ratelimit-reset-requests")
+                -- Лимиты по токенам как запасной вариант
+                local remainTok = getHeader("x-ratelimit-remaining-tokens")
+                local limitTok  = getHeader("x-ratelimit-limit-tokens")
+
+                if remainReq and limitReq then
+                    limitText = "Запросов: " .. remainReq .. " / " .. limitReq .. " в мин."
+                    if resetReq then
+                        limitText = limitText .. "  •  Сброс: " .. resetReq
+                    end
+                    if remainTok and limitTok then
+                        limitText = limitText .. "\nТокенов: " .. remainTok .. " / " .. limitTok
+                    end
+                elseif remainTok and limitTok then
+                    limitText = "Токенов осталось: " .. remainTok .. " / " .. limitTok
                 elseif tonumber(s2) == 429 then
                     limitText = "⚠️ Лимит исчерпан — подожди немного."
+                else
+                    -- Если заголовков нет — хотя бы сообщаем что ключ рабочий
+                    limitText = "Ключ активен. Лимиты: недоступны в данном executor'е."
                 end
             end
 
@@ -6634,11 +6659,24 @@ end)
 -- Отдельная история для директ-чата (не смешивается с игровым чатом)
 
 local function ctDoSend()
-    local msg = ctInputBox.Text:gsub("^%s+",""):gsub("%s+$","")
-    if msg == "" or ctSending then return end
+    local rawMsg = ctInputBox.Text:gsub("^%s+",""):gsub("%s+$","")
+    if rawMsg == "" or ctSending then return end
     ctSending = true
     ctInputBox.Text = ""
-    ctAddMessage(msg, false, false)
+
+    -- Применяем фильтр # точно так же как в игровом чате
+    local msg = rawMsg
+    if ClientSettings.StripHash ~= false then
+        msg = msg:gsub("#", "")
+        msg = msg:gsub("%s+", " "):match("^%s*(.-)%s*$")
+    end
+    if msg == "" then
+        ctSending = false
+        return
+    end
+
+    -- Показываем оригинальный текст пользователя (до фильтра)
+    ctAddMessage(rawMsg, false, false)
 
     local typingIdx = ctMsgCounter + 1
     ctMsgCounter = ctMsgCounter + 1
@@ -6660,10 +6698,12 @@ local function ctDoSend()
 
     local settings = ClientSettings
     task.spawn(function()
-        -- Строим payload из DirectChatHistory
+        -- Строим payload — историю берём только если память включена
         local apiMsgs = {{ role = "system", content = makeSystemPrompt(settings) }}
-        for _, m in ipairs(DirectChatHistory) do
-            table.insert(apiMsgs, m)
+        if settings.MemoryEnabled then
+            for _, m in ipairs(DirectChatHistory) do
+                table.insert(apiMsgs, m)
+            end
         end
         table.insert(apiMsgs, { role = "user", content = msg })
 
@@ -6678,8 +6718,8 @@ local function ctDoSend()
             messages    = apiMsgs,
         }
         local text, err = providerRouter:chatCompletions(payload)
-        if text and text ~= "" then
-            -- Сохраняем через единую функцию с правильным обрезанием
+        if text and text ~= "" and settings.MemoryEnabled then
+            -- Сохраняем только если память включена
             appendHistory(DirectChatHistory, msg, text)
         end
         if ChatTestCallback then
