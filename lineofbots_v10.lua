@@ -79,7 +79,8 @@ local ClientSettings = {
     AutoReply = false,
     PerUserMemory = false, -- Separate history per user (works only if MemoryEnabled=true)
     MemoryEnabled = true,  -- Включена ли память вообще
-    StripHash = true,      -- Убирать символ "#" из сообщений (ИИ иначе думает что это HTML/Markdown)
+    StripHash = true,      -- Убирать символ "#" из сообщений
+    UsePlayerName = true,  -- Передавать ИИ ник игрока (ИИ сможет обращаться по имени)
     BlacklistUserIds = {},
     Blacklist = {
         Permanent = {},
@@ -398,11 +399,10 @@ end
 local function postJson(url, headers, bodyTable)
     local body = HttpService:JSONEncode(bodyTable)
     
-    -- Executor request function detection
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     
     if not httprequest then
-        return nil, 500, "ExecutorHttpNotSupported", "This script requires an executor with a custom HTTP request function (syn.request, http_request, etc.)."
+        return nil, 500, "ExecutorHttpNotSupported", "This script requires an executor with a custom HTTP request function.", {}
     end
 
     local response = httprequest({
@@ -412,13 +412,13 @@ local function postJson(url, headers, bodyTable)
         Body = body,
     })
     
-    -- Normalize response format (some executors allow .Body or .body)
-    local respBody = response.Body or response.body
-    local respStatus = response.StatusCode or response.statusCode or response.Status or response.status
-    local respMsg = response.StatusMessage or response.statusMessage or "Unknown"
+    local respBody    = response.Body or response.body
+    local respStatus  = response.StatusCode or response.statusCode or response.Status or response.status
+    local respMsg     = response.StatusMessage or response.statusMessage or "Unknown"
+    local respHeaders = response.Headers or response.headers or {}
 
     if respStatus and (respStatus < 200 or respStatus >= 300) then
-         return nil, respStatus, respMsg, respBody
+        return nil, respStatus, respMsg, respBody, respHeaders
     end
     
     local decoded
@@ -426,10 +426,10 @@ local function postJson(url, headers, bodyTable)
         decoded = HttpService:JSONDecode(respBody)
     end)
     if not ok then
-        return nil, respStatus, "JSONDecodeFailed", err
+        return nil, respStatus, "JSONDecodeFailed", err, respHeaders
     end
     
-    return decoded, respStatus, nil, nil
+    return decoded, respStatus, nil, nil, respHeaders
 end
 
 -- Groq Provider
@@ -469,6 +469,45 @@ local function isRateLimited(statusCode, statusMsg, body)
     return false
 end
 
+-- Глобальный кэш лимитов Groq — обновляется после каждого запроса
+local GroqRateLimitCache = {
+    remainingRequests = nil,
+    limitRequests     = nil,
+    resetRequests     = nil,
+    remainingTokens   = nil,
+    limitTokens       = nil,
+    updatedAt         = nil,
+}
+-- Колбэк — вкладка Настройки подписывается чтобы обновить UI
+local onRateLimitUpdate = nil
+
+local function parseRateLimitHeaders(hdrs)
+    if type(hdrs) ~= "table" then return end
+    local function get(name)
+        local lo = name:lower()
+        if hdrs[name] then return tostring(hdrs[name]) end
+        for k, v in pairs(hdrs) do
+            if tostring(k):lower() == lo then return tostring(v) end
+        end
+    end
+    local rr = get("x-ratelimit-remaining-requests")
+    local lr = get("x-ratelimit-limit-requests")
+    local rs = get("x-ratelimit-reset-requests")
+    local rt = get("x-ratelimit-remaining-tokens")
+    local lt = get("x-ratelimit-limit-tokens")
+    if rr or rt then
+        GroqRateLimitCache.remainingRequests = rr
+        GroqRateLimitCache.limitRequests     = lr
+        GroqRateLimitCache.resetRequests     = rs
+        GroqRateLimitCache.remainingTokens   = rt
+        GroqRateLimitCache.limitTokens       = lt
+        GroqRateLimitCache.updatedAt         = os.clock()
+        if onRateLimitUpdate then
+            task.spawn(onRateLimitUpdate)
+        end
+    end
+end
+
 function GroqProvider:chatCompletions(payload)
     local apiKey = getGroqApiKey()
     if type(apiKey) ~= "string" or apiKey == "" then
@@ -476,10 +515,15 @@ function GroqProvider:chatCompletions(payload)
     end
     
     local url = "https://api.groq.com/openai/v1/chat/completions"
-    local res, statusCode, statusMsg, body = postJson(url, {
+    local res, statusCode, statusMsg, body, respHeaders = postJson(url, {
         ["Content-Type"] = "application/json",
         ["Authorization"] = "Bearer " .. apiKey,
     }, payload)
+
+    -- Парсим лимиты из заголовков после каждого запроса
+    if respHeaders then
+        parseRateLimitHeaders(respHeaders)
+    end
     
     if not res then
         if isRateLimited(statusCode, statusMsg, body) and onApiRateLimited then
@@ -493,7 +537,6 @@ function GroqProvider:chatCompletions(payload)
         return nil, "NoChoicesReturned" 
     end
 
-    -- Content filter или пустой ответ — возвращаем nil (автоответчик промолчит, директ-чат покажет ошибку)
     if choice.finish_reason == "content_filter" then
         return nil, "ContentFiltered"
     end
@@ -665,12 +708,10 @@ local function makeSystemPrompt(settings)
     local system = ""
 
     local personalityId = settings.PersonalityId
-    -- Если есть кастомный промт — он главный, личность идёт только как дополнение
     local custom = settings.CustomSystemPrompt
     local hasCustom = type(custom) == "string" and custom:gsub("%s+", "") ~= ""
 
     if hasCustom then
-        -- Кастомный промт полностью заменяет личность
         system = custom
     elseif type(personalityId) == "string" and Personalities[personalityId] then
         system = tostring(Personalities[personalityId].system or "")
@@ -680,8 +721,16 @@ local function makeSystemPrompt(settings)
         system = "You are a helpful assistant in a Roblox game. Answer questions naturally and helpfully."
     end
 
-    -- НЕ добавляем "Keep answers very short" — это ломает директ-чат и кастомные промты
-    -- Длина ответа контролируется через max_tokens
+    -- Если включена настройка UsePlayerName — говорим ИИ как обращаться с никами
+    if settings.UsePlayerName then
+        system = system .. "\n\nПравила обращения к игрокам:"
+            .. "\n- Каждое сообщение игрока начинается с его ника в формате [НикИгрока]: текст"
+            .. "\n- Используй короткое имя из ника: если ник 'Alex12345' — обращайся 'Alex', если 'xXProGamerXx' — 'ProGamer' и т.п."
+            .. "\n- Разные ники = разные люди. Запоминай кто что говорил."
+            .. "\n- Не упоминай формат [ник]: в своих ответах — обращайся просто по имени."
+            .. "\n- Если имя не распознать — не обращайся по имени вообще."
+    end
+
     return system
 end
 
@@ -841,7 +890,17 @@ local function handleQueuedChat(item)
         end
     end
 
-    table.insert(apiMessages, { role = "user", content = item.cleaned })
+    -- Если включена настройка UsePlayerName — добавляем ник к тексту
+    -- ИИ видит: "[Alex12345]: текст сообщения"
+    local userContent = item.cleaned
+    if settings.UsePlayerName then
+        local nick = item.displayName or item.name or ""
+        if nick ~= "" then
+            userContent = "[" .. nick .. "]: " .. item.cleaned
+        end
+    end
+
+    table.insert(apiMessages, { role = "user", content = userContent })
 
     local model = getModel(settings)
     if model == "" then return end
@@ -860,7 +919,7 @@ local function handleQueuedChat(item)
 
     -- Сохраняем в историю только если память включена (history не nil)
     if history then
-        appendHistory(history, item.cleaned, text)
+        appendHistory(history, userContent, text)
     end
 
     sendBotMessage(text)
@@ -1580,7 +1639,7 @@ local function pushNotificationInternal(titleText, bodyText, accent, actions)
     local card = Instance.new("Frame")
     card.Name = "NotificationCard"
     card.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-    card.BackgroundTransparency = 0.1
+    card.BackgroundTransparency = 0
     card.Size = UDim2.new(1, 0, 0, cardHeight)
     card.Position = UDim2.new(0, 0, 0, -cardHeight)
     card.BorderSizePixel = 0
@@ -2280,23 +2339,8 @@ local function createInterface()
     makeStroke(window, 1, THEME.Stroke, 0.2) 
     makeDraggable(window)
 
-    -- Gradient for Header Legibility (Top-Down Darkening)
-    if ClientSettings.Theme == "PremiumDark" or ClientSettings.Theme == "LineOfBots" or ClientSettings.Theme == nil then
-        -- Subtle Material Gradient (Glass-like depth)
-        local grad = Instance.new("UIGradient")
-        grad.Rotation = 90
-        grad.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 80, 90)), -- Subtle highlight top
-            ColorSequenceKeypoint.new(0.3, Color3.fromRGB(255, 255, 255)), -- Neutral
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 0)) -- Darker bottom for weight
-        })
-        grad.Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0.8),   -- Very transparent highlight
-            NumberSequenceKeypoint.new(0.3, 1),   -- Invisible middle
-            NumberSequenceKeypoint.new(1, 0.6)    -- Shadow at bottom
-        })
-        grad.Parent = window
-    end
+    -- Нет градиента — тема LineOfBots и так выглядит правильно без него
+    if false then end -- gradient removed
 
     -- Sidebar (Flush Left) - narrower on mobile
     local sidebarWidth = isMobile and 130 or 170
@@ -2813,7 +2857,7 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
     row.BackgroundColor3 = THEME.Card
-    row.BackgroundTransparency = 0.35 -- Glass effect
+    row.BackgroundTransparency = 0
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, 42)
     row.Parent = parent
@@ -2890,7 +2934,7 @@ local function makeRightControlRow(parent, labelText, descText, controlWidth)
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
     row.BackgroundColor3 = THEME.Card
-    row.BackgroundTransparency = 0.35 -- Glass effect
+    row.BackgroundTransparency = 0
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, 42) -- Match ToggleRow height
     row.Parent = parent
@@ -2933,7 +2977,7 @@ local function makeKeybindRow(parent, labelText, descText, currentKey, onChanged
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
     row.BackgroundColor3 = THEME.Card
-    row.BackgroundTransparency = 0.35 -- Glass effect
+    row.BackgroundTransparency = 0
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, 42) -- Standard height
     row.Parent = parent
@@ -3053,7 +3097,7 @@ local function makeSliderRow(parent, labelText, minVal, maxVal, currentVal, call
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
     row.BackgroundColor3 = THEME.Card
-    row.BackgroundTransparency = 0.35 -- Glass effect
+    row.BackgroundTransparency = 0
     row.Size = UDim2.new(1, 0, 0, 42)
     row.Parent = parent
     makeCorner(row, 10)
@@ -3354,6 +3398,17 @@ makeToggleRow(
     ClientSettings.StripHash ~= false,
     function(state)
         ClientSettings.StripHash = state
+    end
+)
+
+-- Передавать ник игрока
+makeToggleRow(
+    automation,
+    "Передавать ник игрока",
+    "ИИ видит ник и обращается по имени. Помнит что разные ники = разные люди. В директ-чате — 'Пользователь'.",
+    ClientSettings.UsePlayerName ~= false,
+    function(state)
+        ClientSettings.UsePlayerName = state
     end
 )
 
@@ -3787,7 +3842,7 @@ do
     local apiCard = Instance.new("Frame")
     apiCard.Name = "ApiKeyCard"
     apiCard.BackgroundColor3 = THEME.Card
-    apiCard.BackgroundTransparency = 0.35
+    apiCard.BackgroundTransparency = 0
     apiCard.BorderSizePixel = 0
     apiCard.Size = UDim2.new(1, 0, 0, 160)
     apiCard.Parent = advancedScroll
@@ -3858,20 +3913,20 @@ do
     apiBox.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq) or ""
     apiBox.Parent = apiInputFrame
 
-    -- Лимиты ключа
-    local apiLimitLbl = makeTextLabel(apiCard, "Нажми «Проверить» чтобы увидеть лимиты", 11, "medium")
-    apiLimitLbl.Size = UDim2.new(1, 0, 0, 14)
+    -- Лимиты ключа — обновляются автоматически после каждого запроса
+    local apiLimitLbl = makeTextLabel(apiCard, "Лимиты обновляются после каждого запроса к ИИ", 11, "medium")
+    apiLimitLbl.Size = UDim2.new(1, 0, 0, 28)
     apiLimitLbl.Position = UDim2.new(0, 0, 0, 78)
     apiLimitLbl.TextColor3 = THEME.TextDim
     apiLimitLbl.TextWrapped = true
 
-    -- Кнопка проверить
+    -- Кнопка проверить (валидация ключа + разовое получение лимитов)
     local apiCheckBtn = Instance.new("TextButton")
     apiCheckBtn.Size = UDim2.new(1, 0, 0, 28)
-    apiCheckBtn.Position = UDim2.new(0, 0, 0, 96)
+    apiCheckBtn.Position = UDim2.new(0, 0, 0, 112)
     apiCheckBtn.BackgroundColor3 = THEME.Accent
     apiCheckBtn.BackgroundTransparency = 0.15
-    apiCheckBtn.Text = "Проверить API ключ"
+    apiCheckBtn.Text = "Проверить ключ"
     apiCheckBtn.Font = Enum.Font.GothamBold
     apiCheckBtn.TextSize = 13
     apiCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -3898,142 +3953,65 @@ do
         end
     end
 
-    apiCheckBtn.MouseButton1Click:Connect(function()
-        apiCheckBtn.Text = "Проверяю..."
-        apiCheckBtn.BackgroundTransparency = 0.4
+    -- Обновляет текст лимитов из глобального кэша GroqRateLimitCache
+    local function refreshLimitDisplay()
+        local c = GroqRateLimitCache
+        if not c.updatedAt then return end
+        local parts = {}
+        if c.remainingRequests and c.limitRequests then
+            table.insert(parts, "Запросов: " .. c.remainingRequests .. "/" .. c.limitRequests)
+            if c.resetRequests then table.insert(parts, "Сброс: " .. c.resetRequests) end
+        end
+        if c.remainingTokens and c.limitTokens then
+            table.insert(parts, "Токенов: " .. c.remainingTokens .. "/" .. c.limitTokens)
+        end
+        if #parts > 0 then
+            apiLimitLbl.Text = table.concat(parts, "  •  ")
+        end
+    end
 
-        -- Сначала сохраняем ключ из поля
+    -- Подписываемся: каждый раз когда ИИ отвечает — обновляем лимиты в UI
+    onRateLimitUpdate = refreshLimitDisplay
+    if GroqRateLimitCache.updatedAt then refreshLimitDisplay() end
+
+    apiCheckBtn.MouseButton1Click:Connect(function()
         local raw = tostring(apiBox.Text or "")
         local clean = raw:gsub("%s+", "")
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.groq = clean
 
+        apiCheckBtn.Text = "Проверяю..."
+        apiCheckBtn.BackgroundTransparency = 0.4
         task.spawn(function()
-            -- Шаг 1: Тестовый запрос к /chat/completions
-            local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-            if not req then
-                apiCheckBtn.Text = "Проверить API ключ"
-                apiCheckBtn.BackgroundTransparency = 0.15
-                setApiStatus(false, "ошибка executor", "Executor не поддерживает HTTP запросы.")
-                return
-            end
-
             local testKey = getGroqApiKey()
+            apiCheckBtn.Text = "Проверить ключ"
+            apiCheckBtn.BackgroundTransparency = 0.15
             if not testKey or testKey == "" then
-                apiCheckBtn.Text = "Проверить API ключ"
-                apiCheckBtn.BackgroundTransparency = 0.15
                 setApiStatus(false, "ключ не указан", "Введи API ключ в поле выше.")
                 return
             end
-
-            -- Пробуем получить список моделей (лёгкий GET запрос)
-            local ok, res = pcall(req, {
-                Url    = "https://api.groq.com/openai/v1/models",
-                Method = "GET",
-                Headers = {
-                    ["Authorization"] = "Bearer " .. testKey,
-                    ["Content-Type"]  = "application/json",
-                },
-            })
-
-            apiCheckBtn.Text = "Проверить API ключ"
-            apiCheckBtn.BackgroundTransparency = 0.15
-
-            if not ok then
-                setApiStatus(false, "ошибка сети", "Нет соединения с Groq API.")
+            local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+            if not req then
+                setApiStatus(false, "ошибка executor", "HTTP недоступен в этом executor.")
                 return
             end
-
-            local status = res.StatusCode or res.statusCode or 0
-            local body   = res.Body or res.body or ""
-
-            if tonumber(status) == 401 then
-                setApiStatus(false, "неверный ключ", "Ключ не действителен. Проверь на console.groq.com")
-                return
-            end
-
-            if tonumber(status) == 429 then
-                setApiStatus(false, "rate limit", "Ключ правильный, но исчерпан лимит запросов.")
-                return
-            end
-
-            if tonumber(status) ~= 200 then
-                setApiStatus(false, "ошибка " .. tostring(status), "Неожиданный ответ от Groq.")
-                return
-            end
-
-            -- Ключ валидный — парсим список моделей
-            local decoded
-            local decOk = pcall(function() decoded = HttpService:JSONDecode(body) end)
-            local modelCount = 0
-            if decOk and decoded and decoded.data then
-                for _ in pairs(decoded.data) do modelCount = modelCount + 1 end
-            end
-
-            -- Шаг 2: Узнаём лимиты через тестовый chat запрос
-            local limitText = "Доступно моделей: " .. tostring(modelCount)
+            -- Один запрос — результат уйдёт в parseRateLimitHeaders через кэш
             local ok2, res2 = pcall(req, {
                 Url    = "https://api.groq.com/openai/v1/chat/completions",
                 Method = "POST",
-                Headers = {
-                    ["Authorization"] = "Bearer " .. testKey,
-                    ["Content-Type"]  = "application/json",
-                },
-                Body = HttpService:JSONEncode({
-                    model      = "llama-3.1-8b-instant",
-                    max_tokens = 1,
-                    messages   = {{ role = "user", content = "hi" }},
-                }),
+                Headers = { ["Authorization"] = "Bearer " .. testKey, ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode({ model = "llama-3.1-8b-instant", max_tokens = 1, messages = {{ role = "user", content = "hi" }} }),
             })
-
-            if ok2 then
-                local s2 = res2.StatusCode or res2.statusCode or 0
-                -- Заголовки от Groq приходят в разном регистре в разных executor'ах
-                -- Перебираем все ключи заголовков case-insensitive
-                local headers = res2.Headers or res2.headers or {}
-                local function getHeader(name)
-                    local lower = name:lower()
-                    -- Прямое совпадение
-                    if headers[name] then return tostring(headers[name]) end
-                    -- Перебор всех ключей
-                    for k, v in pairs(headers) do
-                        if tostring(k):lower() == lower then
-                            return tostring(v)
-                        end
-                    end
-                    return nil
-                end
-
-                -- Читаем лимиты по запросам (более стабильно чем по токенам)
-                local remainReq = getHeader("x-ratelimit-remaining-requests")
-                local limitReq  = getHeader("x-ratelimit-limit-requests")
-                local resetReq  = getHeader("x-ratelimit-reset-requests")
-                -- Лимиты по токенам как запасной вариант
-                local remainTok = getHeader("x-ratelimit-remaining-tokens")
-                local limitTok  = getHeader("x-ratelimit-limit-tokens")
-
-                if remainReq and limitReq then
-                    limitText = "Запросов: " .. remainReq .. " / " .. limitReq .. " в мин."
-                    if resetReq then
-                        limitText = limitText .. "  •  Сброс: " .. resetReq
-                    end
-                    if remainTok and limitTok then
-                        limitText = limitText .. "\nТокенов: " .. remainTok .. " / " .. limitTok
-                    end
-                elseif remainTok and limitTok then
-                    limitText = "Токенов осталось: " .. remainTok .. " / " .. limitTok
-                elseif tonumber(s2) == 429 then
-                    limitText = "⚠️ Лимит исчерпан — подожди немного."
-                else
-                    -- Если заголовков нет — хотя бы сообщаем что ключ рабочий
-                    limitText = "Ключ активен. Лимиты: недоступны в данном executor'е."
-                end
-            end
-
-            setApiStatus(true, "✓ работает", limitText)
+            if not ok2 then setApiStatus(false, "ошибка сети", "Нет соединения с Groq."); return end
+            local s2 = res2.StatusCode or res2.statusCode or 0
+            if tonumber(s2) == 401 then setApiStatus(false, "❌ неверный ключ", "Проверь на console.groq.com"); return end
+            if tonumber(s2) == 429 then setApiStatus(false, "⚠️ rate limit", "Ключ верный, лимит исчерпан."); return end
+            if tonumber(s2) ~= 200 then setApiStatus(false, "❌ ошибка " .. tostring(s2), "Неожиданный ответ."); return end
+            -- Парсим заголовки (этот req идёт в обход postJson, нужно вручную)
+            parseRateLimitHeaders(res2.Headers or res2.headers or {})
+            setApiStatus(true, "✓ работает", nil)
         end)
     end)
-
     apiBox.FocusLost:Connect(function()
         local raw = tostring(apiBox.Text or "")
         local clean = raw:gsub("%s+", "")
@@ -5015,7 +4993,7 @@ mod3_rebuild = function()
 
         local clearBg = Instance.new("Frame")
         clearBg.BackgroundColor3 = THEME.SidebarSelected
-        clearBg.BackgroundTransparency = 0.35
+        clearBg.BackgroundTransparency = 0
         clearBg.BorderSizePixel = 0
         clearBg.Size = UDim2.new(1, 0, 1, 0)
         clearBg.Parent = clearBtn
@@ -5437,7 +5415,7 @@ end
 local function mod2_makeCard(parent)
     local card = Instance.new("Frame")
     card.BackgroundColor3 = THEME.Button
-    card.BackgroundTransparency = 0.35
+    card.BackgroundTransparency = 0
     card.BorderSizePixel = 0
     card.Parent = parent
     makeCorner(card, 16)
@@ -5716,7 +5694,7 @@ end)
 
 local mod2_footer = Instance.new("Frame")
 mod2_footer.BackgroundColor3 = THEME.SidebarSelected
-mod2_footer.BackgroundTransparency = 0.35
+mod2_footer.BackgroundTransparency = 0
 mod2_footer.BorderSizePixel = 0
 mod2_footer.AnchorPoint = Vector2.new(0, 1)
 mod2_footer.Position = UDim2.new(0, 12, 1, -12)
@@ -6133,7 +6111,7 @@ cards.Parent = moderationFrame
 local function makeModCard(parent, title, subtitle)
     local card = Instance.new("Frame")
     card.BackgroundColor3 = THEME.Button
-    card.BackgroundTransparency = 0.35
+    card.BackgroundTransparency = 0
     card.BorderSizePixel = 0
     card.Parent = parent
     makeCorner(card, 14)
@@ -6254,7 +6232,7 @@ local function createPlayerRow(parentScroll, userId, displayName, name, isBlocke
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 62)
     row.BackgroundColor3 = THEME.Window
-    row.BackgroundTransparency = 0.35
+    row.BackgroundTransparency = 0
     row.BorderSizePixel = 0
     row.Parent = parentScroll
     makeCorner(row, 12)
@@ -6340,7 +6318,7 @@ local function createPlayerRow(parentScroll, userId, displayName, name, isBlocke
         tween(stroke, TWEEN_FAST, { Transparency = 0.35 })
     end)
     row.MouseLeave:Connect(function()
-        tween(row, TWEEN_FAST, { BackgroundTransparency = 0.35 })
+        tween(row, TWEEN_FAST, { BackgroundTransparency = 0.05 })
         tween(stroke, TWEEN_FAST, { Transparency = 0.55 })
     end)
 
@@ -6705,7 +6683,12 @@ local function ctDoSend()
                 table.insert(apiMsgs, m)
             end
         end
-        table.insert(apiMsgs, { role = "user", content = msg })
+        -- Если UsePlayerName — в директ-чате называем "Пользователь"
+        local userContent = msg
+        if settings.UsePlayerName then
+            userContent = "[Пользователь]: " .. msg
+        end
+        table.insert(apiMsgs, { role = "user", content = userContent })
 
         -- В директ-чате max_tokens берём из настроек но не ограничиваем как в игровом чате
         -- Для инструкций нужно больше токенов
@@ -6719,8 +6702,7 @@ local function ctDoSend()
         }
         local text, err = providerRouter:chatCompletions(payload)
         if text and text ~= "" and settings.MemoryEnabled then
-            -- Сохраняем только если память включена
-            appendHistory(DirectChatHistory, msg, text)
+            appendHistory(DirectChatHistory, userContent, text)
         end
         if ChatTestCallback then
             if err then
