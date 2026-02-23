@@ -386,6 +386,29 @@ local function normalizeOneLine(s)
     return s
 end
 
+-- Извлекает короткое читаемое имя из Roblox ника
+-- "Alex12345" -> "Alex", "xXProGamerXx" -> "ProGamer", "cool_kid99" -> "cool"
+local function extractShortName(nick)
+    if type(nick) ~= "string" or nick == "" then return nil end
+    local s = nick:gsub("[_%-]", " ")
+    -- Ищем слово с заглавной + строчные (CamelCase имена: "Alex", "Pro", "Gamer")
+    local best = nil
+    for word in s:gmatch("[A-Za-z]+") do
+        if #word >= 3 then
+            if word:match("^[A-Z][a-z][a-z]") then
+                if not best or #word > #best then best = word end
+            elseif not best and #word >= 3 then
+                best = word
+            end
+        end
+    end
+    if best then return best:sub(1, 14) end
+    -- Fallback: буквы до первой цифры
+    local prefix = nick:match("^([A-Za-z]+)")
+    if prefix and #prefix >= 2 then return prefix:sub(1, 14) end
+    return nil
+end
+
 local function trimToMax(s, max)
     s = tostring(s or "")
     if #s <= max then
@@ -721,14 +744,31 @@ local function makeSystemPrompt(settings)
         system = "You are a helpful assistant in a Roblox game. Answer questions naturally and helpfully."
     end
 
-    -- Если включена настройка UsePlayerName — говорим ИИ как обращаться с никами
+    -- Честность про актуальные данные: ИИ не должен выдумывать тренды/мемы/новости
+    system = system
+        .. "\nKnowledge cutoff: your training data has a cutoff date."
+        .. " If someone asks about current trends, recent memes, new songs, latest news or anything"
+        .. " that changes over time — say honestly that you don't have up-to-date info on that"
+        .. " and suggest they check TikTok/YouTube/Google directly."
+        .. " Never make up or guess trending content."
+
+    -- UsePlayerName: инструкция как естественно использовать имя игрока
     if settings.UsePlayerName then
-        system = system .. "\n\nПравила обращения к игрокам:"
-            .. "\n- Каждое сообщение игрока начинается с его ника в формате [НикИгрока]: текст"
-            .. "\n- Используй короткое имя из ника: если ник 'Alex12345' — обращайся 'Alex', если 'xXProGamerXx' — 'ProGamer' и т.п."
-            .. "\n- Разные ники = разные люди. Запоминай кто что говорил."
-            .. "\n- Не упоминай формат [ник]: в своих ответах — обращайся просто по имени."
-            .. "\n- Если имя не распознать — не обращайся по имени вообще."
+        system = system
+            .. "\n\nPlayer name rule:"
+            .. "\nThe player's name is at the start of their message as [NAME:Alex]."
+            .. "\nUse that name naturally in your reply like a real person would to a friend."
+            .. "\nGood examples:"
+            .. "\n  [NAME:Alex] sup -> hey Alex whats up"
+            .. "\n  [NAME:Mia] lol that was funny -> haha yeah Mia"
+            .. "\n  [NAME:Max] I won! -> lets go Max nice"
+            .. "\n  [NAME:Alex] any tips? -> yeah Alex try the east side"
+            .. "\nRules:"
+            .. "\n- Use the name occasionally, NOT in every single reply."
+            .. "\n- Place the name anywhere in the sentence, not always at the start."
+            .. "\n- NEVER write [NAME:...] yourself, just use the plain name."
+            .. "\n- If the name looks like random characters, skip the name entirely."
+            .. "\n- Different names = different players."
     end
 
     return system
@@ -890,13 +930,14 @@ local function handleQueuedChat(item)
         end
     end
 
-    -- Если включена настройка UsePlayerName — добавляем ник к тексту
-    -- ИИ видит: "[Alex12345]: текст сообщения"
+    -- UsePlayerName: извлекаем короткое имя и передаём через [NAME:x]
+    -- ИИ получает "Alex" а не "Alex12345" — работает с инструкцией в системном промпте
     local userContent = item.cleaned
     if settings.UsePlayerName then
-        local nick = item.displayName or item.name or ""
-        if nick ~= "" then
-            userContent = "[" .. nick .. "]: " .. item.cleaned
+        local rawNick = item.displayName or item.name or ""
+        local shortName = extractShortName(rawNick)
+        if shortName then
+            userContent = "[NAME:" .. shortName .. "] " .. item.cleaned
         end
     end
 
@@ -911,6 +952,10 @@ local function handleQueuedChat(item)
         max_tokens  = tonumber(settings.MaxTokens) or 512,
         messages    = apiMessages,
     }
+    -- Qwen3 по умолчанию включает цепочку рассуждений — отключаем через reasoning_effort
+    if model == "qwen/qwen3-32b" then
+        payload.reasoning_effort = "none"
+    end
 
     local text, err = providerRouter:chatCompletions(payload)
     if err or not text or text == "" then
@@ -982,12 +1027,15 @@ local function processChatMessage(player, rawMessage)
     -- Blacklist check
     if isBlacklisted(settings, player.UserId) then return end
 
-    local message = normalizeOneLine(rawMessage)
-    if message == "" then return end
-
-    if not passesTrigger(settings, message) then
+    -- ВАЖНО: passesTrigger проверяем на оригинальном сообщении ДО нормализации
+    -- normalizeOneLine удаляет '#', поэтому если триггер = "#что-то" он никогда не сработает
+    -- если проверять после normalizeOneLine
+    if not passesTrigger(settings, rawMessage) then
         return
     end
+
+    local message = normalizeOneLine(rawMessage)
+    if message == "" then return end
 
     -- Selective Mode Check
     if settings.Range.SelectiveMode then
@@ -2367,13 +2415,13 @@ local sidebarTitle = makeTextLabel(sidebar, "LineOfBots", 19, "bold")
 sidebarTitle.Position = UDim2.new(0, 16, 0, 16)
 sidebarTitle.Size = UDim2.new(1, -16, 0, 22)
 
-local sidebarSubtitle = makeTextLabel(sidebar, "v10 Shell", 11, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebar, "v15 Public", 11, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 16, 0, 40)
 sidebarSubtitle.Size = UDim2.new(1, -16, 0, 14)
 
 sidebarTitle.Text = "LineOfBots"
-sidebarSubtitle.Text = "v10 Shell"
+sidebarSubtitle.Text = "v15 Public"
 
 -- Sidebar Title Animation Removed to keep static text
 
@@ -2389,7 +2437,7 @@ tabLayout.SortOrder = Enum.SortOrder.LayoutOrder -- Enable explicit ordering
 tabLayout.Parent = tabContainer
 
 -- Tab Indicator (Side Bar) - Hidden as per user request
- local currentTab = "Основное"
+ local currentTab = "General"
  local isTabSwitching = false
  local pendingTabName = nil
  local tabButtons = {}
@@ -2532,7 +2580,7 @@ local function switchTab(name)
         return
     end
     currentTab = name
-    if name == "Модерация" and mod3_rebuild then
+    if name == "Moderation" and mod3_rebuild then
         mod3_needsRebuild = false
         mod3_rebuild()
     end
@@ -2702,12 +2750,13 @@ end
 
 -- Tabs
 -- Tabs
-    local generalTabBtn = makeTabButton("Основное", "rbxassetid://7733960981")
-    local behaviorTabBtn = makeTabButton("Поведение", "rbxassetid://7734053495")
-    local perceptionTabBtn = makeTabButton("Восприятие", "rbxassetid://7743872758")
-    local securityTabBtn = makeTabButton("Модерация", "rbxassetid://7734056411")
-    local advancedTabBtn = makeTabButton("Настройки", "rbxassetid://7734058803")
-    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7733715400")
+    local generalTabBtn = makeTabButton("General", "rbxassetid://7733960981")
+    local behaviorTabBtn = makeTabButton("Behavior", "rbxassetid://7734053495")
+    local perceptionTabBtn = makeTabButton("Perception", "rbxassetid://7743872758")
+    local securityTabBtn = makeTabButton("Moderation", "rbxassetid://7734056411")
+    local advancedTabBtn = makeTabButton("Settings", "rbxassetid://7734058803")
+    local chatTestTabBtn = makeTabButton("AI Chat", "rbxassetid://7733715400")
+    local aboutTabBtn = makeTabButton("About", "rbxassetid://7734053495")
     
     -- Tabs are permanent categories now, so no hiding logic needed.
 
@@ -2720,12 +2769,12 @@ generalFrame.GroupTransparency = 1
 generalFrame.Size = UDim2.new(1, 0, 1, 0)
 generalFrame.Visible = false
 generalFrame.Parent = contentArea
-tabFrames["Основное"] = generalFrame
+tabFrames["General"] = generalFrame
 
-local genTitle = makeTextLabel(generalFrame, "Основное", 24, "bold")
+local genTitle = makeTextLabel(generalFrame, "General", 24, "bold")
 genTitle.Size = UDim2.new(1, 0, 0, 30)
 
-local genDesc = makeTextLabel(generalFrame, "Глобальные настройки и автоматизация.", 13, "semibold")
+local genDesc = makeTextLabel(generalFrame, "Global settings and automation.", 13, "semibold")
 genDesc.TextColor3 = THEME.TextDim
 genDesc.Position = UDim2.new(0, 0, 0, 32)
 genDesc.Size = UDim2.new(1, 0, 0, 16)
@@ -2757,12 +2806,12 @@ behaviorFrame.GroupTransparency = 1
 behaviorFrame.Size = UDim2.new(1, 0, 1, 0)
 behaviorFrame.Visible = false
 behaviorFrame.Parent = contentArea
-tabFrames["Поведение"] = behaviorFrame
+tabFrames["Behavior"] = behaviorFrame
 
-local behTitle = makeTextLabel(behaviorFrame, "Поведение", 24, "bold")
+local behTitle = makeTextLabel(behaviorFrame, "Behavior", 24, "bold")
 behTitle.Size = UDim2.new(1, 0, 0, 30)
 
-local behDesc = makeTextLabel(behaviorFrame, "Личность и интеллект бота.", 13, "semibold")
+local behDesc = makeTextLabel(behaviorFrame, "Bot personality and intelligence.", 13, "semibold")
 behDesc.TextColor3 = THEME.TextDim
 behDesc.Position = UDim2.new(0, 0, 0, 32)
 behDesc.Size = UDim2.new(1, 0, 0, 16)
@@ -3349,11 +3398,11 @@ end
 updateRangeVisualizer()
 
 -- GENERAL TAB CONTENT (Populate)
-local automation = makeSectionCard(generalScroll, "Автоматизация", "")
+local automation = makeSectionCard(generalScroll, "Automation", "")
 autoReplyToggle = makeToggleRow(
     automation,
-    "Автоответ (Общий чат)",
-    "Когда включено, бот отвечает напрямую в общий чат.",
+    "Auto-reply (Game Chat)",
+    "When enabled, the bot replies directly in game chat.",
     ClientSettings.AutoReply,
     function(state)
         ClientSettings.AutoReply = state
@@ -3364,8 +3413,8 @@ autoReplyToggle = makeToggleRow(
 -- Тогл включения памяти (главный)
 makeToggleRow(
     automation,
-    "Включить память",
-    "ИИ помнит предыдущие сообщения в разговоре. Если выключено — каждый ответ без контекста.",
+    "Enable Memory",
+    "AI remembers previous messages. If off, every reply has no context.",
     ClientSettings.MemoryEnabled,
     function(state)
         ClientSettings.MemoryEnabled = state
@@ -3380,8 +3429,8 @@ makeToggleRow(
 -- Тогл режима памяти (работает только если память включена)
 makeToggleRow(
     automation,
-    "Память по пользователям",
-    "Включено: отдельный контекст для каждого игрока. Выключено: один общий контекст для всех.",
+    "Per-User Memory",
+    "On: separate context per player. Off: one shared context for all.",
     ClientSettings.PerUserMemory,
     function(state)
         ClientSettings.PerUserMemory = state
@@ -3393,19 +3442,19 @@ makeToggleRow(
 -- Игнорирование символа #
 makeToggleRow(
     automation,
-    "Игнорировать символ «#»",
-    "Убирает # из сообщений перед отправкой в ИИ. Без этого ИИ форматирует ответ как HTML/Markdown.",
+    "Filter # symbol",
+    "Removes # from messages before sending to AI. Otherwise AI formats responses as Markdown.",
     ClientSettings.StripHash ~= false,
     function(state)
         ClientSettings.StripHash = state
     end
 )
 
--- Передавать ник игрока
+-- Send Player Nickname
 makeToggleRow(
     automation,
-    "Передавать ник игрока",
-    "ИИ видит ник и обращается по имени. Помнит что разные ники = разные люди. В директ-чате — 'Пользователь'.",
+    "Send Player Nickname",
+    "AI sees nickname and addresses by name. Different nicknames = different people.",
     ClientSettings.UsePlayerName ~= false,
     function(state)
         ClientSettings.UsePlayerName = state
@@ -3416,15 +3465,16 @@ makeToggleRow(
 -- Production Models — стабильные, для реального использования
 -- Preview Models — могут быть отключены без предупреждения
 local groqModels = {
-    -- ── PRODUCTION ───────────────────────────────────
-    "llama-3.1-8b-instant",           -- Meta, 560 t/s, лучший для чата
-    "llama-3.3-70b-versatile",        -- Meta, 280 t/s, умный и быстрый
-    "openai/gpt-oss-120b",            -- OpenAI OSS, 500 t/s, топ качество
-    "openai/gpt-oss-20b",             -- OpenAI OSS, 1000 t/s, самый быстрый
-    -- ── PREVIEW ──────────────────────────────────────
-    "meta-llama/llama-4-scout-17b-16e-instruct",   -- Llama 4 Scout, 750 t/s
-    "moonshotai/kimi-k2-instruct-0905",             -- Kimi K2, 200 t/s, умный
-    "qwen/qwen3-32b",                               -- Qwen3 32B, 400 t/s
+    -- ── PRODUCTION (стабильные) ───────────────────────────────────────────
+    "llama-3.1-8b-instant",              -- Meta Llama 3.1 8B  | 560 t/s | быстрый чат
+    "llama-3.3-70b-versatile",           -- Meta Llama 3.3 70B | 280 t/s | умный
+    "openai/gpt-oss-20b",               -- GPT OSS 20B        | 1000 t/s | самый быстрый
+    "openai/gpt-oss-120b",              -- GPT OSS 120B       | 500 t/s  | топ качество
+    -- ── PREVIEW (свежие модели) ───────────────────────────────────────────
+    "meta-llama/llama-4-scout-17b-16e-instruct",  -- Llama 4 Scout 17B | 750 t/s | новый
+    "meta-llama/llama-4-maverick-17b-128e-instruct", -- Llama 4 Maverick | топ reasoning
+    "moonshotai/kimi-k2-instruct-0905",  -- Kimi K2            | 200 t/s  | умный диалог
+    "qwen/qwen3-32b",                    -- Qwen3 32B          | 400 t/s  | хорош в логике
 }
 
 --[[ 
@@ -3485,7 +3535,7 @@ end)
 local currentModel = ClientSettings.Models.groq or groqModels[1]
 
 do
-    local _, ctrl = makeRightControlRow(generalScroll, "Модель", "Выбери AI модель.", 230)
+    local _, ctrl = makeRightControlRow(generalScroll, "Model", "Select AI model.", 230)
     
     local modelDropdown = makeDropdown(ctrl, groqModels, currentModel or "llama-3.1-8b-instant", function(val)
         ClientSettings.Models.groq = val
@@ -3495,7 +3545,7 @@ end
 -- BEHAVIOR TAB CONTENT (Populate)
 
 -- BEHAVIOR TAB CONTENT (Populate)
-local personalitySection = makeSectionCard(behaviorScroll, "Личность", "")
+local personalitySection = makeSectionCard(behaviorScroll, "Personality", "")
 
 do
     -- Remove "Custom" from selectable dropdown list
@@ -3508,14 +3558,14 @@ do
     table.sort(personalityOrder)
 
     -- Personality Dropdown
-    local dropRow, ctrl = makeRightControlRow(behaviorScroll, "Личность", "Тон и стиль ответов бота.", 220)
+    local dropRow, ctrl = makeRightControlRow(behaviorScroll, "Personality", "Tone and style of bot responses.", 220)
     
     local personalityDropdown = makeDropdown(ctrl, personalityOrder, ClientSettings.PersonalityId or "Friendly", function(val)
         ClientSettings.PersonalityId = val
     end)
     
     -- Custom Personality Prompt (Always Visible)
-    local customPromptContainer, customPromptBox = makeScrollingTextBox(behaviorScroll, "Введи свой кастомный промпт здесь...", ClientSettings.CustomSystemPrompt, 120)
+    local customPromptContainer, customPromptBox = makeScrollingTextBox(behaviorScroll, "Enter your custom system prompt here...", ClientSettings.CustomSystemPrompt, 120)
 
     -- Auto-Switch to Custom on Type
     customPromptBox:GetPropertyChangedSignal("Text"):Connect(function()
@@ -3538,18 +3588,18 @@ do
 end
 
 -- ── Температура и память ───────────────────────────────────
-local aiParamsSection = makeSectionCard(behaviorScroll, "Параметры генерации")
+local aiParamsSection = makeSectionCard(behaviorScroll, "Generation Parameters")
 
 -- Температура (0.0 – 2.0)
 do
-    local _, ctrl = makeRightControlRow(behaviorScroll, "Температура (0.0 – 2.0)", "Чем выше — тем более случайные ответы.", 80)
+    local _, ctrl = makeRightControlRow(behaviorScroll, "Temperature (0.0 – 2.0)", "Higher = more random responses.", 80)
     
     local tempDisp = makeTextLabel(ctrl, string.format("%.1f", ClientSettings.Temperature or 0.7), 13, "bold")
     tempDisp.Size = UDim2.new(1, 0, 1, 0)
     tempDisp.TextXAlignment = Enum.TextXAlignment.Center
     tempDisp.TextColor3 = THEME.Accent
 
-    makeSliderRow(behaviorScroll, "Температура", 0, 20, math.floor((ClientSettings.Temperature or 0.7) * 10), function(val)
+    makeSliderRow(behaviorScroll, "Temperature", 0, 20, math.floor((ClientSettings.Temperature or 0.7) * 10), function(val)
         ClientSettings.Temperature = val / 10
         tempDisp.Text = string.format("%.1f", val / 10)
     end)
@@ -3558,7 +3608,7 @@ end
 -- Макс. токенов ответа
 do
     local initTok = tonumber(ClientSettings.MaxTokens) or 512
-    local _, ctrl = makeRightControlRow(behaviorScroll, "Макс. токенов ответа", "Ограничение длины ответа. 512+ для инструкций.", 70)
+    local _, ctrl = makeRightControlRow(behaviorScroll, "Max Response Tokens", "Limits response length. 512+ for instructions.", 70)
 
     local tokDisp = makeTextLabel(ctrl, tostring(initTok), 13, "bold")
     tokDisp.Size = UDim2.new(1, 0, 1, 0)
@@ -3568,7 +3618,7 @@ do
     -- Слайдер: 64 – 4096 шагами по 64
     local tokSteps = 64 -- шаг
     local tokMin, tokMax = 1, 64 -- значения слайдера (умножаем на tokSteps)
-    makeSliderRow(behaviorScroll, "Токены ответа", tokMin, tokMax, math.floor(initTok / tokSteps), function(val)
+    makeSliderRow(behaviorScroll, "Response Tokens", tokMin, tokMax, math.floor(initTok / tokSteps), function(val)
         local tokens = math.max(64, val * tokSteps)
         ClientSettings.MaxTokens = tokens
         tokDisp.Text = tostring(tokens)
@@ -3577,14 +3627,14 @@ end
 
 -- Глубина памяти (кол-во пар диалога)
 do
-    local _, ctrl = makeRightControlRow(behaviorScroll, "Глубина памяти (пар диалога)", "Сколько последних обменов помнит ИИ.", 60)
+    local _, ctrl = makeRightControlRow(behaviorScroll, "Memory Depth (message pairs)", "How many recent exchanges the AI remembers.", 60)
 
     local memDisp = makeTextLabel(ctrl, tostring(MAX_HISTORY or 10), 13, "bold")
     memDisp.Size = UDim2.new(1, 0, 1, 0)
     memDisp.TextXAlignment = Enum.TextXAlignment.Center
     memDisp.TextColor3 = THEME.Accent
 
-    makeSliderRow(behaviorScroll, "Глубина памяти", 1, 30, MAX_HISTORY or 10, function(val)
+    makeSliderRow(behaviorScroll, "Memory Depth", 1, 30, MAX_HISTORY or 10, function(val)
         MAX_HISTORY = math.floor(val)
         memDisp.Text = tostring(MAX_HISTORY)
     end)
@@ -3592,13 +3642,13 @@ end
 
 -- Кнопки сброса памяти
 do
-    local resetSection = makeSectionCard(behaviorScroll, "Сброс памяти")
+    local resetSection = makeSectionCard(behaviorScroll, "Memory Reset")
 
     local btnResetAll = Instance.new("TextButton")
     btnResetAll.Size = UDim2.new(1, 0, 0, 34)
     btnResetAll.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
     btnResetAll.BackgroundTransparency = 0.3
-    btnResetAll.Text = "🗑️  Сбросить всю память ИИ"
+    btnResetAll.Text = "🗑️  Clear All AI Memory"
     btnResetAll.Font = Enum.Font.GothamBold
     btnResetAll.TextSize = 13
     btnResetAll.TextColor3 = Color3.fromRGB(255, 200, 200)
@@ -3614,14 +3664,14 @@ do
         for k in pairs(ChatHistory) do ChatHistory[k] = nil end
         -- Сброс директ-чата
         for i = #DirectChatHistory, 1, -1 do DirectChatHistory[i] = nil end
-        btnResetAll.Text = "✓ Память очищена"
+        btnResetAll.Text = "✓ Memory Cleared"
         task.delay(2, function()
             if btnResetAll and btnResetAll.Parent then
-                btnResetAll.Text = "🗑️  Сбросить всю память ИИ"
+                btnResetAll.Text = "🗑️  Clear All AI Memory"
             end
         end)
         if pushNotification then
-            pushNotification("Память очищена", "ИИ забыл все предыдущие разговоры.", THEME.Accent)
+            pushNotification("Memory cleared", "AI has forgotten all previous conversations.", THEME.Accent)
         end
     end)
 
@@ -3629,7 +3679,7 @@ do
     btnResetDirect.Size = UDim2.new(1, 0, 0, 30)
     btnResetDirect.BackgroundColor3 = THEME.Button
     btnResetDirect.BackgroundTransparency = 0.3
-    btnResetDirect.Text = "Сбросить только директ-чат"
+    btnResetDirect.Text = "Reset AI Chat only"
     btnResetDirect.Font = Enum.Font.GothamMedium
     btnResetDirect.TextSize = 12
     btnResetDirect.TextColor3 = THEME.TextDim
@@ -3641,10 +3691,10 @@ do
     btnResetDirect.MouseLeave:Connect(function() tween(btnResetDirect, TWEEN_FAST, { BackgroundTransparency = 0.3 }) end)
     btnResetDirect.MouseButton1Click:Connect(function()
         for i = #DirectChatHistory, 1, -1 do DirectChatHistory[i] = nil end
-        btnResetDirect.Text = "✓ Директ-чат сброшен"
+        btnResetDirect.Text = "✓ AI Chat reset"
         task.delay(2, function()
             if btnResetDirect and btnResetDirect.Parent then
-                btnResetDirect.Text = "Сбросить только директ-чат"
+                btnResetDirect.Text = "Reset AI Chat only"
             end
         end)
     end)
@@ -3658,12 +3708,12 @@ advancedFrame.Size = UDim2.new(1, 0, 1, 0)
 advancedFrame.Visible = false
 advancedFrame.GroupTransparency = 1
 advancedFrame.Parent = contentArea
-tabFrames["Настройки"] = advancedFrame
+tabFrames["Settings"] = advancedFrame
 
-local advTitle = makeTextLabel(advancedFrame, "Настройки", 24, "bold")
+local advTitle = makeTextLabel(advancedFrame, "Settings", 24, "bold")
 advTitle.Size = UDim2.new(1, 0, 0, 30)
 
-local advDesc = makeTextLabel(advancedFrame, "Системные настройки и конфигурация API.", 13, "semibold")
+local advDesc = makeTextLabel(advancedFrame, "System settings and API configuration.", 13, "semibold")
 advDesc.TextColor3 = THEME.TextDim
 advDesc.Position = UDim2.new(0, 0, 0, 32)
 advDesc.Size = UDim2.new(1, 0, 0, 16)
@@ -3693,10 +3743,10 @@ local function makeAdvancedHeader(text)
     return h
 end
 
-makeAdvancedHeader("Внешний вид")
+makeAdvancedHeader("Appearance")
 do
     local themeValues = { "LineOfBots", "Default", "PremiumDark", "Obsidian", "FrostedGlass", "Dark" }
-    local _, ctrl = makeRightControlRow(advancedScroll, "Тема", "Управляет внешним видом интерфейса.", 240)
+    local _, ctrl = makeRightControlRow(advancedScroll, "Theme", "Controls the look and feel of the interface.", 240)
     local dd = makeDropdown(ctrl, themeValues, ClientSettings.Theme or "LineOfBots", function(val)
         ClientSettings.Theme = val
         createInterface()
@@ -3704,18 +3754,18 @@ do
     dd.Frame.Size = UDim2.new(1, 0, 1, 0)
 end
 
-makeAdvancedHeader("Размер окна")
+makeAdvancedHeader("Window Size")
 do
     local presets = {
-        { label = "Маленькое (650x450)", w = 650, h = 450 },
-        { label = "По умолчанию (700x460)", w = 700, h = 460 },
-        { label = "Большое (900x600)", w = 900, h = 600 },
-        { label = "Огромное (1050x720)", w = 1050, h = 720 },
+        { label = "Small (650x450)", w = 650, h = 450 },
+        { label = "Default (700x460)", w = 700, h = 460 },
+        { label = "Large (900x600)", w = 900, h = 600 },
+        { label = "Huge (1050x720)", w = 1050, h = 720 },
     }
 
     local curW = tonumber(ClientSettings.UI and ClientSettings.UI.WindowWidth) or 700
     local curH = tonumber(ClientSettings.UI and ClientSettings.UI.WindowHeight) or 460
-    local defaultLabel = "По умолчанию (700x460)"
+    local defaultLabel = "Default (700x460)"
     for _, p in ipairs(presets) do
         if p.w == curW and p.h == curH then
             defaultLabel = p.label
@@ -3728,7 +3778,7 @@ do
         table.insert(values, p.label)
     end
 
-    local _, ctrl = makeRightControlRow(advancedScroll, "Размер окна", "Изменяет размер окна интерфейса.", 240)
+    local _, ctrl = makeRightControlRow(advancedScroll, "Window Size", "Resize the interface window.", 240)
     local dd = makeDropdown(ctrl, values, defaultLabel, function(val)
         for _, p in ipairs(presets) do
             if p.label == val then
@@ -3743,7 +3793,7 @@ do
     dd.Frame.Size = UDim2.new(1, 0, 1, 0)
 end
 
-makeAdvancedHeader("Кулдаун")
+makeAdvancedHeader("Cooldown")
 do
     local function clampCooldown(v)
         v = tonumber(v)
@@ -3751,7 +3801,7 @@ do
         return math.clamp(math.floor(v + 0.5), 0, 120)
     end
 
-    local _, ctrl = makeRightControlRow(advancedScroll, "Кулдаун", "Секунд между ответами на одного пользователя.", 140)
+    local _, ctrl = makeRightControlRow(advancedScroll, "Cooldown", "Seconds between replies per user.", 140)
     local box = makeTextBox(ctrl, "Seconds")
     box.Size = UDim2.new(1, 0, 1, 0)
     box.TextWrapped = false
@@ -3768,7 +3818,7 @@ do
     end)
 end
 
-makeAdvancedHeader("Лимиты сообщений")
+makeAdvancedHeader("Message Limits")
 do
     local function clampRate(v)
         v = tonumber(v)
@@ -3782,7 +3832,7 @@ do
         return math.clamp(math.floor(v + 0.5), 1, 10)
     end
 
-    local _, rateCtrl = makeRightControlRow(advancedScroll, "Макс. сообщ./сек", "Глобальный лимит обрабатываемых сообщений.", 140)
+    local _, rateCtrl = makeRightControlRow(advancedScroll, "Max msg/sec", "Global limit on processed messages.", 140)
     local rateBox = makeTextBox(rateCtrl, "1-30")
     rateBox.Size = UDim2.new(1, 0, 1, 0)
     rateBox.Text = tostring(ClientSettings.MaxMessagesPerSecond or 10)
@@ -3796,7 +3846,7 @@ do
         end
     end)
 
-    local _, queueCtrl = makeRightControlRow(advancedScroll, "Очередь на пользователя", "Макс. кол-во сообщений в очереди.", 140)
+    local _, queueCtrl = makeRightControlRow(advancedScroll, "Queue per user", "Max messages in queue per user.", 140)
     local queueBox = makeTextBox(queueCtrl, "1-30")
     queueBox.Size = UDim2.new(1, 0, 1, 0)
     queueBox.Text = tostring(ClientSettings.MaxQueuePerUser or 10)
@@ -3811,28 +3861,28 @@ do
     end)
 
     -- Following Header
-    makeAdvancedHeader("Следование")
-    local _ = makeToggleRow(advancedScroll, "Включить следование", "Позволять игрокам просить следовать за ними.", ClientSettings.FollowingEnabled, function(state)
+    makeAdvancedHeader("Following")
+    local _ = makeToggleRow(advancedScroll, "Enable Following", "Allow players to ask the bot to follow them.", ClientSettings.FollowingEnabled, function(state)
         ClientSettings.FollowingEnabled = state
         if not state then stopFollow() end
     end)
 
-    local _, followModeCtrl = makeRightControlRow(advancedScroll, "Режим следования", "Pathfinding обходит стены; Linear — прямая линия.", 200)
+    local _, followModeCtrl = makeRightControlRow(advancedScroll, "Follow Mode", "Pathfinding avoids walls; Linear goes straight.", 200)
     local followModeDd = makeDropdown(followModeCtrl, {"Pathfinding", "Linear"}, ClientSettings.FollowMode or "Pathfinding", function(val)
         ClientSettings.FollowMode = val
     end)
     followModeDd.Frame.Size = UDim2.new(1, 0, 1, 0)
 end
 
-makeAdvancedHeader("Горячая клавиша")
-makeKeybindRow(advancedScroll, "Показать/Скрыть", "Показать или скрыть интерфейс.", ClientSettings.ToggleKey or Enum.KeyCode.P, function(newKey)
+makeAdvancedHeader("Hotkey")
+makeKeybindRow(advancedScroll, "Show/Hide", "Toggle the interface visibility.", ClientSettings.ToggleKey or Enum.KeyCode.P, function(newKey)
     ClientSettings.ToggleKey = newKey
 end)
 
 makeAdvancedHeader("API")
 do
     local slotValues = { "Api One", "Api 2", "Api 3" }
-    local _, slotCtrl = makeRightControlRow(advancedScroll, "Слот API", "Выбери встроенный API ключ.", 200)
+    local _, slotCtrl = makeRightControlRow(advancedScroll, "API Slot", "Select a built-in API key slot.", 200)
     local slotDd = makeDropdown(slotCtrl, slotValues, ClientSettings.ApiKeySlot or "Api One", function(val)
         ClientSettings.ApiKeySlot = val
     end)
@@ -3862,7 +3912,7 @@ do
     apiTitleRow.Size = UDim2.new(1, 0, 0, 18)
     apiTitleRow.Parent = apiCard
 
-    local apiTitle = makeTextLabel(apiTitleRow, "Свой API Ключ", 14, "bold")
+    local apiTitle = makeTextLabel(apiTitleRow, "Custom API Key", 14, "bold")
     apiTitle.Size = UDim2.new(1, -90, 1, 0)
     apiTitle.TextColor3 = THEME.Text
 
@@ -3877,7 +3927,7 @@ do
     apiStatusDot.Parent = apiTitleRow
     makeCorner(apiStatusDot, 999)
 
-    local apiStatusLbl = makeTextLabel(apiTitleRow, "не проверен", 11, "medium")
+    local apiStatusLbl = makeTextLabel(apiTitleRow, "not verified", 11, "medium")
     apiStatusLbl.Size = UDim2.new(0, 70, 1, 0)
     apiStatusLbl.Position = UDim2.new(1, -70, 0, 0)
     apiStatusLbl.TextColor3 = THEME.TextDim
@@ -3906,7 +3956,7 @@ do
     apiBox.Font = Enum.Font.GothamMedium
     apiBox.TextSize = 13
     apiBox.TextColor3 = THEME.Text
-    apiBox.PlaceholderText = "Вставь Groq API ключ сюда (gsk_...)"
+    apiBox.PlaceholderText = "Paste your Groq API key here (gsk_...)"
     apiBox.PlaceholderColor3 = THEME.TextDim
     apiBox.TextXAlignment = Enum.TextXAlignment.Left
     apiBox.ClearTextOnFocus = false
@@ -3914,7 +3964,7 @@ do
     apiBox.Parent = apiInputFrame
 
     -- Лимиты ключа — обновляются автоматически после каждого запроса
-    local apiLimitLbl = makeTextLabel(apiCard, "Лимиты обновляются после каждого запроса к ИИ", 11, "medium")
+    local apiLimitLbl = makeTextLabel(apiCard, "Limits update after each AI request", 11, "medium")
     apiLimitLbl.Size = UDim2.new(1, 0, 0, 28)
     apiLimitLbl.Position = UDim2.new(0, 0, 0, 78)
     apiLimitLbl.TextColor3 = THEME.TextDim
@@ -3926,7 +3976,7 @@ do
     apiCheckBtn.Position = UDim2.new(0, 0, 0, 112)
     apiCheckBtn.BackgroundColor3 = THEME.Accent
     apiCheckBtn.BackgroundTransparency = 0.15
-    apiCheckBtn.Text = "Проверить ключ"
+    apiCheckBtn.Text = "Check Key"
     apiCheckBtn.Font = Enum.Font.GothamBold
     apiCheckBtn.TextSize = 13
     apiCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -3959,11 +4009,11 @@ do
         if not c.updatedAt then return end
         local parts = {}
         if c.remainingRequests and c.limitRequests then
-            table.insert(parts, "Запросов: " .. c.remainingRequests .. "/" .. c.limitRequests)
-            if c.resetRequests then table.insert(parts, "Сброс: " .. c.resetRequests) end
+            table.insert(parts, "Requests: " .. c.remainingRequests .. "/" .. c.limitRequests)
+            if c.resetRequests then table.insert(parts, "Reset: " .. c.resetRequests) end
         end
         if c.remainingTokens and c.limitTokens then
-            table.insert(parts, "Токенов: " .. c.remainingTokens .. "/" .. c.limitTokens)
+            table.insert(parts, "Tokens: " .. c.remainingTokens .. "/" .. c.limitTokens)
         end
         if #parts > 0 then
             apiLimitLbl.Text = table.concat(parts, "  •  ")
@@ -3980,19 +4030,19 @@ do
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.groq = clean
 
-        apiCheckBtn.Text = "Проверяю..."
+        apiCheckBtn.Text = "Checking..."
         apiCheckBtn.BackgroundTransparency = 0.4
         task.spawn(function()
             local testKey = getGroqApiKey()
-            apiCheckBtn.Text = "Проверить ключ"
+            apiCheckBtn.Text = "Check Key"
             apiCheckBtn.BackgroundTransparency = 0.15
             if not testKey or testKey == "" then
-                setApiStatus(false, "ключ не указан", "Введи API ключ в поле выше.")
+                setApiStatus(false, "no key entered", "Enter an API key in the field above.")
                 return
             end
             local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
             if not req then
-                setApiStatus(false, "ошибка executor", "HTTP недоступен в этом executor.")
+                setApiStatus(false, "executor error", "HTTP not available in this executor.")
                 return
             end
             -- Один запрос — результат уйдёт в parseRateLimitHeaders через кэш
@@ -4002,14 +4052,14 @@ do
                 Headers = { ["Authorization"] = "Bearer " .. testKey, ["Content-Type"] = "application/json" },
                 Body = HttpService:JSONEncode({ model = "llama-3.1-8b-instant", max_tokens = 1, messages = {{ role = "user", content = "hi" }} }),
             })
-            if not ok2 then setApiStatus(false, "ошибка сети", "Нет соединения с Groq."); return end
+            if not ok2 then setApiStatus(false, "network error", "Cannot connect to Groq."); return end
             local s2 = res2.StatusCode or res2.statusCode or 0
-            if tonumber(s2) == 401 then setApiStatus(false, "❌ неверный ключ", "Проверь на console.groq.com"); return end
-            if tonumber(s2) == 429 then setApiStatus(false, "⚠️ rate limit", "Ключ верный, лимит исчерпан."); return end
-            if tonumber(s2) ~= 200 then setApiStatus(false, "❌ ошибка " .. tostring(s2), "Неожиданный ответ."); return end
+            if tonumber(s2) == 401 then setApiStatus(false, "❌ invalid key", "Check at console.groq.com"); return end
+            if tonumber(s2) == 429 then setApiStatus(false, "⚠️ rate limit", "Key valid, limit reached."); return end
+            if tonumber(s2) ~= 200 then setApiStatus(false, "❌ error " .. tostring(s2), "Unexpected response."); return end
             -- Парсим заголовки (этот req идёт в обход postJson, нужно вручную)
             parseRateLimitHeaders(res2.Headers or res2.headers or {})
-            setApiStatus(true, "✓ работает", nil)
+            setApiStatus(true, "✓ working", nil)
         end)
     end)
     apiBox.FocusLost:Connect(function()
@@ -4022,7 +4072,7 @@ do
         apiBox.Text = clean
         -- Сбрасываем статус при смене ключа
         tween(apiStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
-        apiStatusLbl.Text = "не проверен"
+        apiStatusLbl.Text = "not verified"
         apiStatusLbl.TextColor3 = THEME.TextDim
         tween(apiCardStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.5 })
     end)
@@ -4038,12 +4088,12 @@ perceptionFrame.Size = UDim2.new(1, 0, 1, 0)
 perceptionFrame.Visible = false
 perceptionFrame.GroupTransparency = 1
 perceptionFrame.Parent = contentArea
-tabFrames["Восприятие"] = perceptionFrame
+tabFrames["Perception"] = perceptionFrame
 
-local percTitle = makeTextLabel(perceptionFrame, "Восприятие", 24, "bold")
+local percTitle = makeTextLabel(perceptionFrame, "Perception", 24, "bold")
 percTitle.Size = UDim2.new(1, 0, 0, 30)
 
-local percDesc = makeTextLabel(perceptionFrame, "Радиус и близость.", 13, "semibold")
+local percDesc = makeTextLabel(perceptionFrame, "Range and proximity.", 13, "semibold")
 percDesc.TextColor3 = THEME.TextDim
 percDesc.Position = UDim2.new(0, 0, 0, 32)
 percDesc.Size = UDim2.new(1, 0, 0, 16)
@@ -4066,37 +4116,37 @@ end)
 
 -- PERCEPTION TAB CONTENT (Populate)
 -- Header
-local percHeader = makeSectionCard(perceptionScroll, "Настройки восприятия")
+local percHeader = makeSectionCard(perceptionScroll, "Perception Settings")
 
-makeToggleRow(percHeader, "Радиус близости", "Ограничить бота только ближайшими игроками.", ClientSettings.Range.Enabled, function(state)
+makeToggleRow(percHeader, "Proximity Range", "Restrict bot to nearby players only.", ClientSettings.Range.Enabled, function(state)
     ClientSettings.Range.Enabled = state
     updateRangeVisualizer()
 end)
 
-makeToggleRow(percHeader, "Показать визуализатор", "Рисовать кольцо вокруг персонажа.", ClientSettings.Range.ShowVisualizer, function(state)
+makeToggleRow(percHeader, "Show Visualizer", "Draw a ring around your character.", ClientSettings.Range.ShowVisualizer, function(state)
     ClientSettings.Range.ShowVisualizer = state
     updateRangeVisualizer()
 end)
 
-makeToggleRow(percHeader, "Игнорировать стены", "Отвечать игрокам даже за стенами.", ClientSettings.Range.IgnoreWalls or false, function(state)
+makeToggleRow(percHeader, "Ignore Walls", "Reply to players even through walls.", ClientSettings.Range.IgnoreWalls or false, function(state)
     ClientSettings.Range.IgnoreWalls = state
 end)
 
 -- Visualizer Card removed as per user request
 -- Slider
-makeSliderRow(perceptionScroll, "Дистанция (studs)", 1, 150, ClientSettings.Range.Studs or 50, function(val)
+makeSliderRow(perceptionScroll, "Distance (studs)", 1, 150, ClientSettings.Range.Studs or 50, function(val)
     ClientSettings.Range.Studs = val
     updateRangeVisualizer()
 end)
 
 -- Selective Perception UI
-local selectiveSection = makeSectionCard(perceptionScroll, "Режим выбора")
+local selectiveSection = makeSectionCard(perceptionScroll, "Selective Mode")
 
-makeToggleRow(selectiveSection, "Включить режим выбора", "Отвечать только выбранным игрокам.", ClientSettings.Range.SelectiveMode, function(state)
+makeToggleRow(selectiveSection, "Enable Selective Mode", "Only reply to selected players.", ClientSettings.Range.SelectiveMode, function(state)
     ClientSettings.Range.SelectiveMode = state
 end)
 
-local searchBox = makeTextBox(selectiveSection, "Поиск игроков...")
+local searchBox = makeTextBox(selectiveSection, "Search players...")
 searchBox.Size = UDim2.new(1, 0, 0, 36)
 
 local userList = Instance.new("Frame")
@@ -4220,17 +4270,17 @@ moderationFrame.Size = UDim2.new(1, 0, 1, 0)
 moderationFrame.Visible = false
 moderationFrame.GroupTransparency = 1
 moderationFrame.Parent = contentArea
-tabFrames["Модерация"] = moderationFrame
+tabFrames["Moderation"] = moderationFrame
 
-local modTitle = makeTextLabel(moderationFrame, "Модерация", 28, "bold")
+local modTitle = makeTextLabel(moderationFrame, "Moderation", 28, "bold")
 modTitle.Size = UDim2.new(1, 0, 0, 35)
 
-local modDesc = makeTextLabel(moderationFrame, "Управление заблокированными пользователями.", 16, "semibold")
+local modDesc = makeTextLabel(moderationFrame, "Manage blocked users.", 16, "semibold")
 modDesc.TextColor3 = THEME.TextDim
 modDesc.Position = UDim2.new(0, 0, 0, 40)
 modDesc.Size = UDim2.new(1, 0, 0, 20)
 
-local modInfo = makeTextLabel(moderationFrame, "Управляйте чёрным списком. Нажми на игрока чтобы заблокировать/разблокировать.", 14, "semibold")
+local modInfo = makeTextLabel(moderationFrame, "Manage the blacklist. Click a player to block/unblock.", 14, "semibold")
 modInfo.TextColor3 = THEME.TextDim
 modInfo.Position = UDim2.new(0, 0, 0, 78)
 modInfo.Size = UDim2.new(1, 0, 0, 20)
@@ -6410,7 +6460,7 @@ local function rebuildPlayerList(filter)
     rightCard.Count.Text = tostring(blockedCount)
 
     if activeCount == 0 then
-        local empty = makeTextLabel(leftCard.Scroll, "Игроков нет.", 14, "semibold")
+        local empty = makeTextLabel(leftCard.Scroll, "No players found.", 14, "semibold")
         empty.Size = UDim2.new(1, 0, 0, 40)
         empty.TextColor3 = THEME.TextDim
         empty.TextTransparency = 0.5
@@ -6419,7 +6469,7 @@ local function rebuildPlayerList(filter)
     end
 
     if blockedCount == 0 then
-        local empty = makeTextLabel(rightCard.Scroll, "Заблокированных нет.", 14, "semibold")
+        local empty = makeTextLabel(rightCard.Scroll, "No blocked players.", 14, "semibold")
         empty.Size = UDim2.new(1, 0, 0, 40)
         empty.TextColor3 = THEME.TextDim
         empty.TextTransparency = 0.5
@@ -6466,6 +6516,118 @@ logLayout.Parent = logScroll
 -- Log scroll kept for future use but Logger removed
 
 -- ═══════════════════════════════════════════════════════════
+-- ABOUT TAB
+-- ═══════════════════════════════════════════════════════════
+local aboutFrame = Instance.new("CanvasGroup")
+aboutFrame.BackgroundTransparency = 1
+aboutFrame.Size = UDim2.new(1, 0, 1, 0)
+aboutFrame.Visible = false
+aboutFrame.Parent = contentArea
+tabFrames["About"] = aboutFrame
+
+-- Padding
+local aboutPad = Instance.new("UIPadding")
+aboutPad.PaddingLeft = UDim.new(0, 18)
+aboutPad.PaddingRight = UDim.new(0, 18)
+aboutPad.Parent = aboutFrame
+
+-- Big title: LineOfBots
+local aboutBigTitle = makeTextLabel(aboutFrame, "LineOfBots", 38, "bold")
+aboutBigTitle.Size = UDim2.new(1, 0, 0, 48)
+aboutBigTitle.Position = UDim2.new(0, 0, 0, 20)
+aboutBigTitle.TextColor3 = THEME.Accent
+aboutBigTitle.TextXAlignment = Enum.TextXAlignment.Center
+
+-- Version badge
+local aboutVersion = makeTextLabel(aboutFrame, "v15 Public Edition", 13, "semibold")
+aboutVersion.Size = UDim2.new(1, 0, 0, 18)
+aboutVersion.Position = UDim2.new(0, 0, 0, 72)
+aboutVersion.TextColor3 = THEME.TextDim
+aboutVersion.TextXAlignment = Enum.TextXAlignment.Center
+
+-- Divider line
+local aboutDivider = Instance.new("Frame")
+aboutDivider.BackgroundColor3 = THEME.Stroke
+aboutDivider.BorderSizePixel = 0
+aboutDivider.Size = UDim2.new(0.7, 0, 0, 1)
+aboutDivider.Position = UDim2.new(0.15, 0, 0, 106)
+aboutDivider.Parent = aboutFrame
+
+-- Description card
+local aboutCard = Instance.new("Frame")
+aboutCard.BackgroundColor3 = THEME.Card
+aboutCard.BackgroundTransparency = 0
+aboutCard.BorderSizePixel = 0
+aboutCard.Size = UDim2.new(1, 0, 0, 160)
+aboutCard.Position = UDim2.new(0, 0, 0, 122)
+aboutCard.Parent = aboutFrame
+makeCorner(aboutCard, 12)
+makeStroke(aboutCard, 1, THEME.Stroke, 0.5)
+
+local aboutCardPad = Instance.new("UIPadding")
+aboutCardPad.PaddingLeft = UDim.new(0, 16)
+aboutCardPad.PaddingRight = UDim.new(0, 16)
+aboutCardPad.PaddingTop = UDim.new(0, 14)
+aboutCardPad.Parent = aboutCard
+
+local aboutDesc1 = makeTextLabel(aboutCard, "This is a custom public edition of LineOfBots.", 14, "semibold")
+aboutDesc1.Size = UDim2.new(1, 0, 0, 20)
+aboutDesc1.Position = UDim2.new(0, 16, 0, 14)
+aboutDesc1.TextColor3 = THEME.Text
+aboutDesc1.TextXAlignment = Enum.TextXAlignment.Left
+
+local aboutDesc2 = makeTextLabel(aboutCard, "LineOfBots is a universal Roblox AI chatbot that lets your character automatically talk with other players using real AI models.", 13, "medium")
+aboutDesc2.Size = UDim2.new(1, -32, 0, 50)
+aboutDesc2.Position = UDim2.new(0, 16, 0, 42)
+aboutDesc2.TextColor3 = THEME.TextDim
+aboutDesc2.TextXAlignment = Enum.TextXAlignment.Left
+aboutDesc2.TextWrapped = true
+
+local aboutDesc3 = makeTextLabel(aboutCard, "Based on the original Universal Script AI Chatbot:", 12, "medium")
+aboutDesc3.Size = UDim2.new(1, -32, 0, 16)
+aboutDesc3.Position = UDim2.new(0, 16, 0, 100)
+aboutDesc3.TextColor3 = THEME.TextDim
+aboutDesc3.TextXAlignment = Enum.TextXAlignment.Left
+
+local aboutLink = makeTextLabel(aboutCard, "scriptblox.com/script/Universal-Script-AI-chatbot-83523", 11, "semibold")
+aboutLink.Size = UDim2.new(1, -32, 0, 20)
+aboutLink.Position = UDim2.new(0, 16, 0, 120)
+aboutLink.TextColor3 = THEME.Accent
+aboutLink.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Features list card
+local featCard = Instance.new("Frame")
+featCard.BackgroundColor3 = THEME.Card
+featCard.BackgroundTransparency = 0
+featCard.BorderSizePixel = 0
+featCard.Size = UDim2.new(1, 0, 0, 150)
+featCard.Position = UDim2.new(0, 0, 0, 294)
+featCard.Parent = aboutFrame
+makeCorner(featCard, 12)
+makeStroke(featCard, 1, THEME.Stroke, 0.5)
+
+local featTitle = makeTextLabel(featCard, "Features", 13, "bold")
+featTitle.Size = UDim2.new(1, -32, 0, 18)
+featTitle.Position = UDim2.new(0, 16, 0, 12)
+featTitle.TextColor3 = THEME.Text
+featTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+local feats = {
+    "🤖  Multiple AI models (Llama 4, GPT-OSS, Kimi K2, Qwen3...)",
+    "💬  Auto-reply in game chat with real AI responses",
+    "🧠  Memory system — AI remembers conversations",
+    "👤  Player nickname recognition",
+    "🛡️  Moderation: blacklist, range, selective mode",
+}
+for i, feat in ipairs(feats) do
+    local fl = makeTextLabel(featCard, feat, 11, "medium")
+    fl.Size = UDim2.new(1, -32, 0, 16)
+    fl.Position = UDim2.new(0, 16, 0, 14 + i * 20)
+    fl.TextColor3 = THEME.TextDim
+    fl.TextXAlignment = Enum.TextXAlignment.Left
+end
+
+-- ═══════════════════════════════════════════════════════════
 -- ЧАТ С ИИ — вкладка для прямого тестирования бота
 -- ═══════════════════════════════════════════════════════════
 local chatTestFrame = Instance.new("CanvasGroup")
@@ -6474,12 +6636,12 @@ chatTestFrame.Size = UDim2.new(1, 0, 1, 0)
 chatTestFrame.Visible = false
 chatTestFrame.GroupTransparency = 1
 chatTestFrame.Parent = contentArea
-tabFrames["Чат с ИИ"] = chatTestFrame
+tabFrames["AI Chat"] = chatTestFrame
 
-local ctTitle = makeTextLabel(chatTestFrame, "Чат с ИИ", 24, "bold")
+local ctTitle = makeTextLabel(chatTestFrame, "AI Chat", 24, "bold")
 ctTitle.Size = UDim2.new(1, 0, 0, 30)
 
-local ctDesc = makeTextLabel(chatTestFrame, "Тестируй бота напрямую — без реального чата.", 13, "semibold")
+local ctDesc = makeTextLabel(chatTestFrame, "Test the bot directly — without real chat.", 13, "semibold")
 ctDesc.TextColor3 = THEME.TextDim
 ctDesc.Position = UDim2.new(0, 0, 0, 32)
 ctDesc.Size = UDim2.new(1, 0, 0, 16)
@@ -6552,7 +6714,7 @@ local function ctAddMessage(text, isBot, isError)
         inner.Position = UDim2.new(1, 0, 0, 0)
     end
 
-    local prefix = isBot and ("🤖 " .. (ClientSettings.PersonalityId or "Бот")) or "👤 Ты"
+    local prefix = isBot and ("🤖 " .. (ClientSettings.PersonalityId or "Bot")) or "👤 You"
     local prefixLbl = makeTextLabel(inner, prefix, 11, "bold")
     prefixLbl.Size = UDim2.new(0, 200, 0, 14)
     prefixLbl.TextColor3 = isBot and THEME.TextDim or Color3.fromRGB(255,255,255)
@@ -6589,7 +6751,7 @@ ctInputBox.Position = UDim2.new(0, 8, 0, 0)
 ctInputBox.Font = Enum.Font.GothamMedium
 ctInputBox.TextSize = 13
 ctInputBox.TextColor3 = THEME.Text
-ctInputBox.PlaceholderText = "Напиши что-нибудь и нажми Enter..."
+ctInputBox.PlaceholderText = "Type something and press Enter..."
 ctInputBox.PlaceholderColor3 = THEME.TextDim
 ctInputBox.TextXAlignment = Enum.TextXAlignment.Left
 ctInputBox.ClearTextOnFocus = false
@@ -6615,7 +6777,7 @@ ctClearBtn.Size = UDim2.new(1, 0, 0, 26)
 ctClearBtn.Position = UDim2.new(0, 0, 1, -80)
 ctClearBtn.BackgroundColor3 = THEME.Button
 ctClearBtn.BackgroundTransparency = 0.6
-ctClearBtn.Text = "Очистить историю"
+ctClearBtn.Text = "Clear History"
 ctClearBtn.Font = Enum.Font.GothamMedium
 ctClearBtn.TextSize = 12
 ctClearBtn.TextColor3 = THEME.TextDim
@@ -6631,7 +6793,7 @@ ctClearBtn.MouseButton1Click:Connect(function()
         if not c:IsA("UILayout") and not c:IsA("UIPadding") then c:Destroy() end
     end
     ctMsgCounter = 0
-    ctAddMessage("История очищена.", true, false)
+    ctAddMessage("History cleared.", true, false)
 end)
 
 -- Отдельная история для директ-чата (не смешивается с игровым чатом)
@@ -6663,7 +6825,7 @@ local function ctDoSend()
     typingBubble.Size = UDim2.new(1, 0, 0, 26)
     typingBubble.LayoutOrder = typingIdx
     typingBubble.Parent = ctLog
-    local typingLbl = makeTextLabel(typingBubble, "⌨️ бот печатает...", 12, "medium")
+    local typingLbl = makeTextLabel(typingBubble, "⌨️ bot is typing...", 12, "medium")
     typingLbl.TextColor3 = THEME.TextDim
     typingLbl.Size = UDim2.new(1, 0, 1, 0)
 
@@ -6683,10 +6845,10 @@ local function ctDoSend()
                 table.insert(apiMsgs, m)
             end
         end
-        -- Если UsePlayerName — в директ-чате называем "Пользователь"
+        -- UsePlayerName в директ-чате
         local userContent = msg
         if settings.UsePlayerName then
-            userContent = "[Пользователь]: " .. msg
+            userContent = "[NAME:User] " .. msg
         end
         table.insert(apiMsgs, { role = "user", content = userContent })
 
@@ -6700,6 +6862,10 @@ local function ctDoSend()
             max_tokens  = directMaxTokens,
             messages    = apiMsgs,
         }
+        -- Qwen3 — отключаем цепочку рассуждений через reasoning_effort
+        if payload.model == "qwen/qwen3-32b" then
+            payload.reasoning_effort = "none"
+        end
         local text, err = providerRouter:chatCompletions(payload)
         if text and text ~= "" and settings.MemoryEnabled then
             appendHistory(DirectChatHistory, userContent, text)
@@ -6709,26 +6875,26 @@ local function ctDoSend()
                 local errLower = tostring(err):lower()
                 local friendlyErr
                 if errLower:find("contentfiltered") or errLower:find("emptyresponse") then
-                    friendlyErr = "🚫 Модель отказалась отвечать. Попробуй переформулировать."
+                    friendlyErr = "🚫 Model refused to respond. Try rephrasing."
                 elseif errLower:find("429") or errLower:find("rate") then
-                    friendlyErr = "⚡ Rate limit — подожди немного."
+                    friendlyErr = "⚡ Rate limit — wait a moment."
                 elseif errLower:find("401") or errLower:find("invalid_api_key") or errLower:find("missinggroqkey") then
-                    friendlyErr = "🔑 API ключ неверный или не указан."
+                    friendlyErr = "🔑 API key is invalid or not set."
                 elseif errLower:find("400") or errLower:find("bad request") then
-                    friendlyErr = "⚠️ Модель не поддерживает этот запрос. Попробуй другую."
+                    friendlyErr = "⚠️ Model does not support this request. Try another."
                 elseif errLower:find("timeout") or errLower:find("timed") then
-                    friendlyErr = "⏱️ Таймаут. Попробуй ещё раз."
+                    friendlyErr = "⏱️ Timeout. Try again."
                 else
-                    friendlyErr = "❌ Ошибка: " .. tostring(err)
+                    friendlyErr = "❌ Error: " .. tostring(err)
                 end
                 ChatTestCallback(friendlyErr, true)
             else
-                ChatTestCallback(text or "Нет ответа", false)
+                ChatTestCallback(text or "No response", false)
             end
         end
     end)
     task.delay(30, function()
-        if ChatTestCallback then ChatTestCallback("⏱️ Нет ответа (таймаут 30с)", true) end
+        if ChatTestCallback then ChatTestCallback("⏱️ No response (30s timeout)", true) end
     end)
 end
 
@@ -6741,11 +6907,12 @@ ctInputBox.FocusLost:Connect(function(enter) if enter then ctDoSend() end end)
 local isMinimized = false
 local CIRCLE_SIZE = 58
 
--- Круглая кнопка (показывается когда свёрнуто)
+-- Круглая кнопка (показывается когда свёрнуто) — по центру экрана
 local circleBtn = Instance.new("TextButton")
 circleBtn.Name = "LineOfBotsCircle"
 circleBtn.Size = UDim2.new(0, CIRCLE_SIZE, 0, CIRCLE_SIZE)
-circleBtn.Position = UDim2.new(0, 20, 0.5, -CIRCLE_SIZE/2)
+circleBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+circleBtn.Position = UDim2.new(0.5, 0, 0.5, 0)
 circleBtn.BackgroundColor3 = THEME.Accent
 circleBtn.Text = ""
 circleBtn.AutoButtonColor = false
@@ -6891,24 +7058,25 @@ end)
 -- Initialize
     -- Reorder Tabs (Settings at bottom)
     local tabOrder = {
-        ["Основное"] = 1,
-        ["Поведение"] = 2,
-        ["Восприятие"] = 3,
-        ["Модерация"] = 4,
-        ["Настройки"] = 5,
-        ["Чат с ИИ"] = 6,
+        ["General"] = 1,
+        ["Behavior"] = 2,
+        ["Perception"] = 3,
+        ["Moderation"] = 4,
+        ["Settings"] = 5,
+        ["AI Chat"] = 6,
         ["Information"] = 7,
+        ["About"] = 8,
     }
     
     for name, btn in pairs(tabButtons) do
         if tabOrder[name] then
             btn.LayoutOrder = tabOrder[name]
         else
-            btn.LayoutOrder = 8
+            btn.LayoutOrder = 9
         end
     end
 
-    switchTab("Основное")
+    switchTab("General")
 end
 
 createInterface()
