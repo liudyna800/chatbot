@@ -952,10 +952,9 @@ local function handleQueuedChat(item)
         max_tokens  = tonumber(settings.MaxTokens) or 512,
         messages    = apiMessages,
     }
-    -- Qwen3 по умолчанию включает цепочку рассуждений — отключаем
-    -- иначе ИИ показывает весь внутренний монолог вместо чистого ответа
+    -- Qwen3 по умолчанию включает цепочку рассуждений — отключаем через reasoning_effort
     if model == "qwen/qwen3-32b" then
-        payload.thinking = { type = "disabled" }
+        payload.reasoning_effort = "none"
     end
 
     local text, err = providerRouter:chatCompletions(payload)
@@ -2416,13 +2415,13 @@ local sidebarTitle = makeTextLabel(sidebar, "LineOfBots", 19, "bold")
 sidebarTitle.Position = UDim2.new(0, 16, 0, 16)
 sidebarTitle.Size = UDim2.new(1, -16, 0, 22)
 
-local sidebarSubtitle = makeTextLabel(sidebar, "v14.5 Shell", 11, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebar, "v15 Shell", 11, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 16, 0, 40)
 sidebarSubtitle.Size = UDim2.new(1, -16, 0, 14)
 
 sidebarTitle.Text = "LineOfBots"
-sidebarSubtitle.Text = "v14.5 Shell"
+sidebarSubtitle.Text = "v15 Shell"
 
 -- Sidebar Title Animation Removed to keep static text
 
@@ -6750,9 +6749,9 @@ local function ctDoSend()
             max_tokens  = directMaxTokens,
             messages    = apiMsgs,
         }
-        -- Qwen3 — отключаем цепочку рассуждений
+        -- Qwen3 — отключаем цепочку рассуждений через reasoning_effort
         if payload.model == "qwen/qwen3-32b" then
-            payload.thinking = { type = "disabled" }
+            payload.reasoning_effort = "none"
         end
         local text, err = providerRouter:chatCompletions(payload)
         if text and text ~= "" and settings.MemoryEnabled then
