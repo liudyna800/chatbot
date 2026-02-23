@@ -2411,13 +2411,13 @@ local sidebarTitle = makeTextLabel(sidebar, "LineOfBots", 19, "bold")
 sidebarTitle.Position = UDim2.new(0, 16, 0, 16)
 sidebarTitle.Size = UDim2.new(1, -16, 0, 22)
 
-local sidebarSubtitle = makeTextLabel(sidebar, "v14 Shell", 11, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebar, "v14.5 Shell", 11, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 16, 0, 40)
 sidebarSubtitle.Size = UDim2.new(1, -16, 0, 14)
 
 sidebarTitle.Text = "LineOfBots"
-sidebarSubtitle.Text = "v14 Shell"
+sidebarSubtitle.Text = "v14.5 Shell"
 
 -- Sidebar Title Animation Removed to keep static text
 
@@ -3460,15 +3460,18 @@ makeToggleRow(
 -- Production Models — стабильные, для реального использования
 -- Preview Models — могут быть отключены без предупреждения
 local groqModels = {
-    -- ── PRODUCTION ───────────────────────────────────
-    "llama-3.1-8b-instant",           -- Meta, 560 t/s, лучший для чата
-    "llama-3.3-70b-versatile",        -- Meta, 280 t/s, умный и быстрый
-    "openai/gpt-oss-120b",            -- OpenAI OSS, 500 t/s, топ качество
-    "openai/gpt-oss-20b",             -- OpenAI OSS, 1000 t/s, самый быстрый
-    -- ── PREVIEW ──────────────────────────────────────
-    "meta-llama/llama-4-scout-17b-16e-instruct",   -- Llama 4 Scout, 750 t/s
-    "moonshotai/kimi-k2-instruct-0905",             -- Kimi K2, 200 t/s, умный
-    "qwen/qwen3-32b",                               -- Qwen3 32B, 400 t/s
+    -- ── PRODUCTION (стабильные) ───────────────────────────────────────────
+    "llama-3.1-8b-instant",              -- Meta Llama 3.1 8B  | 560 t/s | быстрый чат
+    "llama-3.3-70b-versatile",           -- Meta Llama 3.3 70B | 280 t/s | умный
+    "openai/gpt-oss-20b",               -- GPT OSS 20B        | 1000 t/s | самый быстрый
+    "openai/gpt-oss-120b",              -- GPT OSS 120B       | 500 t/s  | топ качество
+    -- ── PREVIEW (свежие модели) ───────────────────────────────────────────
+    "meta-llama/llama-4-scout-17b-16e-instruct",  -- Llama 4 Scout 17B | 750 t/s | новый
+    "meta-llama/llama-4-maverick-17b-128e-instruct", -- Llama 4 Maverick | топ reasoning
+    "moonshotai/kimi-k2-instruct-0905",  -- Kimi K2            | 200 t/s  | умный диалог
+    "qwen/qwen3-32b",                    -- Qwen3 32B          | 400 t/s  | хорош в логике
+    "deepseek-r1-distill-llama-70b",     -- DeepSeek R1 70B    | reasoning
+    "deepseek-r1-distill-qwen-32b",      -- DeepSeek R1 32B    | быстрый reasoning
 }
 
 --[[ 
