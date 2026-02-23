@@ -952,6 +952,11 @@ local function handleQueuedChat(item)
         max_tokens  = tonumber(settings.MaxTokens) or 512,
         messages    = apiMessages,
     }
+    -- Qwen3 по умолчанию включает цепочку рассуждений — отключаем
+    -- иначе ИИ показывает весь внутренний монолог вместо чистого ответа
+    if model == "qwen/qwen3-32b" then
+        payload.thinking = { type = "disabled" }
+    end
 
     local text, err = providerRouter:chatCompletions(payload)
     if err or not text or text == "" then
@@ -3470,8 +3475,6 @@ local groqModels = {
     "meta-llama/llama-4-maverick-17b-128e-instruct", -- Llama 4 Maverick | топ reasoning
     "moonshotai/kimi-k2-instruct-0905",  -- Kimi K2            | 200 t/s  | умный диалог
     "qwen/qwen3-32b",                    -- Qwen3 32B          | 400 t/s  | хорош в логике
-    "deepseek-r1-distill-llama-70b",     -- DeepSeek R1 70B    | reasoning
-    "deepseek-r1-distill-qwen-32b",      -- DeepSeek R1 32B    | быстрый reasoning
 }
 
 --[[ 
@@ -6747,6 +6750,10 @@ local function ctDoSend()
             max_tokens  = directMaxTokens,
             messages    = apiMsgs,
         }
+        -- Qwen3 — отключаем цепочку рассуждений
+        if payload.model == "qwen/qwen3-32b" then
+            payload.thinking = { type = "disabled" }
+        end
         local text, err = providerRouter:chatCompletions(payload)
         if text and text ~= "" and settings.MemoryEnabled then
             appendHistory(DirectChatHistory, userContent, text)
