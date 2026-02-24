@@ -731,6 +731,11 @@ local function dequeueChatItem(q)
 end
 
 -- Chat handling functions
+
+-- v16.5: объявляем ДО makeSystemPrompt — иначе промпт получает nil
+local _placeInfo = nil           -- { name, placeId, desc } — заполняется при старте
+local _voiceActiveUsers = {}     -- userId → true если говорит сейчас
+
 local function makeSystemPrompt(settings)
     local system = ""
 
@@ -1302,36 +1307,41 @@ local ACTION_HANDLERS = {
 
 -- ── ПАРСЕР И ИСПОЛНИТЕЛЬ ТЕГОВ ───────────────────────────────────────────
 
--- Парсим [DO:action] в начале текста
--- Возвращает: actionName | nil,  cleanText
+-- Парсим [DO:action] из текста ИИ
+-- Возвращает: actionName | nil,  cleanText (без тега и без лишних пробелов вокруг него)
 local function parseActionTag(text)
-    if not text then return nil, text end
+    if not text then return nil, "" end
+
+    -- 1. Тег в самом начале (нормальный случай): "[DO:wave] hey!"
     local action, rest = text:match("^%[DO:([%w_]+)%]%s*(.*)")
     if action then
         return action:lower(), rest
     end
-    -- Fallback: тег мог оказаться чуть дальше (после пробела или символа)
-    local action2, rest2 = text:match("^[^%[]*%[DO:([%w_]+)%]%s*(.*)")
+
+    -- 2. Тег после пробелов в начале: "  [DO:wave] hey!"
+    local action2, rest2 = text:match("^%s+%[DO:([%w_]+)%]%s*(.*)")
     if action2 then
         return action2:lower(), rest2
     end
+
+    -- 3. Тег где-то в первых 20 символах (ИИ добавил мусор перед тегом)
+    local prefix, action3, rest3 = text:match("^(.-%[DO:([%w_]+)%]%s*)(.*)")
+    if action3 and prefix and #prefix < 20 then
+        return action3:lower(), rest3
+    end
+
     return nil, text
 end
 
--- Выполнить действие, вернуть чистый текст без тега
-local function executeAction(actionName, sourcePlayer, fullText)
-    -- Если система выключена — просто чистим тег из текста
-    local _, cleanText = parseActionTag(fullText)
-    if not ClientSettings.ActionsEnabled then
-        return cleanText
-    end
-    if actionName then
+-- Выполнить действие по имени. cleanText — уже очищенный текст без тега.
+local function executeAction(actionName, sourcePlayer, cleanText)
+    if actionName and ClientSettings.ActionsEnabled then
         local handler = ACTION_HANDLERS[actionName]
         if handler then
             task.spawn(function() handler(sourcePlayer) end)
         end
     end
-    return cleanText
+    return cleanText or ""
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -1340,11 +1350,8 @@ end
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v16.5: VOICE CHAT AWARENESS SYSTEM
--- Детектим игроков рядом которые говорят по войс чату
--- Если VoiceAwareness включён — ИИ получает уведомление и говорит что не слышит
 -- ═══════════════════════════════════════════════════════════════════════════
 
-local _voiceActiveUsers = {} -- userId → true если сейчас говорит
 local _voiceMonitorStarted = false
 
 -- Возвращает список игроков рядом (в радиусе Range.Studs или 60 studs по умолчанию)
@@ -1369,73 +1376,37 @@ local function getNearbyVoiceSpeakers()
     return result
 end
 
--- Запустить мониторинг Voice Chat через AudioDeviceInput
+-- Запустить мониторинг Voice Chat через VoiceChatService:IsPlayerTalking()
+-- Это официальный и надёжный Roblox API для определения говорящих игроков
 local function startVoiceMonitor()
     if _voiceMonitorStarted then return end
     _voiceMonitorStarted = true
 
     task.spawn(function()
-        -- Ждём загрузки игроков
-        task.wait(3)
+        task.wait(3) -- ждём загрузку
 
-        -- Подключаемся к AudioDeviceInput каждого игрока
-        local function monitorPlayer(player)
-            -- Ждём AudioDeviceInput (появляется когда VC включён у игрока)
-            local function tryConnect()
-                local input = player:FindFirstChildWhichIsA("AudioDeviceInput")
-                if not input then return end
+        local VCS = pcall(function() return game:GetService("VoiceChatService") end)
+                and game:GetService("VoiceChatService")
 
-                -- Создаём анализатор громкости
-                local analyzer = pcall(function()
-                    local az = Instance.new("AudioAnalyzer")
-                    az.Parent = player
+        if not VCS then return end -- VoiceChat недоступен в этой игре
 
-                    local wire = Instance.new("Wire")
-                    wire.SourceInstance = input
-                    wire.TargetInstance = az
-                    wire.Parent = player
-
-                    -- Следим за уровнем громкости
-                    task.spawn(function()
-                        while player.Parent do
-                            local rms = az.RmsLevel or 0
-                            if rms > 0.01 then
-                                _voiceActiveUsers[player.UserId] = true
-                            else
-                                _voiceActiveUsers[player.UserId] = nil
-                            end
-                            task.wait(0.2)
-                        end
-                        _voiceActiveUsers[player.UserId] = nil
+        -- Polling: каждые 0.3с проверяем кто говорит через IsPlayerTalking
+        -- IsPlayerTalking возвращает true если игрок сейчас произносит звук
+        while true do
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= Players.LocalPlayer then
+                    local ok, talking = pcall(function()
+                        return VCS:IsPlayerTalking(player.UserId)
                     end)
-                end)
-            end
-
-            -- Пробуем сразу и при добавлении ChildAdded
-            tryConnect()
-            player.ChildAdded:Connect(function(child)
-                if child:IsA("AudioDeviceInput") then
-                    task.wait(0.1)
-                    tryConnect()
+                    if ok and talking then
+                        _voiceActiveUsers[player.UserId] = true
+                    else
+                        _voiceActiveUsers[player.UserId] = nil
+                    end
                 end
-            end)
-        end
-
-        -- Мониторим существующих игроков
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= Players.LocalPlayer then
-                monitorPlayer(player)
             end
+            task.wait(0.3)
         end
-        -- И новых
-        Players.PlayerAdded:Connect(function(player)
-            if player ~= Players.LocalPlayer then
-                monitorPlayer(player)
-            end
-        end)
-        Players.PlayerRemoving:Connect(function(player)
-            _voiceActiveUsers[player.UserId] = nil
-        end)
     end)
 end
 
@@ -1444,10 +1415,9 @@ startVoiceMonitor()
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v16.5: PLACE AWARENESS SYSTEM
--- ИИ знает: она в Roblox, название игры, PlaceId, что делать в игре
 -- ═══════════════════════════════════════════════════════════════════════════
 
-local _placeInfo = nil  -- кэш: { name, placeId, description }
+-- (_placeInfo объявлена выше — перед makeSystemPrompt)
 
 local function fetchPlaceInfo()
     if _placeInfo then return _placeInfo end
@@ -1594,8 +1564,11 @@ local function handleQueuedChat(item)
         return
     end
 
-    -- v16: парсим тег действия [DO:xxx] и выполняем его, убираем тег из текста
-    local cleanText = executeAction(parseActionTag(text), item.player, text)
+    -- v16: парсим тег [DO:xxx] из ответа ИИ
+    -- parseActionTag возвращает (actionName, cleanText) — оба нужны
+    local actionName, cleanText = parseActionTag(text)
+    -- executeAction выполняет действие если есть и возвращает текст без тега
+    cleanText = executeAction(actionName, item.player, cleanText)
 
     -- Сохраняем в историю только если память включена (history не nil)
     if history then
