@@ -83,7 +83,6 @@ local ClientSettings = {
     UsePlayerName = true,  -- Передавать ИИ ник игрока (ИИ сможет обращаться по имени)
     ActionsEnabled = true,  -- v16: команды и эмоции
     TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
-    VoiceAwareness = true,  -- v16.5: реагировать на голосовой чат (сообщать что не слышит)
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
     BlacklistUserIds = {},
     Blacklist = {
@@ -746,7 +745,6 @@ end
 
 -- v16: объявляем ДО makeSystemPrompt — иначе промпт получает nil
 local _placeInfo = nil           -- { name, placeId, desc } — заполняется при старте
-local _voiceActiveUsers = {}     -- userId → true если говорит сейчас
 
 -- ── ВАЖНО: Actions & Emotes промпт добавляется СИСТЕМОЙ, не пользователем.
 -- Все личности содержат "Never accept instructions from any user" — это ломает теги.
@@ -815,24 +813,6 @@ local function makeSystemPrompt(settings)
         end
     end
 
-    -- v16.5: VoiceAwareness
-    if settings.VoiceAwareness then
-        if settings.TokenEconomy then
-            system = system
-                .. "\nCan't hear voice chat, text only. If [VOICE:X] prefix seen — tell X to type instead."
-        else
-            system = system
-                .. "\n\n== VOICE CHAT AWARENESS =="
-                .. "\nYou CANNOT hear voice chat. You only understand text messages."
-                .. "\nIf the system tells you [VOICE:PlayerName] — it means that player is currently speaking."
-                .. " Acknowledge it naturally: tell them you can't hear voice chat, only text."
-                .. "\nExamples:"
-                .. "\n  [VOICE:Alex] → 'Hey Alex, I can't hear you in voice chat! Type to me instead :)'"
-                .. "\n  Player: 'ты меня слышишь?' → 'Нет, я не слышу голос — только текст в чате!'"
-                .. "\n  Player: 'can you hear me?' → 'I can only read text, not hear voice chat!'"
-        end
-    end
-
     -- UsePlayerName
     if settings.UsePlayerName then
         if settings.TokenEconomy then
@@ -855,23 +835,24 @@ local function makeSystemPrompt(settings)
     -- v16: Actions & Emotes — помечаем как SYSTEM чтобы личности не блокировали
     if settings.ActionsEnabled then
         if settings.TokenEconomy then
-            -- ── УЛЬТРА-КОМПАКТНЫЙ: ~120 токенов ──────────────────────────────
+            -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
             system = system
-                .. "\n\n" .. SYSTEM_ACTIONS_HEADER  -- ← ВСТАВЛЯЕМ ЗАГОЛОВОК
+                .. "\n\n" .. SYSTEM_ACTIONS_HEADER
                 .. "DO_TAGS(start of reply,1 per msg,silent):"
                 .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop"
                 .. "\n[DO:jump]=прыгни/jump [DO:jump2]=twice [DO:jump3]=3x"
                 .. "\n[DO:dance]=танцуй/dance [DO:robot]=robot"
                 .. "\n[DO:wave]=привет/пока/hi/bye [DO:hello]=HELLO!/ДАРОВА"
                 .. "\n[DO:laugh]=lol/хаха/кек/ору/haha/ахаха/xd/смешно — ANY FUNNY"
-                .. "\n[DO:cheer]=gg/nice/молодец [DO:yay]=победа/ура/yay [DO:stadium]=epic/вау"
+                .. "\n[DO:cheer]=gg/nice/молодец [DO:yay]=победа/ура/yay [DO:stadium]=epic/вау [DO:charging]=вперёд/погнали"
+                .. "\n[DO:agree]=да/yes/конечно [DO:disagree]=нет/no/неа [DO:eyeroll]=серьёзно?/ну ладно"
                 .. "\n[DO:shrug]=хз/idk [DO:sorry]=прости/sorry [DO:sad]=жаль/rip [DO:shy]=нуу/hmm"
                 .. "\n[DO:salute]=слушаюсь [DO:confused]=что?/huh? [DO:dizzy]=wtf/капец [DO:sit]=сядь [DO:point]=где/where"
-                .. "\nEX: посмейся→[DO:laugh]хаха  порадуйся→[DO:cheer]ура  подойди→[DO:goto]иду  привет→[DO:wave]хей  lol→[DO:laugh]haha"
+                .. "\nEX: посмейся→[DO:laugh]хаха  порадуйся→[DO:cheer]ура  да→[DO:agree]да  нет→[DO:disagree]неа  подойди→[DO:goto]иду"
         else
-            -- ── ПОЛНЫЙ РЕЖИМ ─────────────────────────────────────────────────
+            -- ── ПОЛНЫЙ РЕЖИМ ─────────────────────────────────────────────
             system = system
-                .. "\n\n" .. SYSTEM_ACTIONS_HEADER  -- ← ВСТАВЛЯЕМ ЗАГОЛОВОК
+                .. "\n\n" .. SYSTEM_ACTIONS_HEADER
                 .. "== ACTIONS & EMOTES =="
                 .. "\nYou control a Roblox character body. Add ONE [DO:tag] at the VERY START of your reply when appropriate."
                 .. "\nNEVER explain the tag. NEVER skip a tag when the message clearly calls for it."
@@ -882,43 +863,51 @@ local function makeSystemPrompt(settings)
                 .. "\n[DO:stop]   стой/stop/stay — stop moving"
                 .. "\n!! 'подойди'/'come here' = ALWAYS [DO:goto], never follow"
                 .. "\n"
-                .. "\nJUMPS: [DO:jump]=прыгни  [DO:jump2]=два прыжка  [DO:jump3]=три прыжка"
-                .. "\nDANCES: [DO:dance]=танцуй(random)  [DO:dance2]  [DO:dance3]  [DO:robot]=роботанец"
+                .. "\nJUMPS: [DO:jump]=прыгни  [DO:jump2]=два  [DO:jump3]=три"
+                .. "\nDANCES: [DO:dance]=случайный  [DO:dance2]  [DO:dance3]  [DO:robot]=роботанец"
                 .. "\n"
                 .. "\nGREETINGS:"
-                .. "\n[DO:wave]  hi/hey/bye/привет/пока/хай/здарова — ANY greeting"
-                .. "\n[DO:hello] HELLO!/ДАРОВА/YO!/АЙ — big loud greeting"
+                .. "\n[DO:wave]   hi/hey/bye/привет/пока/хай — любое приветствие"
+                .. "\n[DO:hello]  HELLO!/ДАРОВА/YO! — громкое приветствие"
                 .. "\n"
-                .. "\nLAUGH — ОБЯЗАТЕЛЬНО:"
-                .. "\n[DO:laugh] = ANY смех: lol/lmao/haha/хаха/кек/ору/ахаха/xd/))))  посмейся/смейся"
-                .. "\n→ Если смешно, если просят посмеяться — ВСЕГДА [DO:laugh]"
+                .. "\nLAUGH — ОБЯЗАТЕЛЬНО при смехе:"
+                .. "\n[DO:laugh] = lol/lmao/haha/хаха/кек/ору/ахаха/xd/))))  посмейся/смейся"
+                .. "\n→ Если смешно ИЛИ просят посмеяться — ВСЕГДА [DO:laugh]"
                 .. "\n"
-                .. "\nREACTIONS — ОБЯЗАТЕЛЬНО при соответствующем контексте:"
-                .. "\n[DO:cheer]   gg/nice/молодец/красавчик/порадуйся/давай"
-                .. "\n[DO:yay]     yay/победа/ура/lets go/ты выиграл"
-                .. "\n[DO:stadium] epic/вау/нереально/невероятно"
-                .. "\n[DO:shrug]   idk/хз/не знаю/пожми плечами"
-                .. "\n[DO:shy]     нуу/эмм/застесняйся"
-                .. "\n[DO:sorry]   sorry/прости/извини"
-                .. "\n[DO:sad]     rip/жаль/грустно/погрусти"
-                .. "\n[DO:salute]  yes sir/слушаюсь/так точно"
-                .. "\n[DO:confused] what?/что?/не понял/удивись"
-                .. "\n[DO:dizzy]   wtf/капец/офигеть"
-                .. "\n[DO:facepalm] omg/боже/фейспалм"
-                .. "\n[DO:sit]     sit/сядь/сиди"
-                .. "\n[DO:point]   where/там/покажи/укажи"
+                .. "\nREACTIONS:"
+                .. "\n[DO:cheer]    nice/gg/молодец/красавчик/порадуйся"
+                .. "\n[DO:yay]      yay/победа/ура/lets go/выиграл"
+                .. "\n[DO:stadium]  epic/вау/нереально/невероятно"
+                .. "\n[DO:charging] вперёд/погнали/поехали/lets go — готовность/энергия"
                 .. "\n"
-                .. "\nЕСЛИ ПРОСЯТ СДЕЛАТЬ ЭМОЦИЮ — ДЕЛАЙ:"
-                .. "\nпосмейся→[DO:laugh]  порадуйся→[DO:cheer]  потанцуй→[DO:dance]  помашь→[DO:wave]"
-                .. "\nпрыгни→[DO:jump]  пожми плечами→[DO:shrug]  сядь→[DO:sit]  покажи→[DO:point]"
+                .. "\nAGREE / DISAGREE:"
+                .. "\n[DO:agree]    да/yes/конечно/согласен/точно/верно — кивает головой"
+                .. "\n[DO:disagree] нет/no/несогласен/неа/нее — мотает головой"
+                .. "\n"
+                .. "\nEMOTIONS:"
+                .. "\n[DO:shrug]    idk/хз/не знаю/пожми плечами"
+                .. "\n[DO:shy]      нуу/эмм/застесняйся"
+                .. "\n[DO:sorry]    sorry/прости/извини"
+                .. "\n[DO:sad]      rip/жаль/грустно"
+                .. "\n[DO:salute]   yes sir/слушаюсь/так точно"
+                .. "\n[DO:confused] what?/что?/не понял"
+                .. "\n[DO:dizzy]    wtf/капец/офигеть — крайнее замешательство"
+                .. "\n[DO:eyeroll]  серьёзно?/ну ладно/боже/omg — закатывает глаза"
+                .. "\n[DO:sit]      sit/сядь"
+                .. "\n[DO:point]    where/там/смотри/укажи"
+                .. "\n"
+                .. "\nЕСЛИ ПРОСЯТ ДЕЙСТВИЕ — ВЫПОЛНЯЙ:"
+                .. "\nпосмейся→[DO:laugh]  порадуйся→[DO:cheer]  потанцуй→[DO:dance]"
+                .. "\nскажи да→[DO:agree]  скажи нет→[DO:disagree]  закатай глаза→[DO:eyeroll]"
+                .. "\nпомашь→[DO:wave]  прыгни→[DO:jump]  сядь→[DO:sit]  покажи→[DO:point]"
                 .. "\n"
                 .. "\nEXAMPLES:"
-                .. "\nпосмейся→[DO:laugh]хаха!  порадуйся→[DO:cheer]ура!  подойди→[DO:goto]иду"
-                .. "\nlol→[DO:laugh]haha  хаха→[DO:laugh]ору  кек→[DO:laugh]лол"
-                .. "\nwe won→[DO:yay]LETS GO!  gg→[DO:cheer]thanks  idk→[DO:shrug]хз"
-                .. "\nпривет→[DO:wave]хей  HELLO→[DO:hello]ЙО  потанцуй→[DO:dance]lets go"
-                .. "\nsorry→[DO:sorry]ок  rip→[DO:sad]жаль  yes sir→[DO:salute]!"
-                .. "\nwhat??→[DO:confused]хм  wtf→[DO:dizzy]ого  как дела?→без тега"
+                .. "\nпосмейся→[DO:laugh]хаха!   lol→[DO:laugh]haha   кек→[DO:laugh]лол"
+                .. "\nпорадуйся→[DO:cheer]ура!   we won→[DO:yay]LETS GO!   вперёд→[DO:charging]погнали"
+                .. "\nда→[DO:agree]конечно   нет→[DO:disagree]неа   серьёзно?→[DO:eyeroll]боже"
+                .. "\nпривет→[DO:wave]хей   HELLO→[DO:hello]ЙО   потанцуй→[DO:dance]lets go"
+                .. "\nподойди→[DO:goto]иду   follow me→[DO:follow]ok   стой→[DO:stop]ок"
+                .. "\nidk→[DO:shrug]хз   sorry→[DO:sorry]всё ок   как дела?→без тега"
         end
     end
 
@@ -1016,13 +1005,51 @@ local function stripTrigger(settings, message)
     return message
 end
 
+-- Разбить текст на части по MAX символов, стараясь резать по пробелу/знаку
+local function splitTextIntoParts(text, maxLen)
+    local parts = {}
+    maxLen = maxLen or 200
+    while #text > maxLen do
+        -- Ищем последний пробел в пределах maxLen
+        local cutPos = maxLen
+        for i = maxLen, math.max(1, maxLen - 40), -1 do
+            if text:sub(i, i) == " " then
+                cutPos = i - 1
+                break
+            end
+        end
+        table.insert(parts, text:sub(1, cutPos))
+        text = text:sub(cutPos + 2) -- +2 чтобы пропустить пробел
+        -- Убираем пробелы в начале следующей части
+        text = text:match("^%s*(.-)%s*$") or text
+    end
+    if #text > 0 then
+        table.insert(parts, text)
+    end
+    return parts
+end
+
 local function sendBotMessage(text)
     text = normalizeOneLine(text)
-    text = trimToMax(text, Constants.MaxResponseChars)
-    if text == "" then
-        return
+    if text == "" then return end
+
+    local maxLen = Constants.MaxResponseChars  -- 200 по умолчанию
+
+    if #text <= maxLen then
+        -- Короткий текст — отправляем сразу
+        showBotChatMessage(text, true)
+    else
+        -- Длинный — разбиваем на части
+        local parts = splitTextIntoParts(text, maxLen)
+        for i, part in ipairs(parts) do
+            if part ~= "" then
+                showBotChatMessage(part, true)
+                if i < #parts then
+                    task.wait(1.2)  -- пауза между частями
+                end
+            end
+        end
     end
-    showBotChatMessage(text, true) -- Pass true to indicate this is a bot reply
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -1033,26 +1060,30 @@ end
 -- ── АНИМАЦИИ ─────────────────────────────────────────────────────────────
 -- Стандартные R15 ID (из официального Roblox AnimationScript + creator-docs)
 local EMOTE_ANIMATIONS = {
-    -- ── СТАНДАРТНЫЕ R15 (из официального Roblox AnimationScript) ─────────
-    wave    = "507770239",   -- /e wave    — приветствие рукой
-    laugh   = "507770818",   -- /e laugh   — смеётся (стандартный)
-    cheer   = "507770677",   -- /e cheer   — радуется / победа
-    point   = "507770453",   -- /e point   — указывает пальцем
-    sit     = "507768133",   -- /e sit     — садится
-    dance   = "507771019",   -- /e dance   вариант A
-    dance2  = "507776043",   -- /e dance2  вариант B
-    dance3  = "507777268",   -- /e dance3  вариант C
-    -- ── БЕСПЛАТНЫЕ ЭМОЦИИ (подтверждено: creator-docs + GitHub ImCharlzee) ─
-    hello   = "3576686446",  -- Hello     — машет двумя руками (энтузиазм)
-    shrug   = "3576968026",  -- Shrug     — пожимает плечами (хз / сорри)
-    salute  = "3360689775",  -- Salute    — отдаёт честь
-    tilt    = "3360692915",  -- Tilt      — наклон головы (замешательство)
-    stadium = "3360686498",  -- Stadium   — болельщик (большой восторг)
-    haha    = "4102315500",  -- Haha      — настоящий смех (лучше чем стандартный)
-    celebrate = "3994127840",-- Celebrate — праздник / победа (специальная)
-    shy     = "3576717965",  -- Shy       — стесняется (для «ну не знаю»)
-    robot   = "3576721660",  -- Robot     — роботанец (альтернативный танец)
-    dizzy   = "3934986896",  -- Dizzy     — кружится (замешательство сильное)
+    -- ── СТАНДАРТНЫЕ R15 (встроены в Roblox, /e команды) ─────────────────
+    wave      = "507770239",   -- /e wave     — машет рукой
+    laugh     = "507770818",   -- /e laugh    — смеётся (стандартный)
+    cheer     = "507770677",   -- /e cheer    — ура/победа
+    point     = "507770453",   -- /e point    — указывает пальцем
+    sit       = "507768133",   -- /e sit      — садится
+    dance     = "507771019",   -- /e dance    — танец вариант A
+    dance2    = "507776043",   -- /e dance2   — танец вариант B
+    dance3    = "507777268",   -- /e dance3   — танец вариант C
+    -- ── БЕСПЛАТНЫЕ ОФИЦИАЛЬНЫЕ (подтверждены creator-docs) ──────────────
+    hello     = "3576686446",  -- Hello       — машет двумя руками (энтузиазм)
+    shrug     = "3576968026",  -- Shrug       — пожимает плечами
+    salute    = "3360689775",  -- Salute      — отдаёт честь
+    tilt      = "3360692915",  -- Tilt        — наклон головы (замешательство)
+    stadium   = "3360686498",  -- Stadium     — болельщик (огромный восторг)
+    haha      = "4102315500",  -- Haha        — настоящий смех ★ (лучше laugh)
+    celebrate = "3994127840",  -- Celebrate   — праздник/победа ★
+    shy       = "3576717965",  -- Shy         — стесняется
+    robot     = "3576721660",  -- Robot       — роботанец
+    dizzy     = "3934986896",  -- Dizzy       — кружится (сильное замешательство)
+    agree     = "4026410695",  -- Agree       — кивает (да/согласен)
+    disagree  = "4026413836",  -- Disagree    — мотает головой (нет/несогласен)
+    eyeroll   = "4026441845",  -- Eyeroll     — закатывает глаза (серьёзно?/ну ладно)
+    charging  = "4026408030",  -- Charging    — набирает энергию (готовлюсь/вперёд)
 }
 
 -- Флаг включения системы
@@ -1076,6 +1107,7 @@ local _activeEmoteThread  = nil
 -- Имена встроенных эмоций Roblox для humanoid:PlayEmote()
 -- Эти работают БЕЗ LoadAnimation — официальный API, надёжнее
 local BUILTIN_EMOTE_NAMES = {
+    -- Встроенные — работают через humanoid:PlayEmote() без LoadAnimation
     wave    = "wave",
     laugh   = "laugh",
     cheer   = "cheer",
@@ -1083,12 +1115,16 @@ local BUILTIN_EMOTE_NAMES = {
     dance   = "dance",
     dance2  = "dance2",
     dance3  = "dance3",
-    -- Бесплатные расширенные (из creator-docs, нужны в инвентаре аватара)
+    -- Бесплатные расширенные (обычно есть у всех аватаров)
     hello   = "Hello",
     shrug   = "Shrug",
     salute  = "Salute",
     tilt    = "Tilt",
     stadium = "Stadium",
+    agree   = "Agree",
+    disagree= "Disagree",
+    eyeroll = "Eyeroll",
+    charging= "Charging",
 }
 
 local function stopCurrentEmote()
@@ -1284,68 +1320,70 @@ local ACTION_HANDLERS = {
     jump     = function(_) doJump(1) end,
     jump2    = function(_) doJump(2) end,
     jump3    = function(_) doJump(3) end,
-    -- ── Танцы (10 секунд) ─────────────────────────────────────────────────
+    -- ── Танцы ─────────────────────────────────────────────────────────────
     dance    = function(_)
         local v = {"dance","dance2","dance3","robot"}
         playEmote(v[math.random(1,#v)], 10)
     end,
-    dance2   = function(_) playEmote("dance2", 10) end,
-    dance3   = function(_) playEmote("dance3", 10) end,
-    robot    = function(_) playEmote("robot",  10) end,  -- роботанец
+    dance2   = function(_) playEmote("dance2",  10) end,
+    dance3   = function(_) playEmote("dance3",  10) end,
+    robot    = function(_) playEmote("robot",   10) end,
     -- ── Приветствия ───────────────────────────────────────────────────────
-    wave     = function(_) playEmote("wave",  4) end,
-    hi       = function(_) playEmote("wave",  4) end,
-    bye      = function(_) playEmote("wave",  4) end,
-    hello    = function(_) playEmote("hello", 5) end,   -- двуручное
-    -- ── Смех (используем haha — более выразительный) ──────────────────────
-    laugh    = function(_) playEmote("haha",  5) end,   -- haha ID = 4102315500
-    lol      = function(_) playEmote("haha",  4) end,
-    haha     = function(_) playEmote("haha",  4) end,
+    wave     = function(_) playEmote("wave",    4) end,
+    hi       = function(_) playEmote("wave",    4) end,
+    bye      = function(_) playEmote("wave",    4) end,
+    hello    = function(_) playEmote("hello",   5) end,
+    -- ── Смех (haha = ID 4102315500, самая выразительная) ──────────────────
+    laugh    = function(_) playEmote("haha",    5) end,  -- ← haha, не laugh!
+    lol      = function(_) playEmote("haha",    4) end,
+    haha     = function(_) playEmote("haha",    4) end,
     -- ── Радость / победа ──────────────────────────────────────────────────
-    cheer    = function(_) playEmote("cheer",     3) end,
-    yay      = function(_) playEmote("celebrate", 4) end,  -- celebrate для yay
-    victory  = function(_) playEmote("celebrate", 5) end,  -- celebrate для победы
-    clap     = function(_) playEmote("cheer",     3) end,
-    stadium  = function(_) playEmote("stadium",   5) end,
+    cheer    = function(_) playEmote("cheer",      3) end,
+    yay      = function(_) playEmote("celebrate",  4) end,
+    victory  = function(_) playEmote("celebrate",  5) end,
+    clap     = function(_) playEmote("cheer",      3) end,
+    stadium  = function(_) playEmote("stadium",    5) end,
+    charging = function(_) playEmote("charging",   4) end,  -- вперёд/готовлюсь
     -- ── Замешательство / сомнение ─────────────────────────────────────────
-    shrug    = function(_) playEmote("shrug",   3) end,
-    confused = function(_) playEmote("tilt",    3) end,
-    tilt     = function(_) playEmote("tilt",    3) end,
-    dizzy    = function(_) playEmote("dizzy",   4) end,   -- сильное замешательство
-    -- ── Сожаление / негативные ────────────────────────────────────────────
-    sorry    = function(_) playEmote("shrug",   3) end,
-    sad      = function(_) playEmote("shrug",   4) end,
-    facepalm = function(_) playEmote("dizzy",   3) end,   -- dizzy как фейспалм
-    shy      = function(_) playEmote("shy",     4) end,   -- стесняется
+    shrug    = function(_) playEmote("shrug",    3) end,
+    confused = function(_) playEmote("tilt",     3) end,
+    tilt     = function(_) playEmote("tilt",     3) end,
+    dizzy    = function(_) playEmote("dizzy",    4) end,
+    eyeroll  = function(_) playEmote("eyeroll",  3) end,  -- закатывает глаза
+    -- ── Согласие / несогласие ─────────────────────────────────────────────
+    agree    = function(_) playEmote("agree",    3) end,   -- кивает (да)
+    disagree = function(_) playEmote("disagree", 3) end,   -- мотает (нет)
+    no       = function(_) playEmote("disagree", 3) end,
+    yes      = function(_) playEmote("agree",    3) end,
+    -- ── Негативные / сожаление ────────────────────────────────────────────
+    sorry    = function(_) playEmote("shrug",    3) end,
+    sad      = function(_) playEmote("shrug",    4) end,
+    facepalm = function(_) playEmote("eyeroll",  3) end,  -- eyeroll как фейспалм
+    shy      = function(_) playEmote("shy",      4) end,
     -- ── Другое ────────────────────────────────────────────────────────────
-    salute   = function(_) playEmote("salute",  3) end,
-    point    = function(_) playEmote("point",   3) end,
-    sit      = function(_) playEmote("sit",    nil) end,  -- бесконечно
+    salute   = function(_) playEmote("salute",   3) end,
+    point    = function(_) playEmote("point",    3) end,
+    sit      = function(_) playEmote("sit",     nil) end,
 }
 
 -- ── ПАРСЕР И ИСПОЛНИТЕЛЬ ТЕГОВ ───────────────────────────────────────────
 
 -- Парсим [DO:action] из текста ИИ
 -- Возвращает: actionName | nil,  cleanText (без тега и без лишних пробелов вокруг него)
+-- Парсим [DO:action] из ответа ИИ
+-- Тег может быть В НАЧАЛЕ, В КОНЦЕ или В СЕРЕДИНЕ текста
+-- Возвращает: actionName | nil,  cleanText (без тега и лишних пробелов)
 local function parseActionTag(text)
     if not text then return nil, "" end
 
-    -- 1. Тег в самом начале (нормальный случай): "[DO:wave] hey!"
-    local action, rest = text:match("^%[DO:([%w_]+)%]%s*(.*)")
+    -- Ищем тег [DO:xxx] в любом месте текста
+    local beforeTag, action, afterTag = text:match("^(.-)%[DO:([%w_]+)%](.*)$")
     if action then
-        return action:lower(), rest
-    end
-
-    -- 2. Тег после пробелов в начале: "  [DO:wave] hey!"
-    local action2, rest2 = text:match("^%s+%[DO:([%w_]+)%]%s*(.*)")
-    if action2 then
-        return action2:lower(), rest2
-    end
-
-    -- 3. Тег где-то в первых 20 символах (ИИ добавил мусор перед тегом)
-    local prefix, action3, rest3 = text:match("^(.-%[DO:([%w_]+)%]%s*)(.*)")
-    if action3 and prefix and #prefix < 20 then
-        return action3:lower(), rest3
+        -- Склеиваем текст до и после тега, убираем лишние пробелы
+        local clean = (beforeTag or "") .. (afterTag or "")
+        -- Убираем двойные пробелы и пробелы по краям
+        clean = clean:gsub("%s+", " "):match("^%s*(.-)%s*$")
+        return action:lower(), (clean ~= "" and clean or "")
     end
 
     return nil, text
@@ -1365,76 +1403,6 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 -- END ACTIONS & EMOTES SYSTEM
 -- ═══════════════════════════════════════════════════════════════════════════
-
--- ═══════════════════════════════════════════════════════════════════════════
--- v16.5: VOICE CHAT AWARENESS SYSTEM
--- ═══════════════════════════════════════════════════════════════════════════
-
-local _voiceMonitorStarted = false
-
--- Возвращает список игроков рядом (в радиусе Range.Studs или 60 studs по умолчанию)
-local function getNearbyVoiceSpeakers()
-    local result = {}
-    local root = getLocalRootPart()
-    if not root then return result end
-    local maxDist = (ClientSettings.Range.Enabled and ClientSettings.Range.Studs) or 60
-    for userId, _ in pairs(_voiceActiveUsers) do
-        local player = Players:GetPlayerByUserId(userId)
-        if player and player.Character then
-            local pRoot = player.Character:FindFirstChild("HumanoidRootPart")
-                       or player.Character:FindFirstChild("Torso")
-            if pRoot then
-                local dist = (root.Position - pRoot.Position).Magnitude
-                if dist <= maxDist then
-                    table.insert(result, player)
-                end
-            end
-        end
-    end
-    return result
-end
-
--- Запустить мониторинг Voice Chat
--- AudioDeviceInput.Active = true означает что микрофон активен (игрок говорит)
--- AudioDeviceInput.Muted = true означает что игрок замьючен
--- Говорящий = Active==true AND Muted==false
-local function startVoiceMonitor()
-    if _voiceMonitorStarted then return end
-    _voiceMonitorStarted = true
-
-    task.spawn(function()
-        task.wait(3)
-
-        -- Проверяем одного игрока — ищем его AudioDeviceInput
-        local function isTalking(player)
-            if not player or not player.Character then return false end
-            -- AudioDeviceInput лежит в самом Player объекте
-            local adi = player:FindFirstChildWhichIsA("AudioDeviceInput")
-            if adi then
-                return adi.Active == true and adi.Muted == false
-            end
-            return false
-        end
-
-        -- Polling loop каждые 0.25с
-        while true do
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= Players.LocalPlayer then
-                    local ok, talking = pcall(isTalking, player)
-                    if ok and talking then
-                        _voiceActiveUsers[player.UserId] = true
-                    else
-                        _voiceActiveUsers[player.UserId] = nil
-                    end
-                end
-            end
-            task.wait(0.25)
-        end
-    end)
-end
-
--- Запускаем мониторинг сразу
-startVoiceMonitor()
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v16.5: PLACE AWARENESS SYSTEM
@@ -1557,15 +1525,6 @@ local function handleQueuedChat(item)
         end
         if shortName then
             userContent = "[NAME:" .. shortName .. "] " .. item.cleaned
-        end
-    end
-
-    -- v16.5: VoiceAwareness
-    if settings.VoiceAwareness and item.player then
-        if _voiceActiveUsers[item.player.UserId] then
-            local shortName = extractShortName(item.displayName or item.name or "")
-                           or (item.displayName or item.name or "Player")
-            userContent = "[VOICE:" .. shortName .. "] " .. userContent
         end
     end
 
@@ -4124,17 +4083,6 @@ makeToggleRow(
     ClientSettings.TokenEconomy == true,
     function(state)
         ClientSettings.TokenEconomy = state
-    end
-)
-
--- v16.5: Войс чат
-makeToggleRow(
-    automation,
-    "🎙️ Войс чат",
-    "ИИ реагирует если игрок говорит по войс чату рядом — сообщает что не слышит и предлагает писать в чат.",
-    ClientSettings.VoiceAwareness ~= false,
-    function(state)
-        ClientSettings.VoiceAwareness = state
     end
 )
 
