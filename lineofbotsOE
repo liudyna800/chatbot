@@ -771,6 +771,39 @@ local function makeSystemPrompt(settings)
             .. "\n- Different names = different players."
     end
 
+    -- v16: Actions & Emotes — ИИ управляет физическими действиями персонажа
+    if settings.ActionsEnabled then
+        system = system
+            .. "\n\n== ACTIONS SYSTEM =="
+            .. "\nYou are embodied as a Roblox character. You can perform physical actions."
+            .. "\nWhen a player's request implies a physical action, START your reply with an action tag."
+            .. "\nAction tags (put at the very beginning of your reply, before any text):"
+            .. "\n  [DO:jump]   — jump (player says: jump, hop, прыгни, подпрыгни)"
+            .. "\n  [DO:follow] — walk toward the player (player says: come here, follow me, иди сюда, подойди)"
+            .. "\n  [DO:stop]   — stop following (player says: stop, stay, стой, не иди)"
+            .. "\n  [DO:dance]  — dance for 10 seconds (player says: dance, танцуй, потанцуй)"
+            .. "\n  [DO:wave]   — wave hello/goodbye (player says: hi, hello, bye, привет, пока)"
+            .. "\n  [DO:laugh]  — laugh (player says something funny, or says: lol, lmao, хаха, смешно)"
+            .. "\n  [DO:cheer]  — cheer (player wins, says: yay, lets go, ура, победа)"
+            .. "\n  [DO:point]  — point (player asks: where, куда, где)"
+            .. "\n  [DO:sit]    — sit down (player says: sit, сядь, посиди)"
+            .. "\nRULES:"
+            .. "\n- ONLY use a tag if the action is clearly implied. Do NOT add tags to normal conversation."
+            .. "\n- The tag MUST be at the very start of your reply: [DO:wave] hey there!"
+            .. "\n- Only ONE tag per reply, never multiple."
+            .. "\n- After the tag, write your normal response text."
+            .. "\n- NEVER explain the tag to the player, just use it silently."
+            .. "\nExamples:"
+            .. "\n  Player: 'come here' -> [DO:follow] ok coming to you!"
+            .. "\n  Player: 'jump!' -> [DO:jump] wheee!"
+            .. "\n  Player: 'dance for me' -> [DO:dance] lets gooo *starts dancing*"
+            .. "\n  Player: 'hi!' -> [DO:wave] hey what's up!"
+            .. "\n  Player: 'lmao that was epic' -> [DO:laugh] haha ikr"
+            .. "\n  Player: 'we won!' -> [DO:cheer] LETS GO!!!"
+            .. "\n  Player: 'stop following me' -> [DO:stop] ok ok I'll stay here"
+            .. "\n  Player: 'what's your favorite game?' -> just answer normally, no tag needed"
+    end
+
     return system
 end
 
@@ -874,6 +907,229 @@ local function sendBotMessage(text)
     showBotChatMessage(text, true) -- Pass true to indicate this is a bot reply
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- v16: ACTIONS & EMOTES SYSTEM
+-- ИИ добавляет теги [DO:action] в начало ответа — скрипт выполняет действие
+-- Формат: [DO:jump], [DO:follow], [DO:stop], [DO:dance], [DO:wave], [DO:laugh],
+--         [DO:cheer], [DO:point], [DO:sit]
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ID стандартных Roblox R15 анимаций (официальный AnimationScript)
+local EMOTE_ANIMATIONS = {
+    wave   = "507770239",   -- /e wave   — рукой машет
+    point  = "507770453",   -- /e point  — указывает пальцем
+    laugh  = "507770818",   -- /e laugh  — смеётся
+    cheer  = "507770677",   -- /e cheer  — радуется
+    dance  = "507771019",   -- /e dance  — танцует (вариант 1)
+    dance2 = "507776043",   -- /e dance2 — танцует (вариант 2)
+    dance3 = "507777268",   -- /e dance3 — танцует (вариант 3)
+    sit    = "507768133",   -- /e sit    — садится
+}
+
+-- Флаг включения системы
+ClientSettings.ActionsEnabled = ClientSettings.ActionsEnabled ~= false
+
+-- Текущий активный Humanoid
+local function getLocalHumanoid()
+    local char = Players.LocalPlayer.Character
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function getLocalRootPart()
+    local char = Players.LocalPlayer.Character
+    return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+end
+
+-- Активный анимационный трек (чтобы остановить предыдущий)
+local _activeEmoteTrack = nil
+local _activeEmoteThread = nil
+
+local function stopCurrentEmote()
+    if _activeEmoteThread then
+        task.cancel(_activeEmoteThread)
+        _activeEmoteThread = nil
+    end
+    if _activeEmoteTrack then
+        pcall(function() _activeEmoteTrack:Stop() end)
+        _activeEmoteTrack = nil
+    end
+end
+
+-- Воспроизвести анимацию-эмоцию по имени, опционально N секунд
+local function playEmote(emoteName, duration)
+    if not ClientSettings.ActionsEnabled then return end
+    local animId = EMOTE_ANIMATIONS[emoteName]
+    if not animId then return end
+
+    local humanoid = getLocalHumanoid()
+    if not humanoid then return end
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+    if not animator then return end
+
+    stopCurrentEmote()
+
+    pcall(function()
+        local anim = Instance.new("Animation")
+        anim.AnimationId = "rbxassetid://" .. animId
+
+        local track = animator:LoadAnimation(anim)
+        track.Priority = Enum.AnimationPriority.Action
+        track:Play()
+        _activeEmoteTrack = track
+
+        if duration then
+            _activeEmoteThread = task.delay(duration, function()
+                pcall(function() track:Stop() end)
+                _activeEmoteTrack = nil
+                _activeEmoteThread = nil
+            end)
+        end
+    end)
+end
+
+-- Следование — PathfindingService + fallback на MoveTo
+local _followConnection = nil
+local _isFollowing = false
+local _followTarget = nil
+
+local function stopFollowing()
+    _isFollowing = false
+    _followTarget = nil
+    if _followConnection then
+        _followConnection:Disconnect()
+        _followConnection = nil
+    end
+end
+
+local function startFollowingPlayer(targetPlayer)
+    if not ClientSettings.ActionsEnabled then return end
+    stopFollowing()
+
+    _isFollowing = true
+    _followTarget = targetPlayer
+
+    local PathfindingService = game:GetService("PathfindingService")
+
+    local function followStep()
+        if not _isFollowing then return end
+        local humanoid = getLocalHumanoid()
+        local root = getLocalRootPart()
+        if not humanoid or not root then return end
+
+        local char = targetPlayer and targetPlayer.Character
+        local targetRoot = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+        if not targetRoot then return end
+
+        local dist = (root.Position - targetRoot.Position).Magnitude
+        if dist < 5 then return end -- уже рядом
+
+        -- Пробуем Pathfinding
+        local ok = pcall(function()
+            local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5 })
+            path:ComputeAsync(root.Position, targetRoot.Position)
+            if path.Status == Enum.PathStatus.Success then
+                local waypoints = path:GetWaypoints()
+                for _, wp in ipairs(waypoints) do
+                    if not _isFollowing then break end
+                    if wp.Action == Enum.PathWaypointAction.Jump then
+                        humanoid.Jump = true
+                    end
+                    humanoid:MoveTo(wp.Position)
+                    humanoid.MoveToFinished:Wait()
+                end
+            else
+                -- Fallback: прямо к цели
+                humanoid:MoveTo(targetRoot.Position)
+            end
+        end)
+        if not ok then
+            -- Fallback без pcall
+            pcall(function()
+                humanoid:MoveTo(targetRoot.Position)
+            end)
+        end
+    end
+
+    _followConnection = game:GetService("RunService").Heartbeat:Connect(function()
+        if not _isFollowing then
+            stopFollowing()
+            return
+        end
+        -- Шагаем каждые 0.5с через debounce
+    end)
+
+    -- Запускаем цикл следования в отдельном потоке
+    task.spawn(function()
+        while _isFollowing do
+            followStep()
+            task.wait(0.5)
+        end
+    end)
+end
+
+-- Прыжок
+local function doJump()
+    if not ClientSettings.ActionsEnabled then return end
+    local humanoid = getLocalHumanoid()
+    if humanoid then
+        humanoid.Jump = true
+    end
+end
+
+-- Таблица обработчиков действий
+local ACTION_HANDLERS = {
+    jump   = function(_player) doJump() end,
+    follow = function(player)
+        if player then
+            startFollowingPlayer(player)
+        end
+    end,
+    stop   = function(_player) stopFollowing() end,
+    dance  = function(_player)
+        local variants = {"dance", "dance2", "dance3"}
+        playEmote(variants[math.random(1, #variants)], 10)
+    end,
+    wave   = function(_player) playEmote("wave", 4) end,
+    laugh  = function(_player) playEmote("laugh", 4) end,
+    cheer  = function(_player) playEmote("cheer", 3) end,
+    point  = function(_player) playEmote("point", 3) end,
+    sit    = function(_player) playEmote("sit", nil) end, -- бесконечно
+}
+
+-- Парсим тег [DO:action] из начала ответа ИИ
+-- Возвращает: actionName (string или nil), cleanText (string без тега)
+local function parseActionTag(text)
+    if not text then return nil, text end
+    -- Ищем [DO:xxx] в начале строки (с возможным пробелом после)
+    local action, rest = text:match("^%[DO:([%w_]+)%]%s*(.*)")
+    if action then
+        return action:lower(), rest
+    end
+    return nil, text
+end
+
+-- Выполнить действие + вернуть чистый текст
+local function executeAction(actionName, sourcePlayer, fullText)
+    if not actionName or not ClientSettings.ActionsEnabled then
+        return fullText
+    end
+    local action, cleanText = parseActionTag(fullText)
+    if action then
+        local handler = ACTION_HANDLERS[action]
+        if handler then
+            task.spawn(function()
+                handler(sourcePlayer)
+            end)
+        end
+        return cleanText
+    end
+    return fullText
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- END ACTIONS & EMOTES SYSTEM
+-- ═══════════════════════════════════════════════════════════════════════════
+
 -- Chat History Storage
 local ChatHistory = {}
 local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
@@ -962,12 +1218,15 @@ local function handleQueuedChat(item)
         return
     end
 
+    -- v16: парсим тег действия [DO:xxx] и выполняем его, убираем тег из текста
+    local cleanText = executeAction(parseActionTag(text), item.player, text)
+
     -- Сохраняем в историю только если память включена (history не nil)
     if history then
-        appendHistory(history, userContent, text)
+        appendHistory(history, userContent, cleanText)
     end
 
-    sendBotMessage(text)
+    sendBotMessage(cleanText)
 end
 
 local function runChatQueue(userId)
@@ -1146,6 +1405,7 @@ local function processChatMessage(player, rawMessage)
         displayName = player.DisplayName,
         name        = player.Name,
         cleaned     = cleaned,
+        player      = player,  -- v16: нужен для команды [DO:follow]
     }, maxQueue)
     if queued then
         runChatQueue(queueKey)
@@ -2415,13 +2675,13 @@ local sidebarTitle = makeTextLabel(sidebar, "LineOfBots", 19, "bold")
 sidebarTitle.Position = UDim2.new(0, 16, 0, 16)
 sidebarTitle.Size = UDim2.new(1, -16, 0, 22)
 
-local sidebarSubtitle = makeTextLabel(sidebar, "v15 Shell", 11, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebar, "v16 Shell", 11, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 16, 0, 40)
 sidebarSubtitle.Size = UDim2.new(1, -16, 0, 14)
 
 sidebarTitle.Text = "LineOfBots"
-sidebarSubtitle.Text = "v15 Shell"
+sidebarSubtitle.Text = "v16 Shell"
 
 -- Sidebar Title Animation Removed to keep static text
 
@@ -3460,6 +3720,21 @@ makeToggleRow(
     end
 )
 
+-- v16: Команды и эмоции
+makeToggleRow(
+    automation,
+    "🎭 Команды и эмоции",
+    "ИИ сам решает когда прыгнуть, подойти, потанцевать или помахать — по просьбе игрока.",
+    ClientSettings.ActionsEnabled ~= false,
+    function(state)
+        ClientSettings.ActionsEnabled = state
+        if not state then
+            stopFollowing()
+            stopCurrentEmote()
+        end
+    end
+)
+
 -- Официальный список моделей Groq (console.groq.com/docs/models, февраль 2026)
 -- Production Models — стабильные, для реального использования
 -- Preview Models — могут быть отключены без предупреждения
@@ -3474,6 +3749,9 @@ local groqModels = {
     "meta-llama/llama-4-maverick-17b-128e-instruct", -- Llama 4 Maverick | топ reasoning
     "moonshotai/kimi-k2-instruct-0905",  -- Kimi K2            | 200 t/s  | умный диалог
     "qwen/qwen3-32b",                    -- Qwen3 32B          | 400 t/s  | хорош в логике
+    -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
+    "compound-beta",                     -- Compound           | веб-поиск + код + браузер
+    "compound-beta-mini",                -- Compound Mini      | веб-поиск | быстрее
 }
 
 --[[ 
