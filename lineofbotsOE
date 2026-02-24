@@ -83,6 +83,8 @@ local ClientSettings = {
     UsePlayerName = true,  -- Передавать ИИ ник игрока (ИИ сможет обращаться по имени)
     ActionsEnabled = true,  -- v16: команды и эмоции
     TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
+    VoiceAwareness = true,  -- v16.5: реагировать на голосовой чат (сообщать что не слышит)
+    PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
     BlacklistUserIds = {},
     Blacklist = {
         Permanent = {},
@@ -754,6 +756,40 @@ local function makeSystemPrompt(settings)
         .. " and suggest they check TikTok/YouTube/Google directly."
         .. " Never make up or guess trending content."
 
+    -- v16.5: PlaceAwareness — ИИ знает что она в Roblox и в какой игре
+    if settings.PlaceAwareness then
+        local info = _placeInfo or { name = "a Roblox game", placeId = game.PlaceId, desc = "" }
+        system = system
+            .. "\n\n== SELF-AWARENESS =="
+            .. "\nYou are an AI character living inside a Roblox game."
+            .. "\nCurrent game: \"" .. tostring(info.name) .. "\" (PlaceId: " .. tostring(info.placeId) .. ")"
+        if info.desc and info.desc ~= "" then
+            system = system
+                .. "\nGame description: " .. tostring(info.desc)
+        end
+        system = system
+            .. "\nYou know you are in Roblox. You experience this game world as your reality."
+            .. "\nWhen players ask 'what game is this?' or 'где мы?' or 'что тут делать?' — answer based on the game name and description above."
+            .. "\nSpeak naturally about the game as if you live in it, not as an outsider."
+            .. "\nIf you don't know specific game rules/objectives, say honestly 'I'm not sure about all the rules here, but this is " .. tostring(info.name) .. "'"
+    end
+
+    -- v16.5: VoiceAwareness — ИИ реагирует если кто-то говорит по войс чату рядом
+    if settings.VoiceAwareness then
+        system = system
+            .. "\n\n== VOICE CHAT AWARENESS =="
+            .. "\nYou CANNOT hear voice chat. You only understand text messages."
+            .. "\nIf a player's message is very short (1-3 words or just symbols) AND seems like they might be speaking"
+            .. " (e.g., they say something that seems like a continuation of speech, or mention voice/mic/говори/слышишь),"
+            .. " respond that you can only read text chat, not hear voice."
+            .. "\nIf the system tells you [VOICE:PlayerName] — it means that player is currently speaking."
+            .. " Acknowledge it naturally: tell them you can't hear voice chat, only text."
+            .. "\nExamples:"
+            .. "\n  [VOICE:Alex] → 'Hey Alex, I can't hear you in voice chat! Type to me instead :)'"
+            .. "\n  Player: 'ты меня слышишь?' → 'Нет, я не слышу голос — только текст в чате!'"
+            .. "\n  Player: 'can you hear me?' → 'I can only read text, not hear voice chat!'"
+    end
+
     -- UsePlayerName: инструкция как естественно использовать имя игрока
     if settings.UsePlayerName then
         system = system
@@ -1326,6 +1362,151 @@ end
 -- END ACTIONS & EMOTES SYSTEM
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- v16.5: VOICE CHAT AWARENESS SYSTEM
+-- Детектим игроков рядом которые говорят по войс чату
+-- Если VoiceAwareness включён — ИИ получает уведомление и говорит что не слышит
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local _voiceActiveUsers = {} -- userId → true если сейчас говорит
+local _voiceMonitorStarted = false
+
+-- Возвращает список игроков рядом (в радиусе Range.Studs или 60 studs по умолчанию)
+local function getNearbyVoiceSpeakers()
+    local result = {}
+    local root = getLocalRootPart()
+    if not root then return result end
+    local maxDist = (ClientSettings.Range.Enabled and ClientSettings.Range.Studs) or 60
+    for userId, _ in pairs(_voiceActiveUsers) do
+        local player = Players:GetPlayerByUserId(userId)
+        if player and player.Character then
+            local pRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                       or player.Character:FindFirstChild("Torso")
+            if pRoot then
+                local dist = (root.Position - pRoot.Position).Magnitude
+                if dist <= maxDist then
+                    table.insert(result, player)
+                end
+            end
+        end
+    end
+    return result
+end
+
+-- Запустить мониторинг Voice Chat через AudioDeviceInput
+local function startVoiceMonitor()
+    if _voiceMonitorStarted then return end
+    _voiceMonitorStarted = true
+
+    task.spawn(function()
+        -- Ждём загрузки игроков
+        task.wait(3)
+
+        -- Подключаемся к AudioDeviceInput каждого игрока
+        local function monitorPlayer(player)
+            -- Ждём AudioDeviceInput (появляется когда VC включён у игрока)
+            local function tryConnect()
+                local input = player:FindFirstChildWhichIsA("AudioDeviceInput")
+                if not input then return end
+
+                -- Создаём анализатор громкости
+                local analyzer = pcall(function()
+                    local az = Instance.new("AudioAnalyzer")
+                    az.Parent = player
+
+                    local wire = Instance.new("Wire")
+                    wire.SourceInstance = input
+                    wire.TargetInstance = az
+                    wire.Parent = player
+
+                    -- Следим за уровнем громкости
+                    task.spawn(function()
+                        while player.Parent do
+                            local rms = az.RmsLevel or 0
+                            if rms > 0.01 then
+                                _voiceActiveUsers[player.UserId] = true
+                            else
+                                _voiceActiveUsers[player.UserId] = nil
+                            end
+                            task.wait(0.2)
+                        end
+                        _voiceActiveUsers[player.UserId] = nil
+                    end)
+                end)
+            end
+
+            -- Пробуем сразу и при добавлении ChildAdded
+            tryConnect()
+            player.ChildAdded:Connect(function(child)
+                if child:IsA("AudioDeviceInput") then
+                    task.wait(0.1)
+                    tryConnect()
+                end
+            end)
+        end
+
+        -- Мониторим существующих игроков
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= Players.LocalPlayer then
+                monitorPlayer(player)
+            end
+        end
+        -- И новых
+        Players.PlayerAdded:Connect(function(player)
+            if player ~= Players.LocalPlayer then
+                monitorPlayer(player)
+            end
+        end)
+        Players.PlayerRemoving:Connect(function(player)
+            _voiceActiveUsers[player.UserId] = nil
+        end)
+    end)
+end
+
+-- Запускаем мониторинг сразу
+startVoiceMonitor()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- v16.5: PLACE AWARENESS SYSTEM
+-- ИИ знает: она в Roblox, название игры, PlaceId, что делать в игре
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local _placeInfo = nil  -- кэш: { name, placeId, description }
+
+local function fetchPlaceInfo()
+    if _placeInfo then return _placeInfo end
+
+    local placeId = game.PlaceId
+    local placeName = "Unknown Game"
+    local placeDesc = ""
+
+    -- Пробуем получить название через MarketplaceService
+    pcall(function()
+        local info = game:GetService("MarketplaceService"):GetProductInfo(placeId)
+        if info then
+            placeName = tostring(info.Name or "Unknown Game")
+            placeDesc = tostring(info.Description or "")
+            -- Обрезаем описание до 300 символов чтобы не засорять промпт
+            if #placeDesc > 300 then
+                placeDesc = placeDesc:sub(1, 300) .. "..."
+            end
+        end
+    end)
+
+    _placeInfo = {
+        name    = placeName,
+        placeId = placeId,
+        desc    = placeDesc,
+    }
+    return _placeInfo
+end
+
+-- Предзагрузка при старте
+task.spawn(function()
+    task.wait(2)
+    fetchPlaceInfo()
+end)
+
 -- Chat History Storage
 local ChatHistory = {}
 local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
@@ -1390,6 +1571,16 @@ local function handleQueuedChat(item)
         local shortName = extractShortName(rawNick)
         if shortName then
             userContent = "[NAME:" .. shortName .. "] " .. item.cleaned
+        end
+    end
+
+    -- v16.5: VoiceAwareness — если игрок сейчас говорит по войс чату, добавляем тег
+    if settings.VoiceAwareness and item.player then
+        if _voiceActiveUsers[item.player.UserId] then
+            local shortName = extractShortName(item.displayName or item.name or "")
+                           or (item.displayName or item.name or "Player")
+            -- Вставляем тег перед сообщением
+            userContent = "[VOICE:" .. shortName .. "] " .. userContent
         end
     end
 
@@ -2871,13 +3062,13 @@ local sidebarTitle = makeTextLabel(sidebar, "LineOfBots", 19, "bold")
 sidebarTitle.Position = UDim2.new(0, 16, 0, 16)
 sidebarTitle.Size = UDim2.new(1, -16, 0, 22)
 
-local sidebarSubtitle = makeTextLabel(sidebar, "v16 Shell", 11, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebar, "v16.5 Shell", 11, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 16, 0, 40)
 sidebarSubtitle.Size = UDim2.new(1, -16, 0, 14)
 
 sidebarTitle.Text = "LineOfBots"
-sidebarSubtitle.Text = "v16 Shell"
+sidebarSubtitle.Text = "v16.5 Shell"
 
 -- Sidebar Title Animation Removed to keep static text
 
@@ -3939,6 +4130,29 @@ makeToggleRow(
     ClientSettings.TokenEconomy == true,
     function(state)
         ClientSettings.TokenEconomy = state
+    end
+)
+
+-- v16.5: Войс чат
+makeToggleRow(
+    automation,
+    "🎙️ Войс чат",
+    "ИИ реагирует если игрок говорит по войс чату рядом — сообщает что не слышит и предлагает писать в чат.",
+    ClientSettings.VoiceAwareness ~= false,
+    function(state)
+        ClientSettings.VoiceAwareness = state
+    end
+)
+
+-- v16.5: Сознание места
+makeToggleRow(
+    automation,
+    "🌍 Сознание места",
+    "ИИ знает что она в Roblox, знает название игры и может рассказать что тут делать.",
+    ClientSettings.PlaceAwareness ~= false,
+    function(state)
+        ClientSettings.PlaceAwareness = state
+        _placeInfo = nil  -- сбрасываем кэш чтобы перечитать при следующем запросе
     end
 )
 
