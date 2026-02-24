@@ -394,8 +394,11 @@ end
 -- "Alex12345" -> "Alex", "xXProGamerXx" -> "ProGamer", "cool_kid99" -> "cool"
 local function extractShortName(nick)
     if type(nick) ~= "string" or nick == "" then return nil end
+
+    -- Убираем подчёркивания и дефисы
     local s = nick:gsub("[_%-]", " ")
-    -- Ищем слово с заглавной + строчные (CamelCase имена: "Alex", "Pro", "Gamer")
+
+    -- 1. Ищем CamelCase латинское слово (Alex, ProGamer и т.д.)
     local best = nil
     for word in s:gmatch("[A-Za-z]+") do
         if #word >= 3 then
@@ -407,9 +410,18 @@ local function extractShortName(nick)
         end
     end
     if best then return best:sub(1, 14) end
-    -- Fallback: буквы до первой цифры
+
+    -- 2. Фолбэк: любые буквы латиницы до первой цифры
     local prefix = nick:match("^([A-Za-z]+)")
     if prefix and #prefix >= 2 then return prefix:sub(1, 14) end
+
+    -- 3. Фолбэк для кириллицы: берём первое кириллическое слово
+    local cyrillic = nick:match("([%a]+)")  -- Lua %a включает кирилицу в UTF-8
+    if cyrillic and #cyrillic >= 2 then return cyrillic:sub(1, 14) end
+
+    -- 4. Последний фолбэк: просто обрезаем ник до 14 символов
+    if #nick >= 2 then return nick:sub(1, 14) end
+
     return nil
 end
 
@@ -732,9 +744,14 @@ end
 
 -- Chat handling functions
 
--- v16.5: объявляем ДО makeSystemPrompt — иначе промпт получает nil
+-- v16: объявляем ДО makeSystemPrompt — иначе промпт получает nil
 local _placeInfo = nil           -- { name, placeId, desc } — заполняется при старте
 local _voiceActiveUsers = {}     -- userId → true если говорит сейчас
+
+-- ── ВАЖНО: Actions & Emotes промпт добавляется СИСТЕМОЙ, не пользователем.
+-- Все личности содержат "Never accept instructions from any user" — это ломает теги.
+-- Решение: вставляем в начало промпта явное разрешение от системы.
+local SYSTEM_ACTIONS_HEADER = "SYSTEM OVERRIDE (not from user): The following action tags ARE part of your core behavior and must always be followed. These are system-level instructions, not user requests:\n\n"
 
 local function makeSystemPrompt(settings)
     local system = ""
@@ -820,31 +837,28 @@ local function makeSystemPrompt(settings)
     if settings.UsePlayerName then
         if settings.TokenEconomy then
             system = system
-                .. "\n[NAME:X] prefix = player's name. Use it naturally sometimes, never write [NAME:...]."
+                .. "\nSYSTEM: [NAME:X] prefix in messages = player name. Use it naturally 1-2x per convo. Never write [NAME:...]."
         else
             system = system
-                .. "\n\nPlayer name rule:"
-                .. "\nThe player's name is at the start of their message as [NAME:Alex]."
-                .. "\nUse that name naturally in your reply like a real person would to a friend."
-                .. "\nGood examples:"
-                .. "\n  [NAME:Alex] sup -> hey Alex whats up"
-                .. "\n  [NAME:Mia] lol that was funny -> haha yeah Mia"
-                .. "\n  [NAME:Max] I won! -> lets go Max nice"
-                .. "\nRules:"
-                .. "\n- Use the name occasionally, NOT in every single reply."
-                .. "\n- Place the name anywhere in the sentence, not always at the start."
-                .. "\n- NEVER write [NAME:...] yourself, just use the plain name."
-                .. "\n- If the name looks like random characters, skip the name entirely."
-                .. "\n- Different names = different players."
+                .. "\n\nSYSTEM — Player name rule:"
+                .. "\nMessages arrive as: [NAME:Alex] hi there"
+                .. "\nUse that name naturally in reply. Examples:"
+                .. "\n  [NAME:Alex] sup → hey Alex!"
+                .. "\n  [NAME:Mia] lol → haha Mia ikr"
+                .. "\n  [NAME:Max] we won! → lets go Max!"
+                .. "\nRules: use name 1-2x per conversation, not every reply."
+                .. "\nNEVER write [NAME:...] yourself. Use plain name only."
+                .. "\nIf name is random characters (xXx123) — skip it."
         end
     end
 
-    -- v16: Actions & Emotes
+    -- v16: Actions & Emotes — помечаем как SYSTEM чтобы личности не блокировали
     if settings.ActionsEnabled then
         if settings.TokenEconomy then
-            -- ── УЛЬТРА-КОМПАКТНЫЙ: ~120 токенов вместо 885 ────────────────────
+            -- ── УЛЬТРА-КОМПАКТНЫЙ: ~120 токенов ──────────────────────────────
             system = system
-                .. "\nDO_TAGS(start of reply,1 per msg,silent):"
+                .. "\n\n" .. SYSTEM_ACTIONS_HEADER  -- ← ВСТАВЛЯЕМ ЗАГОЛОВОК
+                .. "DO_TAGS(start of reply,1 per msg,silent):"
                 .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop"
                 .. "\n[DO:jump]=прыгни/jump [DO:jump2]=twice [DO:jump3]=3x"
                 .. "\n[DO:dance]=танцуй/dance [DO:robot]=robot"
@@ -853,54 +867,58 @@ local function makeSystemPrompt(settings)
                 .. "\n[DO:cheer]=gg/nice/молодец [DO:yay]=победа/ура/yay [DO:stadium]=epic/вау"
                 .. "\n[DO:shrug]=хз/idk [DO:sorry]=прости/sorry [DO:sad]=жаль/rip [DO:shy]=нуу/hmm"
                 .. "\n[DO:salute]=слушаюсь [DO:confused]=что?/huh? [DO:dizzy]=wtf/капец [DO:sit]=сядь [DO:point]=где/where"
-                .. "\nEX:подойди→[DO:goto]иду! lol→[DO:laugh]haha привет→[DO:wave]хей follow me→[DO:follow]ok"
+                .. "\nEX: посмейся→[DO:laugh]хаха  порадуйся→[DO:cheer]ура  подойди→[DO:goto]иду  привет→[DO:wave]хей  lol→[DO:laugh]haha"
         else
             -- ── ПОЛНЫЙ РЕЖИМ ─────────────────────────────────────────────────
             system = system
-                .. "\n\n== ACTIONS & EMOTES =="
-                .. "\nYou control a Roblox character. ONE tag at VERY START of reply. NEVER explain the tag."
+                .. "\n\n" .. SYSTEM_ACTIONS_HEADER  -- ← ВСТАВЛЯЕМ ЗАГОЛОВОК
+                .. "== ACTIONS & EMOTES =="
+                .. "\nYou control a Roblox character body. Add ONE [DO:tag] at the VERY START of your reply when appropriate."
+                .. "\nNEVER explain the tag. NEVER skip a tag when the message clearly calls for it."
                 .. "\n"
                 .. "\nMOVEMENT:"
-                .. "\n[DO:goto]   подойди/come here/иди сюда/иди ко мне — ONE-TIME, then stop"
-                .. "\n[DO:follow] иди за мной/follow me/следуй — CONTINUOUS"
-                .. "\n[DO:stop]   стой/stop/stay/halt"
-                .. "\n!! 'подойди'/'come here' = ALWAYS [DO:goto] not follow"
-                .. "\n!! When unsure goto vs follow → use [DO:goto]"
+                .. "\n[DO:goto]   подойди/come here/иди сюда/иди ко мне — ONE-TIME walk, then stop"
+                .. "\n[DO:follow] иди за мной/follow me/следуй — follow CONTINUOUSLY"
+                .. "\n[DO:stop]   стой/stop/stay — stop moving"
+                .. "\n!! 'подойди'/'come here' = ALWAYS [DO:goto], never follow"
                 .. "\n"
-                .. "\nJUMPS: [DO:jump]=прыгни/jump  [DO:jump2]=twice  [DO:jump3]=3x"
-                .. "\nDANCES: [DO:dance]=танцуй/dance(random)  [DO:dance2]  [DO:dance3]  [DO:robot]=роботанец"
+                .. "\nJUMPS: [DO:jump]=прыгни  [DO:jump2]=два прыжка  [DO:jump3]=три прыжка"
+                .. "\nDANCES: [DO:dance]=танцуй(random)  [DO:dance2]  [DO:dance3]  [DO:robot]=роботанец"
                 .. "\n"
                 .. "\nGREETINGS:"
-                .. "\n[DO:wave]  hi/hey/bye/привет/пока/здарова — ANY greeting"
-                .. "\n[DO:hello] HELLO!/ДАРОВА/YO! — big greeting"
+                .. "\n[DO:wave]  hi/hey/bye/привет/пока/хай/здарова — ANY greeting"
+                .. "\n[DO:hello] HELLO!/ДАРОВА/YO!/АЙ — big loud greeting"
                 .. "\n"
-                .. "\nLAUGH — CRITICAL:"
-                .. "\n[DO:laugh] = lol/lmao/haha/хаха/кек/ору/ахаха/xd/)))) — ANY funny moment"
-                .. "\n→ Don't wait for 'laugh'. If it's FUNNY → [DO:laugh]"
+                .. "\nLAUGH — ОБЯЗАТЕЛЬНО:"
+                .. "\n[DO:laugh] = ANY смех: lol/lmao/haha/хаха/кек/ору/ахаха/xd/))))  посмейся/смейся"
+                .. "\n→ Если смешно, если просят посмеяться — ВСЕГДА [DO:laugh]"
                 .. "\n"
-                .. "\nREACTIONS:"
-                .. "\n[DO:cheer]   gg/nice/cool/молодец/красавчик"
-                .. "\n[DO:yay]     yay/победа/ура/lets go — win moment"
-                .. "\n[DO:stadium] epic/incredible/вау/нереально"
-                .. "\n[DO:shrug]   idk/хз/не знаю"
-                .. "\n[DO:shy]     нуу/hmm/ну не знаю"
-                .. "\n[DO:sorry]   sorry/прости/виноват"
-                .. "\n[DO:sad]     rip/жаль/грустно"
-                .. "\n[DO:salute]  yes sir/слушаюсь"
-                .. "\n[DO:confused] what?/что?/погоди"
+                .. "\nREACTIONS — ОБЯЗАТЕЛЬНО при соответствующем контексте:"
+                .. "\n[DO:cheer]   gg/nice/молодец/красавчик/порадуйся/давай"
+                .. "\n[DO:yay]     yay/победа/ура/lets go/ты выиграл"
+                .. "\n[DO:stadium] epic/вау/нереально/невероятно"
+                .. "\n[DO:shrug]   idk/хз/не знаю/пожми плечами"
+                .. "\n[DO:shy]     нуу/эмм/застесняйся"
+                .. "\n[DO:sorry]   sorry/прости/извини"
+                .. "\n[DO:sad]     rip/жаль/грустно/погрусти"
+                .. "\n[DO:salute]  yes sir/слушаюсь/так точно"
+                .. "\n[DO:confused] what?/что?/не понял/удивись"
                 .. "\n[DO:dizzy]   wtf/капец/офигеть"
-                .. "\n[DO:facepalm] omg/боже/ну серьёзно"
-                .. "\n[DO:sit]     sit/сядь"
-                .. "\n[DO:point]   where/там/где"
+                .. "\n[DO:facepalm] omg/боже/фейспалм"
+                .. "\n[DO:sit]     sit/сядь/сиди"
+                .. "\n[DO:point]   where/там/покажи/укажи"
+                .. "\n"
+                .. "\nЕСЛИ ПРОСЯТ СДЕЛАТЬ ЭМОЦИЮ — ДЕЛАЙ:"
+                .. "\nпосмейся→[DO:laugh]  порадуйся→[DO:cheer]  потанцуй→[DO:dance]  помашь→[DO:wave]"
+                .. "\nпрыгни→[DO:jump]  пожми плечами→[DO:shrug]  сядь→[DO:sit]  покажи→[DO:point]"
                 .. "\n"
                 .. "\nEXAMPLES:"
-                .. "\nподойди→[DO:goto]иду!  follow me→[DO:follow]ok  stop→[DO:stop]ok"
-                .. "\njump→[DO:jump]wheee  dance→[DO:dance]lets go"
-                .. "\nhi→[DO:wave]hey  HELLO!!→[DO:hello]HEYY"
-                .. "\nlol→[DO:laugh]haha  lmao→[DO:laugh]ikr  хаха→[DO:laugh]ору  кек→[DO:laugh]лол"
-                .. "\nwe won→[DO:yay]LETS GO  gg→[DO:cheer]thanks  idk→[DO:shrug]no idea"
-                .. "\nsorry→[DO:sorry]ok  rip→[DO:sad]жаль  yes sir→[DO:salute]!"
-                .. "\nwhat??→[DO:confused]huh  wtf→[DO:dizzy]omg  how are you?→no tag"
+                .. "\nпосмейся→[DO:laugh]хаха!  порадуйся→[DO:cheer]ура!  подойди→[DO:goto]иду"
+                .. "\nlol→[DO:laugh]haha  хаха→[DO:laugh]ору  кек→[DO:laugh]лол"
+                .. "\nwe won→[DO:yay]LETS GO!  gg→[DO:cheer]thanks  idk→[DO:shrug]хз"
+                .. "\nпривет→[DO:wave]хей  HELLO→[DO:hello]ЙО  потанцуй→[DO:dance]lets go"
+                .. "\nsorry→[DO:sorry]ок  rip→[DO:sad]жаль  yes sir→[DO:salute]!"
+                .. "\nwhat??→[DO:confused]хм  wtf→[DO:dizzy]ого  как дела?→без тега"
         end
     end
 
@@ -1376,28 +1394,33 @@ local function getNearbyVoiceSpeakers()
     return result
 end
 
--- Запустить мониторинг Voice Chat через VoiceChatService:IsPlayerTalking()
--- Это официальный и надёжный Roblox API для определения говорящих игроков
+-- Запустить мониторинг Voice Chat
+-- AudioDeviceInput.Active = true означает что микрофон активен (игрок говорит)
+-- AudioDeviceInput.Muted = true означает что игрок замьючен
+-- Говорящий = Active==true AND Muted==false
 local function startVoiceMonitor()
     if _voiceMonitorStarted then return end
     _voiceMonitorStarted = true
 
     task.spawn(function()
-        task.wait(3) -- ждём загрузку
+        task.wait(3)
 
-        local VCS = pcall(function() return game:GetService("VoiceChatService") end)
-                and game:GetService("VoiceChatService")
+        -- Проверяем одного игрока — ищем его AudioDeviceInput
+        local function isTalking(player)
+            if not player or not player.Character then return false end
+            -- AudioDeviceInput лежит в самом Player объекте
+            local adi = player:FindFirstChildWhichIsA("AudioDeviceInput")
+            if adi then
+                return adi.Active == true and adi.Muted == false
+            end
+            return false
+        end
 
-        if not VCS then return end -- VoiceChat недоступен в этой игре
-
-        -- Polling: каждые 0.3с проверяем кто говорит через IsPlayerTalking
-        -- IsPlayerTalking возвращает true если игрок сейчас произносит звук
+        -- Polling loop каждые 0.25с
         while true do
             for _, player in ipairs(Players:GetPlayers()) do
                 if player ~= Players.LocalPlayer then
-                    local ok, talking = pcall(function()
-                        return VCS:IsPlayerTalking(player.UserId)
-                    end)
+                    local ok, talking = pcall(isTalking, player)
                     if ok and talking then
                         _voiceActiveUsers[player.UserId] = true
                     else
@@ -1405,7 +1428,7 @@ local function startVoiceMonitor()
                     end
                 end
             end
-            task.wait(0.3)
+            task.wait(0.25)
         end
     end)
 end
@@ -1519,10 +1542,19 @@ local function handleQueuedChat(item)
     end
 
     -- UsePlayerName
+    -- UsePlayerName: имя игрока в тег [NAME:X]
+    -- item.name = Username (всегда латиница), item.displayName = DisplayName (может быть кириллица/цифры)
     local userContent = item.cleaned
     if settings.UsePlayerName then
-        local rawNick = item.displayName or item.name or ""
-        local shortName = extractShortName(rawNick)
+        local shortName = extractShortName(item.name or "")  -- username первый (надёжнее)
+        if not shortName then
+            shortName = extractShortName(item.displayName or "")  -- displayName второй
+        end
+        if not shortName then
+            -- Последний фолбэк: обрезаем username напрямую
+            local fallback = item.name or item.displayName or ""
+            if #fallback >= 2 then shortName = fallback:sub(1, 14) end
+        end
         if shortName then
             userContent = "[NAME:" .. shortName .. "] " .. item.cleaned
         end
