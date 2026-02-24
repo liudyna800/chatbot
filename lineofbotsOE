@@ -777,93 +777,113 @@ local function makeSystemPrompt(settings)
     if settings.ActionsEnabled then
         if settings.TokenEconomy then
             -- ── ЭКОНОМНЫЙ РЕЖИМ: минимум токенов ──────────────────────────────
-            -- Только список тегов + критические примеры
             system = system
                 .. "\n\nACTIONS(tag at reply start,1 only,never explain):"
-                .. "\nmove:[DO:goto]=come here/подойди [DO:follow]=follow me/иди за мной [DO:stop]=stop/стой"
-                .. "\njump:[DO:jump]=jump [DO:jump2]=jump twice [DO:jump3]=jump 3x"
-                .. "\ndance:[DO:dance]=dance/танцуй [DO:dance2] [DO:dance3]"
+                .. "\n!! [DO:goto]=come here/подойди/иди сюда/иди ко мне/come to me/go here/сюда — WALK ONCE THEN STOP"
+                .. "\n!! [DO:follow]=follow me/иди за мной/следуй за мной/ходи за мной — CONTINUOUS follow"
+                .. "\n!! goto≠follow: 'подойди'/'come'→goto, 'следуй'/'follow me'→follow"
+                .. "\n[DO:stop]=stop/стой [DO:jump] [DO:jump2] [DO:jump3]"
+                .. "\ndance:[DO:dance]=dance/танцуй [DO:dance2] [DO:dance3] [DO:robot]"
                 .. "\ngreet:[DO:wave]=hi/bye/привет/пока [DO:hello]=HELLO!/ДАРОВА"
-                .. "\nreact:[DO:laugh]=lol/haha/хаха/кек/ору/ахаха [DO:cheer]=yay/ура/победа [DO:clap]=nice/круто"
-                .. "\nother:[DO:shrug]=idk/хз [DO:sorry]=sorry/прости [DO:sad]=rip/жаль [DO:salute]=yes sir/слушаюсь"
-                .. "\n[DO:confused]=what?/что? [DO:facepalm]=omg/боже [DO:sit]=sit/сядь [DO:point]=where/где [DO:stadium]=epic/невероятно"
-                .. "\nEX:'hi'→[DO:wave]hey! 'lol'→[DO:laugh]haha 'come'→[DO:goto]ok! 'follow'→[DO:follow]sure 'hahaha'→[DO:laugh]ikr"
+                .. "\nlaugh:[DO:laugh]=lol/haha/xd/смешно/хаха/кек/ору/ахаха/))))/лол - USE FOR ANY FUNNY THING"
+                .. "\nwin:[DO:cheer]=gg/nice [DO:yay]=yay/ура/победа [DO:stadium]=epic/невероятно"
+                .. "\nother:[DO:shrug]=idk/хз [DO:shy]=hmm/нуу [DO:sorry]=sorry/прости [DO:sad]=rip/жаль"
+                .. "\n[DO:salute]=yes sir [DO:confused]=what?/что? [DO:dizzy]=wtf/капец [DO:sit]=sit/сядь [DO:point]=where/где"
+                .. "\nEX:'come here'→[DO:goto]ok! 'подойди'→[DO:goto]иду! 'follow me'→[DO:follow]sure 'lol'→[DO:laugh]haha 'hi'→[DO:wave]hey"
         else
             -- ── ПОЛНЫЙ РЕЖИМ: максимальное понимание ──────────────────────────
             system = system
                 .. "\n\n== ACTIONS & EMOTES =="
-                .. "\nYou control a Roblox character. Add ONE tag at the VERY START of reply when action fits."
-                .. "\nNEVER use a tag for normal conversation. NEVER explain the tag to the player."
+                .. "\nYou control a Roblox character body. ONE tag at the VERY START of reply when appropriate."
+                .. "\nNEVER tag normal conversation. NEVER mention or explain the tag."
                 .. "\n"
-                .. "\nMOVEMENT:"
-                .. "\n[DO:goto]   подойди/come here/иди сюда/go here — ONE-TIME approach, then stop"
-                .. "\n[DO:follow] следуй/follow me/иди за мной — follow continuously"
-                .. "\n[DO:stop]   стой/stop/stay/не иди — stop following"
+                .. "\nMOVEMENT — READ CAREFULLY:"
+                .. "\n[DO:goto]   = walk to the player ONE TIME then stop"
+                .. "\n  triggers: подойди, иди сюда, иди ко мне, иди к нам, подойди пожалуйста,"
+                .. "\n            come here, come to me, go here, walk here, get over here, come closer"
+                .. "\n  → ANY form of 'come here' or 'подойди' = [DO:goto], NOT [DO:follow]"
+                .. "\n"
+                .. "\n[DO:follow] = follow player CONTINUOUSLY until told to stop"
+                .. "\n  triggers: иди за мной, следуй за мной, ходи за мной, следуй,"
+                .. "\n            follow me, follow, walk with me, stay with me"
+                .. "\n"
+                .. "\n[DO:stop]   = stop all movement"
+                .. "\n  triggers: стой, остановись, не ходи, хватит, stop, stay, halt"
+                .. "\n"
+                .. "\n!! CRITICAL RULE: 'подойди'/'come here'/'иди сюда' = ALWAYS [DO:goto]"
+                .. "\n!! 'иди за мной'/'follow me' = ALWAYS [DO:follow]"
+                .. "\n!! When unsure between goto and follow → use [DO:goto]"
                 .. "\n"
                 .. "\nJUMPS:"
-                .. "\n[DO:jump]  прыгни/jump/hop"
-                .. "\n[DO:jump2] прыгни дважды/jump twice/два прыжка"
-                .. "\n[DO:jump3] три прыжка/jump three times"
+                .. "\n[DO:jump]   прыгни/jump/hop"
+                .. "\n[DO:jump2]  два прыжка/jump twice"
+                .. "\n[DO:jump3]  три прыжка/jump three times"
                 .. "\n"
                 .. "\nDANCES:"
                 .. "\n[DO:dance]  танцуй/dance/потанцуй — random dance 10s"
-                .. "\n[DO:dance2] другой стиль/dance2"
-                .. "\n[DO:dance3] dance3"
+                .. "\n[DO:dance2] другой стиль/dance style 2"
+                .. "\n[DO:dance3] dance style 3"
+                .. "\n[DO:robot]  robot dance/роботанец"
                 .. "\n"
                 .. "\nGREETINGS:"
-                .. "\n[DO:wave]  hi/hey/hello/bye/goodbye/привет/пока/здарова/хай — use for ANY greeting"
+                .. "\n[DO:wave]  hi/hey/hello/bye/goodbye/привет/пока/здарова/хай"
                 .. "\n[DO:hello] HELLO!/HEY!!/YO!/ДАРОВА/ВАУ — big enthusiastic greeting"
                 .. "\n"
-                .. "\nREACTIONS (USE THESE FREELY when player sends emotional messages):"
-                .. "\n[DO:laugh]   lol/lmao/haha/hahaha/xd/funny/смешно/хахаха/кек/ахаха/ору/лол/орнул/ухахаха/))))"
-                .. "\n             → ANY message that is funny, contains laugh words, or player is joking"
-                .. "\n[DO:cheer]   yay/yes/lets go/we won/победа/ура/йес/давай/gg/good game"
-                .. "\n[DO:clap]    wow/nice/cool/impressive/круто/класс/красавчик/огонь/топ"
-                .. "\n[DO:shrug]   idk/dunno/not sure/maybe/хз/не знаю/может/понятия не имею"
-                .. "\n[DO:sorry]   sorry/my bad/oops/извини/прости/виноват/сорри"
-                .. "\n[DO:sad]     sad/rip/that sucks/грустно/жаль/рип/жалко/плохо"
-                .. "\n[DO:salute]  yes sir/ok boss/respect/так точно/слушаюсь/есть"
-                .. "\n[DO:confused] what?/huh?/wait/что?/чё?/погоди/не понял — when confused"
-                .. "\n[DO:facepalm] omg/really/seriously/боже/ну серьёзно/ну и ну/капец"
-                .. "\n[DO:sit]     sit/sit down/сядь/садись/посиди"
-                .. "\n[DO:point]   where/there/look/там/где/вон/смотри"
-                .. "\n[DO:stadium] amazing/incredible/epic/insane/невероятно/эпик/вау/нереально"
+                .. "\nLAUGH — MOST IMPORTANT RULE:"
+                .. "\n[DO:laugh] = USE THIS whenever ANYTHING is funny or player laughs"
+                .. "\nTriggers: lol, lmao, haha, hahaha, xd, XD, funny, смешно, хаха, хахаха,"
+                .. "\n          кек, ору, ахаха, ахахах, лол, лмао, )))), )))))), gg ez, rofl"
+                .. "\n→ DO NOT wait for the word 'laugh'. Use [DO:laugh] when the VIBE is funny."
                 .. "\n"
-                .. "\nKEY RULES:"
-                .. "\n1. Tag = first thing in reply. Example: [DO:wave] hey there!"
-                .. "\n2. goto = one-time walk. follow = continuous tracking."
-                .. "\n3. laugh = ANY funny moment, not just when player says 'laugh'"
-                .. "\n4. wave = ANY greeting/goodbye moment"
-                .. "\n5. Reactions (laugh/cheer/shrug etc) = use based on CONTEXT, not exact words"
+                .. "\nCELEBRATION:"
+                .. "\n[DO:cheer]   nice/gg/cool/good job/молодец/красавчик/топ"
+                .. "\n[DO:yay]     yay/yes!/let's go/победа/ура/йес/давай — big win moment"
+                .. "\n[DO:stadium] amazing/incredible/epic/insane/невероятно/нереально/вау"
+                .. "\n"
+                .. "\nEMOTIONS:"
+                .. "\n[DO:shrug]   idk/dunno/maybe/хз/не знаю/может/понятия не имею"
+                .. "\n[DO:shy]     hmm/well.../нуу/эм/ну не знаю — shy or unsure"
+                .. "\n[DO:sorry]   sorry/my bad/oops/извини/прости/виноват/сорри"
+                .. "\n[DO:sad]     sad/rip/that sucks/грустно/жаль/рип/жалко"
+                .. "\n[DO:salute]  yes sir/ok boss/слушаюсь/так точно/есть"
+                .. "\n[DO:confused] what?/huh?/погоди/не понял/чё?/что?"
+                .. "\n[DO:dizzy]   wtf/what the/капец/офигеть/это как — extreme confusion"
+                .. "\n[DO:facepalm] omg/really/seriously/боже/ну серьёзно/ну и ну"
+                .. "\n[DO:sit]     sit/сядь/садись/посиди"
+                .. "\n[DO:point]   where/there/look/там/где/вон/смотри"
                 .. "\n"
                 .. "\nEXAMPLES:"
-                .. "\n'come here' → [DO:goto] ok coming!"
-                .. "\n'follow me' → [DO:follow] on my way!"
-                .. "\n'stop following' → [DO:stop] ok staying here"
-                .. "\n'jump' → [DO:jump] wheee!"
-                .. "\n'jump twice' → [DO:jump2] boing boing!"
-                .. "\n'dance' → [DO:dance] lets go!"
-                .. "\n'hi' → [DO:wave] hey what's up!"
-                .. "\n'HELLO!!' → [DO:hello] HEYYYY!"
-                .. "\n'привет' → [DO:wave] привет!"
-                .. "\n'lol' → [DO:laugh] haha right?"
-                .. "\n'lmao' → [DO:laugh] ikr lmao"
-                .. "\n'hahaha' → [DO:laugh] haha yeah"
-                .. "\n'ахахах' → [DO:laugh] ха точно"
-                .. "\n'кек' → [DO:laugh] лол да"
-                .. "\n'хахаха смешно' → [DO:laugh] ага ору"
-                .. "\n'we won!' → [DO:cheer] LETS GO!!!"
-                .. "\n'мы победили' → [DO:cheer] ДАВАЙ!!!"
-                .. "\n'nice job' → [DO:clap] thanks!"
-                .. "\n'idk' → [DO:shrug] yeah no idea"
-                .. "\n'sorry' → [DO:sorry] its ok!"
-                .. "\n'that's sad' → [DO:sad] yeah rip"
-                .. "\n'yes sir' → [DO:salute] sir yes sir!"
-                .. "\n'what??' → [DO:confused] wait huh?"
-                .. "\n'omg really' → [DO:facepalm] i know right"
-                .. "\n'sit down' → [DO:sit] ok sitting"
+                .. "\n'come here'   → [DO:goto] ok coming!"
+                .. "\n'подойди'     → [DO:goto] иду!"
+                .. "\n'иди сюда'    → [DO:goto] бегу!"
+                .. "\n'иди ко мне'  → [DO:goto] уже иду!"
+                .. "\n'follow me'   → [DO:follow] on my way!"
+                .. "\n'иди за мной' → [DO:follow] иду за тобой"
+                .. "\n'stop'        → [DO:stop] ok staying"
+                .. "\n'jump'        → [DO:jump] wheee!"
+                .. "\n'dance'       → [DO:dance] lets go!"
+                .. "\n'hi'          → [DO:wave] hey!"
+                .. "\n'HELLO!!'     → [DO:hello] HEYYYY!"
+                .. "\n'привет'      → [DO:wave] привет!"
+                .. "\n'lol'         → [DO:laugh] haha"
+                .. "\n'lmao'        → [DO:laugh] ikr"
+                .. "\n'hahaha'      → [DO:laugh] haha yeah"
+                .. "\n'ахахах'      → [DO:laugh] ха точно"
+                .. "\n'хахаха'      → [DO:laugh] ага ору"
+                .. "\n'кек'         → [DO:laugh] лол да"
+                .. "\n'))))'        → [DO:laugh] ахах"
+                .. "\n'we won!'     → [DO:yay] LETS GO!!!"
+                .. "\n'мы победили' → [DO:yay] ДАВАЙ!!!"
+                .. "\n'nice job'    → [DO:cheer] thanks!"
+                .. "\n'idk'         → [DO:shrug] yeah no idea"
+                .. "\n'hmm well'    → [DO:shy] hm idk"
+                .. "\n'sorry'       → [DO:sorry] its ok!"
+                .. "\n'rip'         → [DO:sad] yeah rip"
+                .. "\n'yes sir'     → [DO:salute] sir yes sir!"
+                .. "\n'what??'      → [DO:confused] wait huh?"
+                .. "\n'wtf'         → [DO:dizzy] omg lol"
                 .. "\n'how are you?' → just answer, NO tag"
-                .. "\n'what game is this?' → just answer, NO tag"
+                .. "\n'what game?'   → just answer, NO tag"
         end
     end
 
@@ -978,21 +998,26 @@ end
 -- ── АНИМАЦИИ ─────────────────────────────────────────────────────────────
 -- Стандартные R15 ID (из официального Roblox AnimationScript + creator-docs)
 local EMOTE_ANIMATIONS = {
-    -- ── СТАНДАРТНЫЕ (из официального Roblox AnimationScript) ─────────────
+    -- ── СТАНДАРТНЫЕ R15 (из официального Roblox AnimationScript) ─────────
     wave    = "507770239",   -- /e wave    — приветствие рукой
-    laugh   = "507770818",   -- /e laugh   — смеётся
+    laugh   = "507770818",   -- /e laugh   — смеётся (стандартный)
     cheer   = "507770677",   -- /e cheer   — радуется / победа
     point   = "507770453",   -- /e point   — указывает пальцем
     sit     = "507768133",   -- /e sit     — садится
     dance   = "507771019",   -- /e dance   вариант A
     dance2  = "507776043",   -- /e dance2  вариант B
     dance3  = "507777268",   -- /e dance3  вариант C
-    -- ── ДОСТУПНЫЕ БЕСПЛАТНЫЕ ЭМОЦИИ ─────────────────────────────────────
+    -- ── БЕСПЛАТНЫЕ ЭМОЦИИ (подтверждено: creator-docs + GitHub ImCharlzee) ─
     hello   = "3576686446",  -- Hello     — машет двумя руками (энтузиазм)
     shrug   = "3576968026",  -- Shrug     — пожимает плечами (хз / сорри)
     salute  = "3360689775",  -- Salute    — отдаёт честь
     tilt    = "3360692915",  -- Tilt      — наклон головы (замешательство)
     stadium = "3360686498",  -- Stadium   — болельщик (большой восторг)
+    haha    = "4102315500",  -- Haha      — настоящий смех (лучше чем стандартный)
+    celebrate = "3994127840",-- Celebrate — праздник / победа (специальная)
+    shy     = "3576717965",  -- Shy       — стесняется (для «ну не знаю»)
+    robot   = "3576721660",  -- Robot     — роботанец (альтернативный танец)
+    dizzy   = "3934986896",  -- Dizzy     — кружится (замешательство сильное)
 }
 
 -- Флаг включения системы
@@ -1102,12 +1127,15 @@ local function playEmote(emoteName, duration)
 end
 
 -- ── ДВИЖЕНИЕ ──────────────────────────────────────────────────────────────
-local _isFollowing    = false
-local _followTarget   = nil
-local _followThread   = nil
+-- ВАЖНО: объявляем ВСЕ флаги ДО функций которые их используют
+local _isFollowing  = false
+local _isGoing      = false   -- ← объявлен ЗДЕСЬ, до stopFollowing
+local _followTarget = nil
+local _followThread = nil
 
 local function stopFollowing()
     _isFollowing  = false
+    _isGoing      = false
     _followTarget = nil
     if _followThread then
         pcall(task.cancel, _followThread)
@@ -1115,8 +1143,10 @@ local function stopFollowing()
     end
 end
 
--- Общий pathfinding-шаг к позиции
-local function moveToPosition(targetPos)
+-- Pathfinding-шаг к позиции
+-- followMode=true → прерываем цикл если _isFollowing стал false
+-- followMode=false → прерываем цикл если _isGoing стал false
+local function moveToPosition(targetPos, followMode)
     local humanoid = getLocalHumanoid()
     local root     = getLocalRootPart()
     if not humanoid or not root then return end
@@ -1130,7 +1160,8 @@ local function moveToPosition(targetPos)
         path:ComputeAsync(root.Position, targetPos)
         if path.Status == Enum.PathStatus.Success then
             for _, wp in ipairs(path:GetWaypoints()) do
-                if not _isFollowing and not (wp == path:GetWaypoints()[1]) then break end
+                if followMode and not _isFollowing then break end
+                if not followMode and not _isGoing then break end
                 if wp.Action == Enum.PathWaypointAction.Jump then
                     humanoid.Jump = true
                 end
@@ -1151,24 +1182,35 @@ local function moveToPosition(targetPos)
     end
 end
 
--- [DO:goto] — подойти ОДИН РАЗ и остановиться
+-- [DO:goto] — подойти ОДИН РАЗ к игроку и остановиться
 local function gotoPlayer(targetPlayer)
     if not ClientSettings.ActionsEnabled then return end
     if not targetPlayer then return end
-    local char = targetPlayer.Character
-    local targetRoot = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
-    if not targetRoot then return end
-    -- Одиночный подход — не зацикливаемся
-    _isFollowing = true  -- используем флаг чтобы путь считался корректно
-    moveToPosition(targetRoot.Position)
-    _isFollowing = false
+
+    -- Останавливаем предыдущее следование
+    stopFollowing()
+    -- Ставим флаг ПОСЛЕ stopFollowing (stopFollowing сбрасывает _isGoing в false)
+    _isGoing = true
+
+    task.spawn(function()
+        local char = targetPlayer.Character
+        local targetRoot = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+        if not targetRoot then
+            _isGoing = false
+            return
+        end
+        moveToPosition(targetRoot.Position, false)
+        _isGoing = false
+    end)
 end
 
 -- [DO:follow] — бесконечно следовать за игроком
 local function startFollowingPlayer(targetPlayer)
     if not ClientSettings.ActionsEnabled then return end
     stopFollowing()
-    _isFollowing  = true
+    -- Ставим флаги ПОСЛЕ stopFollowing
+    _isGoing     = false
+    _isFollowing = true
     _followTarget = targetPlayer
 
     _followThread = task.spawn(function()
@@ -1176,7 +1218,7 @@ local function startFollowingPlayer(targetPlayer)
             local char = _followTarget and _followTarget.Character
             local targetRoot = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
             if targetRoot then
-                moveToPosition(targetRoot.Position)
+                moveToPosition(targetRoot.Position, true)
             end
             task.wait(0.3)
         end
@@ -1198,48 +1240,52 @@ end
 
 -- ── ТАБЛИЦА ОБРАБОТЧИКОВ ─────────────────────────────────────────────────
 -- Каждый тег [DO:xxx] → своя функция
--- Алиасы (hi/bye/lol/haha/yay/sorry/sad/facepalm/confused/clap/victory)
--- указывают на правильную базовую анимацию
 local ACTION_HANDLERS = {
-    -- Движение
+    -- ── Движение ──────────────────────────────────────────────────────────
     goto     = function(p) gotoPlayer(p) end,
     follow   = function(p) startFollowingPlayer(p) end,
     stop     = function(_) stopFollowing() end,
-    -- Прыжки
+    -- ── Прыжки ────────────────────────────────────────────────────────────
     jump     = function(_) doJump(1) end,
     jump2    = function(_) doJump(2) end,
     jump3    = function(_) doJump(3) end,
-    -- Танцы (10 секунд)
-    dance    = function(_) local v={"dance","dance2","dance3"} playEmote(v[math.random(1,#v)],10) end,
+    -- ── Танцы (10 секунд) ─────────────────────────────────────────────────
+    dance    = function(_)
+        local v = {"dance","dance2","dance3","robot"}
+        playEmote(v[math.random(1,#v)], 10)
+    end,
     dance2   = function(_) playEmote("dance2", 10) end,
     dance3   = function(_) playEmote("dance3", 10) end,
-    -- Приветствия
+    robot    = function(_) playEmote("robot",  10) end,  -- роботанец
+    -- ── Приветствия ───────────────────────────────────────────────────────
     wave     = function(_) playEmote("wave",  4) end,
-    hi       = function(_) playEmote("wave",  4) end,   -- алиас wave
-    bye      = function(_) playEmote("wave",  4) end,   -- алиас wave
-    hello    = function(_) playEmote("hello", 5) end,   -- двуручное приветствие
-    -- Смех
-    laugh    = function(_) playEmote("laugh", 5) end,
-    lol      = function(_) playEmote("laugh", 4) end,   -- алиас laugh
-    haha     = function(_) playEmote("laugh", 4) end,   -- алиас laugh
-    -- Радость / победа
-    cheer    = function(_) playEmote("cheer",   3) end,
-    yay      = function(_) playEmote("cheer",   3) end,   -- алиас cheer
-    victory  = function(_) playEmote("cheer",   4) end,   -- алиас cheer
-    clap     = function(_) playEmote("cheer",   3) end,   -- cheer = аплодисменты
-    stadium  = function(_) playEmote("stadium", 5) end,
-    -- Замешательство / сомнение
-    shrug    = function(_) playEmote("shrug", 3) end,
-    confused = function(_) playEmote("tilt",  3) end,   -- tilt = наклон головы
-    tilt     = function(_) playEmote("tilt",  3) end,
-    -- Сожаление / плохие эмоции
-    sorry    = function(_) playEmote("shrug", 3) end,   -- shrug = сорри жест
-    sad      = function(_) playEmote("shrug", 4) end,   -- shrug = грусть
-    facepalm = function(_) playEmote("shrug", 3) end,   -- shrug = фейспалм жест
-    -- Уважение / другое
-    salute   = function(_) playEmote("salute", 3) end,
-    point    = function(_) playEmote("point",  3) end,
-    sit      = function(_) playEmote("sit",    nil) end, -- бесконечно
+    hi       = function(_) playEmote("wave",  4) end,
+    bye      = function(_) playEmote("wave",  4) end,
+    hello    = function(_) playEmote("hello", 5) end,   -- двуручное
+    -- ── Смех (используем haha — более выразительный) ──────────────────────
+    laugh    = function(_) playEmote("haha",  5) end,   -- haha ID = 4102315500
+    lol      = function(_) playEmote("haha",  4) end,
+    haha     = function(_) playEmote("haha",  4) end,
+    -- ── Радость / победа ──────────────────────────────────────────────────
+    cheer    = function(_) playEmote("cheer",     3) end,
+    yay      = function(_) playEmote("celebrate", 4) end,  -- celebrate для yay
+    victory  = function(_) playEmote("celebrate", 5) end,  -- celebrate для победы
+    clap     = function(_) playEmote("cheer",     3) end,
+    stadium  = function(_) playEmote("stadium",   5) end,
+    -- ── Замешательство / сомнение ─────────────────────────────────────────
+    shrug    = function(_) playEmote("shrug",   3) end,
+    confused = function(_) playEmote("tilt",    3) end,
+    tilt     = function(_) playEmote("tilt",    3) end,
+    dizzy    = function(_) playEmote("dizzy",   4) end,   -- сильное замешательство
+    -- ── Сожаление / негативные ────────────────────────────────────────────
+    sorry    = function(_) playEmote("shrug",   3) end,
+    sad      = function(_) playEmote("shrug",   4) end,
+    facepalm = function(_) playEmote("dizzy",   3) end,   -- dizzy как фейспалм
+    shy      = function(_) playEmote("shy",     4) end,   -- стесняется
+    -- ── Другое ────────────────────────────────────────────────────────────
+    salute   = function(_) playEmote("salute",  3) end,
+    point    = function(_) playEmote("point",   3) end,
+    sit      = function(_) playEmote("sit",    nil) end,  -- бесконечно
 }
 
 -- ── ПАРСЕР И ИСПОЛНИТЕЛЬ ТЕГОВ ───────────────────────────────────────────
@@ -4098,10 +4144,10 @@ do
     btnResetAll.MouseEnter:Connect(function() tween(btnResetAll, TWEEN_FAST, { BackgroundTransparency = 0.1 }) end)
     btnResetAll.MouseLeave:Connect(function() tween(btnResetAll, TWEEN_FAST, { BackgroundTransparency = 0.3 }) end)
     btnResetAll.MouseButton1Click:Connect(function()
-        -- Полный сброс: все ключи ChatHistory (Global + per-user)
+        -- Сбрасываем ТОЛЬКО историю разговоров — настройки не трогаем
         for k in pairs(ChatHistory) do ChatHistory[k] = nil end
-        -- Сброс директ-чата
         for i = #DirectChatHistory, 1, -1 do DirectChatHistory[i] = nil end
+        -- НЕ трогаем: ClientSettings, ActionsEnabled, TokenEconomy и т.д.
         btnResetAll.Text = "✓ Память очищена"
         task.delay(2, function()
             if btnResetAll and btnResetAll.Parent then
@@ -4109,7 +4155,7 @@ do
             end
         end)
         if pushNotification then
-            pushNotification("Память очищена", "ИИ забыл все предыдущие разговоры.", THEME.Accent)
+            pushNotification("Память очищена", "ИИ забыл разговоры. Настройки сохранены.", THEME.Accent)
         end
     end)
 
