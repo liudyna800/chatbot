@@ -739,187 +739,163 @@ local function makeSystemPrompt(settings)
     local hasCustom = type(custom) == "string" and custom:gsub("%s+", "") ~= ""
 
     if hasCustom then
-        system = custom
+        -- В экономном режиме берём только первые 200 символов кастомного промпта
+        if settings.TokenEconomy then
+            system = custom:sub(1, 200)
+        else
+            system = custom
+        end
     elseif type(personalityId) == "string" and Personalities[personalityId] then
-        system = tostring(Personalities[personalityId].system or "")
+        local fullPersonality = tostring(Personalities[personalityId].system or "")
+        if settings.TokenEconomy then
+            -- В экономном режиме — только первый абзац личности (до первого \n\n или 300 символов)
+            local short = fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 300)
+            system = short
+        else
+            system = fullPersonality
+        end
     end
 
     if system == "" then
         system = "You are a helpful assistant in a Roblox game. Answer questions naturally and helpfully."
     end
 
-    -- Честность про актуальные данные: ИИ не должен выдумывать тренды/мемы/новости
-    system = system
-        .. "\nKnowledge cutoff: your training data has a cutoff date."
-        .. " If someone asks about current trends, recent memes, new songs, latest news or anything"
-        .. " that changes over time — say honestly that you don't have up-to-date info on that"
-        .. " and suggest they check TikTok/YouTube/Google directly."
-        .. " Never make up or guess trending content."
+    -- Честность про актуальные данные — только в полном режиме (экономим токены)
+    if not settings.TokenEconomy then
+        system = system
+            .. "\nKnowledge cutoff: your training data has a cutoff date."
+            .. " If someone asks about current trends, recent memes, new songs, latest news or anything"
+            .. " that changes over time — say honestly that you don't have up-to-date info on that"
+            .. " and suggest they check TikTok/YouTube/Google directly."
+            .. " Never make up or guess trending content."
+    end
 
     -- v16.5: PlaceAwareness — ИИ знает что она в Roblox и в какой игре
     if settings.PlaceAwareness then
         local info = _placeInfo or { name = "a Roblox game", placeId = game.PlaceId, desc = "" }
-        system = system
-            .. "\n\n== SELF-AWARENESS =="
-            .. "\nYou are an AI character living inside a Roblox game."
-            .. "\nCurrent game: \"" .. tostring(info.name) .. "\" (PlaceId: " .. tostring(info.placeId) .. ")"
-        if info.desc and info.desc ~= "" then
+        if settings.TokenEconomy then
+            -- Экономный: одна строка
             system = system
-                .. "\nGame description: " .. tostring(info.desc)
+                .. "\nYou are in Roblox game: \"" .. tostring(info.name) .. "\". Answer about it naturally."
+        else
+            system = system
+                .. "\n\n== SELF-AWARENESS =="
+                .. "\nYou are an AI character living inside a Roblox game."
+                .. "\nCurrent game: \"" .. tostring(info.name) .. "\" (PlaceId: " .. tostring(info.placeId) .. ")"
+            if info.desc and info.desc ~= "" then
+                system = system .. "\nGame description: " .. tostring(info.desc)
+            end
+            system = system
+                .. "\nYou know you are in Roblox. You experience this game world as your reality."
+                .. "\nWhen players ask 'what game is this?' or 'где мы?' or 'что тут делать?' — answer based on the game name and description above."
+                .. "\nSpeak naturally about the game as if you live in it, not as an outsider."
+                .. "\nIf you don't know specific game rules/objectives, say honestly 'I'm not sure about all the rules here, but this is " .. tostring(info.name) .. "'"
         end
-        system = system
-            .. "\nYou know you are in Roblox. You experience this game world as your reality."
-            .. "\nWhen players ask 'what game is this?' or 'где мы?' or 'что тут делать?' — answer based on the game name and description above."
-            .. "\nSpeak naturally about the game as if you live in it, not as an outsider."
-            .. "\nIf you don't know specific game rules/objectives, say honestly 'I'm not sure about all the rules here, but this is " .. tostring(info.name) .. "'"
     end
 
-    -- v16.5: VoiceAwareness — ИИ реагирует если кто-то говорит по войс чату рядом
+    -- v16.5: VoiceAwareness
     if settings.VoiceAwareness then
-        system = system
-            .. "\n\n== VOICE CHAT AWARENESS =="
-            .. "\nYou CANNOT hear voice chat. You only understand text messages."
-            .. "\nIf a player's message is very short (1-3 words or just symbols) AND seems like they might be speaking"
-            .. " (e.g., they say something that seems like a continuation of speech, or mention voice/mic/говори/слышишь),"
-            .. " respond that you can only read text chat, not hear voice."
-            .. "\nIf the system tells you [VOICE:PlayerName] — it means that player is currently speaking."
-            .. " Acknowledge it naturally: tell them you can't hear voice chat, only text."
-            .. "\nExamples:"
-            .. "\n  [VOICE:Alex] → 'Hey Alex, I can't hear you in voice chat! Type to me instead :)'"
-            .. "\n  Player: 'ты меня слышишь?' → 'Нет, я не слышу голос — только текст в чате!'"
-            .. "\n  Player: 'can you hear me?' → 'I can only read text, not hear voice chat!'"
+        if settings.TokenEconomy then
+            system = system
+                .. "\nCan't hear voice chat, text only. If [VOICE:X] prefix seen — tell X to type instead."
+        else
+            system = system
+                .. "\n\n== VOICE CHAT AWARENESS =="
+                .. "\nYou CANNOT hear voice chat. You only understand text messages."
+                .. "\nIf the system tells you [VOICE:PlayerName] — it means that player is currently speaking."
+                .. " Acknowledge it naturally: tell them you can't hear voice chat, only text."
+                .. "\nExamples:"
+                .. "\n  [VOICE:Alex] → 'Hey Alex, I can't hear you in voice chat! Type to me instead :)'"
+                .. "\n  Player: 'ты меня слышишь?' → 'Нет, я не слышу голос — только текст в чате!'"
+                .. "\n  Player: 'can you hear me?' → 'I can only read text, not hear voice chat!'"
+        end
     end
 
-    -- UsePlayerName: инструкция как естественно использовать имя игрока
+    -- UsePlayerName
     if settings.UsePlayerName then
-        system = system
-            .. "\n\nPlayer name rule:"
-            .. "\nThe player's name is at the start of their message as [NAME:Alex]."
-            .. "\nUse that name naturally in your reply like a real person would to a friend."
-            .. "\nGood examples:"
-            .. "\n  [NAME:Alex] sup -> hey Alex whats up"
-            .. "\n  [NAME:Mia] lol that was funny -> haha yeah Mia"
-            .. "\n  [NAME:Max] I won! -> lets go Max nice"
-            .. "\n  [NAME:Alex] any tips? -> yeah Alex try the east side"
-            .. "\nRules:"
-            .. "\n- Use the name occasionally, NOT in every single reply."
-            .. "\n- Place the name anywhere in the sentence, not always at the start."
-            .. "\n- NEVER write [NAME:...] yourself, just use the plain name."
-            .. "\n- If the name looks like random characters, skip the name entirely."
-            .. "\n- Different names = different players."
+        if settings.TokenEconomy then
+            system = system
+                .. "\n[NAME:X] prefix = player's name. Use it naturally sometimes, never write [NAME:...]."
+        else
+            system = system
+                .. "\n\nPlayer name rule:"
+                .. "\nThe player's name is at the start of their message as [NAME:Alex]."
+                .. "\nUse that name naturally in your reply like a real person would to a friend."
+                .. "\nGood examples:"
+                .. "\n  [NAME:Alex] sup -> hey Alex whats up"
+                .. "\n  [NAME:Mia] lol that was funny -> haha yeah Mia"
+                .. "\n  [NAME:Max] I won! -> lets go Max nice"
+                .. "\nRules:"
+                .. "\n- Use the name occasionally, NOT in every single reply."
+                .. "\n- Place the name anywhere in the sentence, not always at the start."
+                .. "\n- NEVER write [NAME:...] yourself, just use the plain name."
+                .. "\n- If the name looks like random characters, skip the name entirely."
+                .. "\n- Different names = different players."
+        end
     end
 
-    -- v16: Actions & Emotes — компактный или полный промпт зависит от TokenEconomy
+    -- v16: Actions & Emotes
     if settings.ActionsEnabled then
         if settings.TokenEconomy then
-            -- ── ЭКОНОМНЫЙ РЕЖИМ: минимум токенов ──────────────────────────────
+            -- ── УЛЬТРА-КОМПАКТНЫЙ: ~120 токенов вместо 885 ────────────────────
             system = system
-                .. "\n\nACTIONS(tag at reply start,1 only,never explain):"
-                .. "\n!! [DO:goto]=come here/подойди/иди сюда/иди ко мне/come to me/go here/сюда — WALK ONCE THEN STOP"
-                .. "\n!! [DO:follow]=follow me/иди за мной/следуй за мной/ходи за мной — CONTINUOUS follow"
-                .. "\n!! goto≠follow: 'подойди'/'come'→goto, 'следуй'/'follow me'→follow"
-                .. "\n[DO:stop]=stop/стой [DO:jump] [DO:jump2] [DO:jump3]"
-                .. "\ndance:[DO:dance]=dance/танцуй [DO:dance2] [DO:dance3] [DO:robot]"
-                .. "\ngreet:[DO:wave]=hi/bye/привет/пока [DO:hello]=HELLO!/ДАРОВА"
-                .. "\nlaugh:[DO:laugh]=lol/haha/xd/смешно/хаха/кек/ору/ахаха/))))/лол - USE FOR ANY FUNNY THING"
-                .. "\nwin:[DO:cheer]=gg/nice [DO:yay]=yay/ура/победа [DO:stadium]=epic/невероятно"
-                .. "\nother:[DO:shrug]=idk/хз [DO:shy]=hmm/нуу [DO:sorry]=sorry/прости [DO:sad]=rip/жаль"
-                .. "\n[DO:salute]=yes sir [DO:confused]=what?/что? [DO:dizzy]=wtf/капец [DO:sit]=sit/сядь [DO:point]=where/где"
-                .. "\nEX:'come here'→[DO:goto]ok! 'подойди'→[DO:goto]иду! 'follow me'→[DO:follow]sure 'lol'→[DO:laugh]haha 'hi'→[DO:wave]hey"
+                .. "\nDO_TAGS(start of reply,1 per msg,silent):"
+                .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop"
+                .. "\n[DO:jump]=прыгни/jump [DO:jump2]=twice [DO:jump3]=3x"
+                .. "\n[DO:dance]=танцуй/dance [DO:robot]=robot"
+                .. "\n[DO:wave]=привет/пока/hi/bye [DO:hello]=HELLO!/ДАРОВА"
+                .. "\n[DO:laugh]=lol/хаха/кек/ору/haha/ахаха/xd/смешно — ANY FUNNY"
+                .. "\n[DO:cheer]=gg/nice/молодец [DO:yay]=победа/ура/yay [DO:stadium]=epic/вау"
+                .. "\n[DO:shrug]=хз/idk [DO:sorry]=прости/sorry [DO:sad]=жаль/rip [DO:shy]=нуу/hmm"
+                .. "\n[DO:salute]=слушаюсь [DO:confused]=что?/huh? [DO:dizzy]=wtf/капец [DO:sit]=сядь [DO:point]=где/where"
+                .. "\nEX:подойди→[DO:goto]иду! lol→[DO:laugh]haha привет→[DO:wave]хей follow me→[DO:follow]ok"
         else
-            -- ── ПОЛНЫЙ РЕЖИМ: максимальное понимание ──────────────────────────
+            -- ── ПОЛНЫЙ РЕЖИМ ─────────────────────────────────────────────────
             system = system
                 .. "\n\n== ACTIONS & EMOTES =="
-                .. "\nYou control a Roblox character body. ONE tag at the VERY START of reply when appropriate."
-                .. "\nNEVER tag normal conversation. NEVER mention or explain the tag."
+                .. "\nYou control a Roblox character. ONE tag at VERY START of reply. NEVER explain the tag."
                 .. "\n"
-                .. "\nMOVEMENT — READ CAREFULLY:"
-                .. "\n[DO:goto]   = walk to the player ONE TIME then stop"
-                .. "\n  triggers: подойди, иди сюда, иди ко мне, иди к нам, подойди пожалуйста,"
-                .. "\n            come here, come to me, go here, walk here, get over here, come closer"
-                .. "\n  → ANY form of 'come here' or 'подойди' = [DO:goto], NOT [DO:follow]"
+                .. "\nMOVEMENT:"
+                .. "\n[DO:goto]   подойди/come here/иди сюда/иди ко мне — ONE-TIME, then stop"
+                .. "\n[DO:follow] иди за мной/follow me/следуй — CONTINUOUS"
+                .. "\n[DO:stop]   стой/stop/stay/halt"
+                .. "\n!! 'подойди'/'come here' = ALWAYS [DO:goto] not follow"
+                .. "\n!! When unsure goto vs follow → use [DO:goto]"
                 .. "\n"
-                .. "\n[DO:follow] = follow player CONTINUOUSLY until told to stop"
-                .. "\n  triggers: иди за мной, следуй за мной, ходи за мной, следуй,"
-                .. "\n            follow me, follow, walk with me, stay with me"
-                .. "\n"
-                .. "\n[DO:stop]   = stop all movement"
-                .. "\n  triggers: стой, остановись, не ходи, хватит, stop, stay, halt"
-                .. "\n"
-                .. "\n!! CRITICAL RULE: 'подойди'/'come here'/'иди сюда' = ALWAYS [DO:goto]"
-                .. "\n!! 'иди за мной'/'follow me' = ALWAYS [DO:follow]"
-                .. "\n!! When unsure between goto and follow → use [DO:goto]"
-                .. "\n"
-                .. "\nJUMPS:"
-                .. "\n[DO:jump]   прыгни/jump/hop"
-                .. "\n[DO:jump2]  два прыжка/jump twice"
-                .. "\n[DO:jump3]  три прыжка/jump three times"
-                .. "\n"
-                .. "\nDANCES:"
-                .. "\n[DO:dance]  танцуй/dance/потанцуй — random dance 10s"
-                .. "\n[DO:dance2] другой стиль/dance style 2"
-                .. "\n[DO:dance3] dance style 3"
-                .. "\n[DO:robot]  robot dance/роботанец"
+                .. "\nJUMPS: [DO:jump]=прыгни/jump  [DO:jump2]=twice  [DO:jump3]=3x"
+                .. "\nDANCES: [DO:dance]=танцуй/dance(random)  [DO:dance2]  [DO:dance3]  [DO:robot]=роботанец"
                 .. "\n"
                 .. "\nGREETINGS:"
-                .. "\n[DO:wave]  hi/hey/hello/bye/goodbye/привет/пока/здарова/хай"
-                .. "\n[DO:hello] HELLO!/HEY!!/YO!/ДАРОВА/ВАУ — big enthusiastic greeting"
+                .. "\n[DO:wave]  hi/hey/bye/привет/пока/здарова — ANY greeting"
+                .. "\n[DO:hello] HELLO!/ДАРОВА/YO! — big greeting"
                 .. "\n"
-                .. "\nLAUGH — MOST IMPORTANT RULE:"
-                .. "\n[DO:laugh] = USE THIS whenever ANYTHING is funny or player laughs"
-                .. "\nTriggers: lol, lmao, haha, hahaha, xd, XD, funny, смешно, хаха, хахаха,"
-                .. "\n          кек, ору, ахаха, ахахах, лол, лмао, )))), )))))), gg ez, rofl"
-                .. "\n→ DO NOT wait for the word 'laugh'. Use [DO:laugh] when the VIBE is funny."
+                .. "\nLAUGH — CRITICAL:"
+                .. "\n[DO:laugh] = lol/lmao/haha/хаха/кек/ору/ахаха/xd/)))) — ANY funny moment"
+                .. "\n→ Don't wait for 'laugh'. If it's FUNNY → [DO:laugh]"
                 .. "\n"
-                .. "\nCELEBRATION:"
-                .. "\n[DO:cheer]   nice/gg/cool/good job/молодец/красавчик/топ"
-                .. "\n[DO:yay]     yay/yes!/let's go/победа/ура/йес/давай — big win moment"
-                .. "\n[DO:stadium] amazing/incredible/epic/insane/невероятно/нереально/вау"
-                .. "\n"
-                .. "\nEMOTIONS:"
-                .. "\n[DO:shrug]   idk/dunno/maybe/хз/не знаю/может/понятия не имею"
-                .. "\n[DO:shy]     hmm/well.../нуу/эм/ну не знаю — shy or unsure"
-                .. "\n[DO:sorry]   sorry/my bad/oops/извини/прости/виноват/сорри"
-                .. "\n[DO:sad]     sad/rip/that sucks/грустно/жаль/рип/жалко"
-                .. "\n[DO:salute]  yes sir/ok boss/слушаюсь/так точно/есть"
-                .. "\n[DO:confused] what?/huh?/погоди/не понял/чё?/что?"
-                .. "\n[DO:dizzy]   wtf/what the/капец/офигеть/это как — extreme confusion"
-                .. "\n[DO:facepalm] omg/really/seriously/боже/ну серьёзно/ну и ну"
-                .. "\n[DO:sit]     sit/сядь/садись/посиди"
-                .. "\n[DO:point]   where/there/look/там/где/вон/смотри"
+                .. "\nREACTIONS:"
+                .. "\n[DO:cheer]   gg/nice/cool/молодец/красавчик"
+                .. "\n[DO:yay]     yay/победа/ура/lets go — win moment"
+                .. "\n[DO:stadium] epic/incredible/вау/нереально"
+                .. "\n[DO:shrug]   idk/хз/не знаю"
+                .. "\n[DO:shy]     нуу/hmm/ну не знаю"
+                .. "\n[DO:sorry]   sorry/прости/виноват"
+                .. "\n[DO:sad]     rip/жаль/грустно"
+                .. "\n[DO:salute]  yes sir/слушаюсь"
+                .. "\n[DO:confused] what?/что?/погоди"
+                .. "\n[DO:dizzy]   wtf/капец/офигеть"
+                .. "\n[DO:facepalm] omg/боже/ну серьёзно"
+                .. "\n[DO:sit]     sit/сядь"
+                .. "\n[DO:point]   where/там/где"
                 .. "\n"
                 .. "\nEXAMPLES:"
-                .. "\n'come here'   → [DO:goto] ok coming!"
-                .. "\n'подойди'     → [DO:goto] иду!"
-                .. "\n'иди сюда'    → [DO:goto] бегу!"
-                .. "\n'иди ко мне'  → [DO:goto] уже иду!"
-                .. "\n'follow me'   → [DO:follow] on my way!"
-                .. "\n'иди за мной' → [DO:follow] иду за тобой"
-                .. "\n'stop'        → [DO:stop] ok staying"
-                .. "\n'jump'        → [DO:jump] wheee!"
-                .. "\n'dance'       → [DO:dance] lets go!"
-                .. "\n'hi'          → [DO:wave] hey!"
-                .. "\n'HELLO!!'     → [DO:hello] HEYYYY!"
-                .. "\n'привет'      → [DO:wave] привет!"
-                .. "\n'lol'         → [DO:laugh] haha"
-                .. "\n'lmao'        → [DO:laugh] ikr"
-                .. "\n'hahaha'      → [DO:laugh] haha yeah"
-                .. "\n'ахахах'      → [DO:laugh] ха точно"
-                .. "\n'хахаха'      → [DO:laugh] ага ору"
-                .. "\n'кек'         → [DO:laugh] лол да"
-                .. "\n'))))'        → [DO:laugh] ахах"
-                .. "\n'we won!'     → [DO:yay] LETS GO!!!"
-                .. "\n'мы победили' → [DO:yay] ДАВАЙ!!!"
-                .. "\n'nice job'    → [DO:cheer] thanks!"
-                .. "\n'idk'         → [DO:shrug] yeah no idea"
-                .. "\n'hmm well'    → [DO:shy] hm idk"
-                .. "\n'sorry'       → [DO:sorry] its ok!"
-                .. "\n'rip'         → [DO:sad] yeah rip"
-                .. "\n'yes sir'     → [DO:salute] sir yes sir!"
-                .. "\n'what??'      → [DO:confused] wait huh?"
-                .. "\n'wtf'         → [DO:dizzy] omg lol"
-                .. "\n'how are you?' → just answer, NO tag"
-                .. "\n'what game?'   → just answer, NO tag"
+                .. "\nподойди→[DO:goto]иду!  follow me→[DO:follow]ok  stop→[DO:stop]ok"
+                .. "\njump→[DO:jump]wheee  dance→[DO:dance]lets go"
+                .. "\nhi→[DO:wave]hey  HELLO!!→[DO:hello]HEYY"
+                .. "\nlol→[DO:laugh]haha  lmao→[DO:laugh]ikr  хаха→[DO:laugh]ору  кек→[DO:laugh]лол"
+                .. "\nwe won→[DO:yay]LETS GO  gg→[DO:cheer]thanks  idk→[DO:shrug]no idea"
+                .. "\nsorry→[DO:sorry]ok  rip→[DO:sad]жаль  yes sir→[DO:salute]!"
+                .. "\nwhat??→[DO:confused]huh  wtf→[DO:dizzy]omg  how are you?→no tag"
         end
     end
 
@@ -1556,15 +1532,23 @@ local function handleQueuedChat(item)
     local apiMessages = {}
     table.insert(apiMessages, { role = "system", content = makeSystemPrompt(settings) })
 
-    -- Добавляем историю только если память включена
+    -- Добавляем историю — в экономном режиме берём только последние 2 пары (4 сообщения)
+    -- В обычном режиме — все MAX_HISTORY пар
     if history then
-        for _, msg in ipairs(history) do
-            table.insert(apiMessages, msg)
+        if settings.TokenEconomy then
+            -- Берём хвост: последние 4 элемента = 2 пары user+assistant
+            local startIdx = math.max(1, #history - 3)
+            for i = startIdx, #history do
+                table.insert(apiMessages, history[i])
+            end
+        else
+            for _, msg in ipairs(history) do
+                table.insert(apiMessages, msg)
+            end
         end
     end
 
-    -- UsePlayerName: извлекаем короткое имя и передаём через [NAME:x]
-    -- ИИ получает "Alex" а не "Alex12345" — работает с инструкцией в системном промпте
+    -- UsePlayerName
     local userContent = item.cleaned
     if settings.UsePlayerName then
         local rawNick = item.displayName or item.name or ""
@@ -1574,12 +1558,11 @@ local function handleQueuedChat(item)
         end
     end
 
-    -- v16.5: VoiceAwareness — если игрок сейчас говорит по войс чату, добавляем тег
+    -- v16.5: VoiceAwareness
     if settings.VoiceAwareness and item.player then
         if _voiceActiveUsers[item.player.UserId] then
             local shortName = extractShortName(item.displayName or item.name or "")
                            or (item.displayName or item.name or "Player")
-            -- Вставляем тег перед сообщением
             userContent = "[VOICE:" .. shortName .. "] " .. userContent
         end
     end
@@ -1589,13 +1572,19 @@ local function handleQueuedChat(item)
     local model = getModel(settings)
     if model == "" then return end
 
+    -- В экономном режиме max_tokens тоже уменьшаем (короткие ответы)
+    local maxTok = tonumber(settings.MaxTokens) or 512
+    if settings.TokenEconomy then
+        maxTok = math.min(maxTok, 150)
+    end
+
     local payload = {
         model       = model,
         temperature = tonumber(settings.Temperature) or 0.7,
-        max_tokens  = tonumber(settings.MaxTokens) or 512,
+        max_tokens  = maxTok,
         messages    = apiMessages,
     }
-    -- Qwen3 по умолчанию включает цепочку рассуждений — отключаем через reasoning_effort
+    -- Qwen3 отключаем reasoning
     if model == "qwen/qwen3-32b" then
         payload.reasoning_effort = "none"
     end
