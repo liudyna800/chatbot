@@ -761,7 +761,6 @@ local function makeSystemPrompt(settings)
     local hasCustom = type(custom) == "string" and custom:gsub("%s+", "") ~= ""
 
     if hasCustom then
-        -- В экономном режиме берём только первые 200 символов кастомного промпта
         if settings.TokenEconomy then
             system = custom:sub(1, 200)
         else
@@ -770,7 +769,6 @@ local function makeSystemPrompt(settings)
     elseif type(personalityId) == "string" and Personalities[personalityId] then
         local fullPersonality = tostring(Personalities[personalityId].system or "")
         if settings.TokenEconomy then
-            -- В экономном режиме — только первый абзац личности (до первого \n\n или 300 символов)
             local short = fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 300)
             system = short
         else
@@ -782,7 +780,17 @@ local function makeSystemPrompt(settings)
         system = "You are a helpful assistant in a Roblox game. Answer questions naturally and helpfully."
     end
 
-    -- Честность про актуальные данные — только в полном режиме (экономим токены)
+    -- FIX #4: ЯЗЫК — добавляем ПЕРВЫМ (до всех остальных блоков)
+    -- Это перебивает любые русские слова в системном промпте
+    system = system
+        .. "\n\nCRITICAL LANGUAGE RULE: Always reply in the SAME language the player used."
+        .. " If they wrote in English → reply in English."
+        .. " If they wrote in Russian → reply in Russian."
+        .. " If they wrote in any other language → use that language."
+        .. " NEVER switch languages unless the player switches first."
+        .. " The system context blocks ([NEARBY], [NAME:], etc.) are metadata — ignore their language for your reply."
+
+    -- Честность про актуальные данные — только в полном режиме
     if not settings.TokenEconomy then
         system = system
             .. "\nKnowledge cutoff: your training data has a cutoff date."
@@ -792,11 +800,10 @@ local function makeSystemPrompt(settings)
             .. " Never make up or guess trending content."
     end
 
-    -- v16.5: PlaceAwareness — ИИ знает что она в Roblox и в какой игре
+    -- v16.5: PlaceAwareness
     if settings.PlaceAwareness then
         local info = _placeInfo or { name = "a Roblox game", placeId = game.PlaceId, desc = "" }
         if settings.TokenEconomy then
-            -- Экономный: одна строка
             system = system
                 .. "\nYou are in Roblox game: \"" .. tostring(info.name) .. "\". Answer about it naturally."
         else
@@ -815,40 +822,44 @@ local function makeSystemPrompt(settings)
         end
     end
 
-    -- v17: PlayerAwareness — ИИ знает кто рядом и как себя ведёт
+    -- v17: PlayerAwareness
     if settings.PlayerAwareness then
         if settings.TokenEconomy then
             system = system
-                .. "\n[NEARBY] придёт в сообщении — реагируй на поведение игроков рядом естественно."
+                .. "\n[NEARBY] context in message — react to nearby players naturally."
         else
             system = system
                 .. "\n\n== PLAYER AWARENESS =="
-                .. "\nВ каждом сообщении есть блок [NEARBY] — кто стоит рядом, с какой стороны и как ведёт себя."
-                .. "\nИспользуй эту информацию естественно. Примеры:"
-                .. "\n  ПЕРЕД тобой → 'вижу тебя, привет!'"
-                .. "\n  СЗАДИ → 'эй, чувствую тебя за спиной'"
-                .. "\n  приближается → 'о, идёшь ко мне?'"
-                .. "\n  токсичит_сзади → 'я всё вижу, перестань дёргаться сзади!'"
-                .. "\nНЕ пиши '[NEARBY]' в ответе. Говори как о реальности вокруг тебя."
+                .. "\nEach message includes [NEARBY] block — who is nearby, their direction from you, and their behavior."
+                .. "\nUse this naturally in replies. Examples:"
+                .. "\n  player in FRONT → 'I see you, hey!'"
+                .. "\n  player BEHIND → 'I can feel you behind me'"
+                .. "\n  player approaching → 'oh, coming towards me?'"
+                .. "\n  player doing toxic_behind → 'I see everything you are doing back there, stop it!'"
+                .. "\nNEVER write '[NEARBY]' in your reply. Treat it as real perception."
         end
     end
 
-    -- UsePlayerName
+    -- FIX #5: UsePlayerName — частое использование ника
     if settings.UsePlayerName then
         if settings.TokenEconomy then
             system = system
-                .. "\nSYSTEM: [NAME:X] prefix in messages = player name. Use it naturally 1-2x per convo. Never write [NAME:...]."
+                .. "\nSYSTEM: [NAME:X] = player name. Use it in most replies naturally. Never write [NAME:...]."
         else
             system = system
                 .. "\n\nSYSTEM — Player name rule:"
                 .. "\nMessages arrive as: [NAME:Alex] hi there"
-                .. "\nUse that name naturally in reply. Examples:"
-                .. "\n  [NAME:Alex] sup → hey Alex!"
-                .. "\n  [NAME:Mia] lol → haha Mia ikr"
-                .. "\n  [NAME:Max] we won! → lets go Max!"
-                .. "\nRules: use name 1-2x per conversation, not every reply."
-                .. "\nNEVER write [NAME:...] yourself. Use plain name only."
-                .. "\nIf name is random characters (xXx123) — skip it."
+                .. "\nUse that name naturally and OFTEN — in most replies, not rarely."
+                .. "\nGood examples:"
+                .. "\n  [NAME:Alex] sup → hey Alex! wassup"
+                .. "\n  [NAME:Mia] lol → haha Mia that was funny"
+                .. "\n  [NAME:Max] we won! → lets go Max! gg"
+                .. "\n  [NAME:Pro] nice jump → yeah Pro that was clean"
+                .. "\nRules:"
+                .. "\n- Use the name in MOST replies (every 1-2 messages minimum)."
+                .. "\n- Place it anywhere — start, middle, or end."
+                .. "\n- NEVER write [NAME:...] yourself. Use plain name only."
+                .. "\n- If name looks like random chars (xXx123) — skip it."
         end
     end
 
@@ -884,8 +895,19 @@ local function makeSystemPrompt(settings)
                 .. "\n[DO:stop]   стой/stop/stay — stop moving"
                 .. "\n!! 'подойди'/'come here' = ALWAYS [DO:goto], never follow"
                 .. "\n"
-                .. "\nJUMPS: [DO:jump]=1  [DO:jump2]=2  [DO:jump3]=3  [DO:jump5]=5  [DO:jump10]=10 — если просят N прыжков используй ближайший тег"
-                .. "\nSPIN: [DO:spin]=крутись/spin(3с)  [DO:spin5]=5с  [DO:spin10]=10с — кружиться/вертеться/spin"
+                .. "\nJUMPS — ВАЖНО: число прыжков ВСЕГДА кодируй в тег!"
+                .. "\n  прыгни 1 раз / jump once → [DO:jump]"
+                .. "\n  прыгни 2 раза / jump twice → [DO:jump2]"
+                .. "\n  прыгни 3 раза → [DO:jump3]"
+                .. "\n  прыгни 4 раза → [DO:jump4]"
+                .. "\n  прыгни 5 раз / jump 5 times → [DO:jump5]"
+                .. "\n  прыгни 6 раз → [DO:jump6]"
+                .. "\n  прыгни 7 раз → [DO:jump7]"
+                .. "\n  прыгни 8 раз → [DO:jump8]"
+                .. "\n  прыгни 9 раз → [DO:jump9]"
+                .. "\n  прыгни 10 раз / jump 10 times → [DO:jump10]"
+                .. "\n  просто 'прыгни'/'jump' без числа → [DO:jump]"
+                .. "\nSPIN: [DO:spin]=крутись/spin(3с)  [DO:spin5]=5с  [DO:spin10]=10с"
                 .. "\nDANCES: [DO:dance]=случайный  [DO:dance2]  [DO:dance3]  [DO:robot]=роботанец"
                 .. "\n"
                 .. "\nGREETINGS:"
@@ -921,17 +943,19 @@ local function makeSystemPrompt(settings)
                 .. "\nЕСЛИ ПРОСЯТ ДЕЙСТВИЕ — ВЫПОЛНЯЙ:"
                 .. "\nпосмейся→[DO:laugh]  порадуйся→[DO:cheer]  потанцуй→[DO:dance]"
                 .. "\nскажи да→[DO:agree]  скажи нет→[DO:disagree]  закатай глаза→[DO:eyeroll]"
-                .. "\nпомашь→[DO:wave]  прыгни→[DO:jump]  сядь→[DO:sit]  покажи→[DO:point]"
+                .. "\nпомашь→[DO:wave]  сядь→[DO:sit]  покажи→[DO:point]"
+                .. "\nпрыгни→[DO:jump]  прыгни 2→[DO:jump2]  прыгни 3→[DO:jump3]  прыгни 4→[DO:jump4]"
+                .. "\nпрыгни 5→[DO:jump5]  прыгни 6→[DO:jump6]  прыгни 7→[DO:jump7]"
+                .. "\nпрыгни 8→[DO:jump8]  прыгни 9→[DO:jump9]  прыгни 10→[DO:jump10]"
                 .. "\n"
                 .. "\nEXAMPLES:"
-                .. "\nпосмейся→[DO:laugh]хаха!   lol→[DO:laugh]haha   кек→[DO:laugh]лол"
-                .. "\nпорадуйся→[DO:cheer]ура!   we won→[DO:yay]LETS GO!   вперёд→[DO:charging]погнали"
-                .. "\nда→[DO:agree]конечно   нет→[DO:disagree]неа   серьёзно?→[DO:eyeroll]боже"
-                .. "\nпривет→[DO:wave]хей   HELLO→[DO:hello]ЙО   потанцуй→[DO:dance]lets go"
-                .. "\nподойди→[DO:goto]иду   follow me→[DO:follow]ok   стой→[DO:stop]ок"
-                .. "\nпрыгни→[DO:jump]  прыгни 5 раз→[DO:jump5]wheee  прыгни 10→[DO:jump10]"
-                .. "\nкрутись→[DO:spin]ок  spin 10 сек→[DO:spin10]  вертись→[DO:spin]"
-                .. "\nidk→[DO:shrug]хз   sorry→[DO:sorry]всё ок   как дела?→без тега"
+                .. "\nпосмейся→[DO:laugh]хаха!   lol→[DO:laugh]haha"
+                .. "\nпорадуйся→[DO:cheer]ура!   we won→[DO:yay]LETS GO!"
+                .. "\nда→[DO:agree]конечно   нет→[DO:disagree]неа"
+                .. "\nпривет→[DO:wave]хей   подойди→[DO:goto]иду"
+                .. "\nпрыгни→[DO:jump]ok   прыгни 2 раза→[DO:jump2]ok   прыгни 5 раз→[DO:jump5]ok   прыгни 10 раз→[DO:jump10]ok"
+                .. "\nкрутись→[DO:spin]ок   крутись 10 сек→[DO:spin10]ок"
+                .. "\nidk→[DO:shrug]хз   sorry→[DO:sorry]всё ок"
         end
     end
 
@@ -1344,18 +1368,50 @@ end
 
 -- ── ПРЫЖКИ ───────────────────────────────────────────────────────────────
 -- jump/jump2/jump3/jumpN — от 1 до 10 прыжков
--- Нужен флаг чтобы камера не поворачивала пока прыгаем
 local _isJumping = false
 
 local function doJump(count)
     if not ClientSettings.ActionsEnabled then return end
-    count = math.max(1, math.min(count or 1, 10))  -- clamp 1..10
+    count = math.max(1, math.min(count or 1, 10))
+
     _isJumping = true
     task.spawn(function()
         for i = 1, count do
             local humanoid = getLocalHumanoid()
-            if humanoid then humanoid.Jump = true end
-            if i < count then task.wait(0.7) end
+            if not humanoid then break end
+
+            -- Ждём пока персонаж на земле перед прыжком
+            -- (если уже в воздухе — humanoid.Jump = true игнорируется Roblox)
+            local state = humanoid:GetState()
+            if state == Enum.HumanoidStateType.Jumping
+            or state == Enum.HumanoidStateType.FreeFalling
+            or state == Enum.HumanoidStateType.FallingDown then
+                -- Ждём приземления максимум 3 сек
+                local landed = false
+                local conn
+                conn = humanoid.StateChanged:Connect(function(_, newState)
+                    if newState == Enum.HumanoidStateType.Landed
+                    or newState == Enum.HumanoidStateType.Running
+                    or newState == Enum.HumanoidStateType.RunningNoPhysics then
+                        landed = true
+                    end
+                end)
+                local t0 = os.clock()
+                while not landed and (os.clock() - t0) < 3 do
+                    task.wait(0.05)
+                end
+                conn:Disconnect()
+                task.wait(0.05)  -- короткая пауза после приземления
+            end
+
+            -- Прыгаем
+            local hum2 = getLocalHumanoid()
+            if hum2 then hum2.Jump = true end
+
+            if i < count then
+                -- Ждём начала прыжка (смена стейта)
+                task.wait(0.15)
+            end
         end
         _isJumping = false
     end)
@@ -1495,8 +1551,28 @@ local function parseActionTag(text)
 end
 
 -- Выполнить действие по имени. cleanText — уже очищенный текст без тега.
-local function executeAction(actionName, sourcePlayer, cleanText)
+-- originalUserMsg — оригинальное сообщение пользователя (для умного парсинга прыжков)
+local function executeAction(actionName, sourcePlayer, cleanText, originalUserMsg)
     if actionName and ClientSettings.ActionsEnabled then
+        -- Умный парсинг числа прыжков: если ИИ написал [DO:jump] но в сообщении было число
+        -- Например: "прыгни 5 раз" → ИИ пишет [DO:jump] → мы видим 5 → вызываем doJump(5)
+        if actionName == "jump" and originalUserMsg then
+            local msg = originalUserMsg:lower()
+            -- Ищем число перед/после "раз", "раза", "times", "прыжк"
+            local n = msg:match("(%d+)%s*ра[зза]")
+                   or msg:match("(%d+)%s*прыжк")
+                   or msg:match("(%d+)%s*times?")
+                   or msg:match("jump%s*(%d+)")
+                   or msg:match("прыгни%s*(%d+)")
+            if n then
+                n = math.max(1, math.min(tonumber(n) or 1, 10))
+                if n > 1 then
+                    task.spawn(function() doJump(n) end)
+                    return cleanText or ""
+                end
+            end
+        end
+
         local handler = ACTION_HANDLERS[actionName]
         if handler then
             task.spawn(function() handler(sourcePlayer) end)
@@ -1573,9 +1649,8 @@ local function getRelativeDirection(myRoot, theirRoot)
 end
 
 -- Оцениваем поведение игрока по его скорости + позиции относительно нас
--- history: таблица { pos, time } последних N тиков
-local _playerBehaviorHistory = {}  -- [userId] = { entries = {{pos,t},...}, lastDir = "" }
-local BEHAVIOR_HISTORY_LEN = 8    -- сколько тиков хранить (~2.4 сек при 0.3с)
+local _playerBehaviorHistory = {}  -- [userId] = { entries = {{pos,t,dir},...} }
+local BEHAVIOR_HISTORY_LEN = 20   -- ~6 секунд при 0.3с интервале (было 8 = 2.4с)
 local _behaviorThread = nil
 
 local function startBehaviorMonitor()
@@ -1611,8 +1686,7 @@ local function startBehaviorMonitor()
     end)
 end
 
--- Определяем паттерн поведения игрока: "стоит", "ходит", "приближается",
--- "удаляется", "кружится_сзади" (back-and-forth за спиной = токсик)
+-- Определяем паттерн поведения игрока
 local function detectBehavior(uid, myRoot)
     local hist = _playerBehaviorHistory[uid]
     if not hist or #hist.entries < 4 then return "стоит" end
@@ -1620,21 +1694,21 @@ local function detectBehavior(uid, myRoot)
     local entries = hist.entries
     local n = #entries
 
-    -- Средняя скорость
     local totalDist = 0
     local dirChanges = 0
     local behindCount = 0
-    local prevDir = nil
+
     for i = 2, n do
         totalDist = totalDist + (entries[i].pos - entries[i-1].pos).Magnitude
         if entries[i].dir == "сзади" then behindCount = behindCount + 1 end
-        -- считаем смены направления движения (признак дёргания)
+
+        -- Смены направления движения (вперёд-назад = дёргание)
         if i >= 3 then
             local v1 = entries[i-1].pos - entries[i-2].pos
             local v2 = entries[i].pos - entries[i-1].pos
-            if v1.Magnitude > 0.1 and v2.Magnitude > 0.1 then
+            if v1.Magnitude > 0.05 and v2.Magnitude > 0.05 then
                 local dot = v1.Unit:Dot(v2.Unit)
-                if dot < -0.5 then dirChanges = dirChanges + 1 end
+                if dot < -0.3 then dirChanges = dirChanges + 1 end  -- было -0.5
             end
         end
     end
@@ -1642,13 +1716,14 @@ local function detectBehavior(uid, myRoot)
     local dt = entries[n].time - entries[1].time
     local avgSpeed = dt > 0 and (totalDist / dt) or 0
 
-    -- Логика паттернов
-    if behindCount >= 5 and dirChanges >= 2 then
-        return "токсичит_сзади"  -- дёргается за спиной
-    elseif avgSpeed < 0.5 then
+    -- FIX: снижены пороги: было behindCount>=5 и dirChanges>=2
+    -- Теперь: 40% тиков сзади + 1 смена направления = токсик
+    local behindRatio = behindCount / (n - 1)
+    if behindRatio >= 0.4 and dirChanges >= 1 and avgSpeed > 0.3 then
+        return "токсичит_сзади"
+    elseif avgSpeed < 0.3 then
         return "стоит"
     else
-        -- Двигается — приближается или удаляется?
         local myPos = myRoot and myRoot.Position or Vector3.zero
         local d1 = (entries[1].pos - myPos).Magnitude
         local d2 = (entries[n].pos - myPos).Magnitude
@@ -1712,43 +1787,56 @@ startBehaviorMonitor()
 
 local _cameraLookThread = nil
 
--- Плавно поворачиваем HumanoidRootPart к targetPosition за ~0.5 сек
+-- Плавно поворачиваем HumanoidRootPart к targetPosition
+-- Использует накопительный Lerp — гарантированно доворачивается до конца
 local function smoothLookAt(targetPos)
     if not ClientSettings.CameraLook then return end
-    -- Не крутимся если идём / прыгаем / спиним
     if _isFollowing or _isGoing or _isJumping or _isSpinning then return end
 
     local root = getLocalRootPart()
     if not root then return end
 
-    -- Отменяем предыдущий поворот
     if _cameraLookThread then
         pcall(task.cancel, _cameraLookThread)
         _cameraLookThread = nil
     end
 
     _cameraLookThread = task.spawn(function()
-        local steps = 12  -- шагов интерполяции
-        local dt     = 0.04  -- ~25 fps
+        local duration = 0.4  -- секунд на полный поворот
+        local dt       = 0.04
+        local elapsed  = 0
 
-        for i = 1, steps do
-            -- Перепроверяем флаги на каждом шаге
+        while elapsed < duration do
             if _isFollowing or _isGoing or _isJumping or _isSpinning then break end
 
             local r = getLocalRootPart()
             if not r then break end
 
-            -- Направление к цели (только горизонталь — Y не меняем)
             local dir = (targetPos - r.Position) * Vector3.new(1, 0, 1)
             if dir.Magnitude < 0.5 then break end
 
+            -- targetCF — куда смотреть
             local targetCF = CFrame.new(r.Position, r.Position + dir.Unit)
-            -- Интерполируем: t от 1/steps до 1
-            local t = i / steps
-            r.CFrame = r.CFrame:Lerp(targetCF, t * 0.18)
 
+            -- alpha = прогресс (0→1) за duration секунд
+            -- используем накопительный Lerp: каждый шаг двигаемся на alpha долю
+            -- итоговое суммарное движение = 1 - (1-alpha)^steps ≈ 1
+            local alpha = math.min(dt / (duration - elapsed + 0.001), 1)
+            r.CFrame = r.CFrame:Lerp(targetCF, alpha)
+
+            elapsed = elapsed + dt
             task.wait(dt)
         end
+
+        -- Финальная фиксация — гарантируем точный поворот
+        local r = getLocalRootPart()
+        if r and not (_isFollowing or _isGoing or _isJumping or _isSpinning) then
+            local dir = (targetPos - r.Position) * Vector3.new(1, 0, 1)
+            if dir.Magnitude >= 0.5 then
+                r.CFrame = CFrame.new(r.Position, r.Position + dir.Unit)
+            end
+        end
+
         _cameraLookThread = nil
     end)
 end
@@ -1889,8 +1977,7 @@ local function handleQueuedChat(item)
     -- v16: парсим тег [DO:xxx] из ответа ИИ
     -- parseActionTag возвращает (actionName, cleanText) — оба нужны
     local actionName, cleanText = parseActionTag(text)
-    -- executeAction выполняет действие если есть и возвращает текст без тега
-    cleanText = executeAction(actionName, item.player, cleanText)
+    cleanText = executeAction(actionName, item.player, cleanText, item.cleaned)
 
     -- Сохраняем в историю только если память включена (history не nil)
     if history then
