@@ -826,40 +826,36 @@ local function makeSystemPrompt(settings)
     if settings.PlayerAwareness then
         if settings.TokenEconomy then
             system = system
-                .. "\n[NEARBY] context in message — react to nearby players naturally."
+                .. "\n[NEARBY] shows nearby players, direction, behavior. If ⚠ TOXIC BEHAVIOR alert appears — react to it in character."
         else
             system = system
                 .. "\n\n== PLAYER AWARENESS =="
-                .. "\nEach message includes [NEARBY] block — who is nearby, their direction from you, and their behavior."
-                .. "\nUse this naturally in replies. Examples:"
-                .. "\n  player in FRONT → 'I see you, hey!'"
-                .. "\n  player BEHIND → 'I can feel you behind me'"
-                .. "\n  player approaching → 'oh, coming towards me?'"
-                .. "\n  player doing toxic_behind → 'I see everything you are doing back there, stop it!'"
-                .. "\nNEVER write '[NEARBY]' in your reply. Treat it as real perception."
+                .. "\nBefore each message you receive a [NEARBY] block listing nearby players, their direction from you, and behavior."
+                .. "\nDirections: перед=in front, сзади=behind, справа=right, слева=left, спереди-справа=front-right, etc."
+                .. "\nReact naturally, as if you physically perceive your surroundings:"
+                .. "\n  'in front' → 'I see you right there!'"
+                .. "\n  'behind' → 'I can feel someone behind me'"
+                .. "\n  'front-right' → 'hey, you on my right side'"
+                .. "\n  TOXIC BEHAVIOR alert → react with surprise/annoyance: 'I know what you're doing back there, stop it!'"
+                .. "\nNEVER print [NEARBY] or direction labels in your reply. Speak naturally."
+                .. "\nIf no [NEARBY] block is given, nobody notable is nearby."
         end
     end
 
-    -- FIX #5: UsePlayerName — частое использование ника
+    -- UsePlayerName
     if settings.UsePlayerName then
         if settings.TokenEconomy then
             system = system
-                .. "\nSYSTEM: [NAME:X] = player name. Use it in most replies naturally. Never write [NAME:...]."
+                .. "\nSYSTEM: [NAME:X] = player's name. Use the name directly (e.g. 'hey Alex'). NEVER copy [NAME:...] tag."
         else
             system = system
-                .. "\n\nSYSTEM — Player name rule:"
-                .. "\nMessages arrive as: [NAME:Alex] hi there"
-                .. "\nUse that name naturally and OFTEN — in most replies, not rarely."
-                .. "\nGood examples:"
-                .. "\n  [NAME:Alex] sup → hey Alex! wassup"
-                .. "\n  [NAME:Mia] lol → haha Mia that was funny"
-                .. "\n  [NAME:Max] we won! → lets go Max! gg"
-                .. "\n  [NAME:Pro] nice jump → yeah Pro that was clean"
-                .. "\nRules:"
-                .. "\n- Use the name in MOST replies (every 1-2 messages minimum)."
-                .. "\n- Place it anywhere — start, middle, or end."
-                .. "\n- NEVER write [NAME:...] yourself. Use plain name only."
-                .. "\n- If name looks like random chars (xXx123) — skip it."
+                .. "\n\n== PLAYER NAME RULE =="
+                .. "\nMessages arrive prefixed with [NAME:Alex] — that is the player's name."
+                .. "\nIMPORTANT — FORBIDDEN: never write '[NAME:...]' in your reply. Extract the name and use it plain."
+                .. "\nCorrect: [NAME:Alex] hi → 'hey Alex what's up'"
+                .. "\nWRONG:   [NAME:Alex] hi → '[NAME:Alex] hi there' ← NEVER do this"
+                .. "\nUse the name often — in most replies. Place it anywhere naturally."
+                .. "\nIf name looks like random chars (xXx_123) — skip it silently."
         end
     end
 
@@ -1654,28 +1650,41 @@ end)
 
 -- Направление от нас к игроку относительно нашего взгляда
 -- Возвращает: "перед", "сзади", "слева", "справа"
+-- Направление от нас к игроку — 8 направлений
+-- Используем порог 0.4 для диагоналей
 local function getRelativeDirection(myRoot, theirRoot)
     if not myRoot or not theirRoot then return "рядом" end
-    local diff = (theirRoot.Position - myRoot.Position).Unit
+    local diff = (theirRoot.Position - myRoot.Position)
+    if diff.Magnitude < 0.1 then return "рядом" end
+    local unit  = diff.Unit
     local look  = myRoot.CFrame.LookVector
     local right = myRoot.CFrame.RightVector
 
-    local forward = diff:Dot(look)
-    local lateral = diff:Dot(right)
+    local fwd = unit:Dot(look)   -- +1 = прямо впереди, -1 = прямо сзади
+    local lat = unit:Dot(right)  -- +1 = прямо справа, -1 = прямо слева
 
-    if math.abs(forward) > math.abs(lateral) then
-        return forward > 0 and "перед" or "сзади"
-    else
-        return lateral > 0 and "справа" or "слева"
+    -- Порог диагонали: если оба компонента > 0.4 — комбинированное направление
+    local DIAG = 0.42
+
+    if fwd > DIAG and lat > DIAG  then return "спереди-справа"
+    elseif fwd > DIAG and lat < -DIAG then return "спереди-слева"
+    elseif fwd < -DIAG and lat > DIAG  then return "сзади-справа"
+    elseif fwd < -DIAG and lat < -DIAG then return "сзади-слева"
+    elseif fwd > 0.3   then return "перед"
+    elseif fwd < -0.3  then return "сзади"
+    elseif lat > 0     then return "справа"
+    else                    return "слева"
     end
 end
 
 -- Оцениваем поведение игрока
--- isBehind записывается в момент тика — НЕ пересчитывается позже
--- Это значит поворот бота не влияет на историю "сзади"
 local _playerBehaviorHistory = {}
 local BEHAVIOR_HISTORY_LEN = 20  -- ~6 сек при тике 0.3с
 local _behaviorThread = nil
+
+-- Флаги активных токсиков: [userId] = true если обнаружен токсик
+-- При следующем chat-запросе будет вставлен алерт
+local _toxicAlerts = {}
 
 local function startBehaviorMonitor()
     if _behaviorThread then return end
@@ -1684,7 +1693,7 @@ local function startBehaviorMonitor()
             local myRoot = getLocalRootPart()
             if myRoot then
                 local myPos  = myRoot.Position
-                local myLook = myRoot.CFrame.LookVector  -- снапшот прямо сейчас
+                local myLook = myRoot.CFrame.LookVector
 
                 for _, p in ipairs(Players:GetPlayers()) do
                     if p ~= Players.LocalPlayer then
@@ -1697,7 +1706,6 @@ local function startBehaviorMonitor()
                             end
                             local hist = _playerBehaviorHistory[uid]
 
-                            -- isBehind: dot < 0 → игрок за спиной (по снапшоту LookVector)
                             local diff = root.Position - myPos
                             local isBehind = false
                             if diff.Magnitude > 0.1 then
@@ -1722,30 +1730,24 @@ local function startBehaviorMonitor()
     end)
 end
 
--- Определяем паттерн поведения игрока
 local function detectBehavior(uid, myRoot)
     local hist = _playerBehaviorHistory[uid]
     if not hist or #hist.entries < 4 then return "стоит" end
 
     local entries = hist.entries
     local n = #entries
-
     local totalDist  = 0
     local dirChanges = 0
     local behindCount = 0
 
     for i = 2, n do
         totalDist = totalDist + (entries[i].pos - entries[i-1].pos).Magnitude
-
-        -- isBehind записан в момент снапшота — не меняется от поворота бота
         if entries[i].isBehind then behindCount = behindCount + 1 end
-
-        -- Смены направления: вектор движения разворачивается
         if i >= 3 then
             local v1 = entries[i-1].pos - entries[i-2].pos
             local v2 = entries[i].pos   - entries[i-1].pos
-            if v1.Magnitude > 0.1 and v2.Magnitude > 0.1 then
-                if v1.Unit:Dot(v2.Unit) < -0.25 then
+            if v1.Magnitude > 0.05 and v2.Magnitude > 0.05 then
+                if v1.Unit:Dot(v2.Unit) < -0.2 then  -- снижен порог
                     dirChanges = dirChanges + 1
                 end
             end
@@ -1755,23 +1757,22 @@ local function detectBehavior(uid, myRoot)
     local dt = entries[n].time - entries[1].time
     local avgSpeed = dt > 0 and (totalDist / dt) or 0
 
-    -- Токсик: >35% времени за спиной + 2+ смены направления + реально двигается
+    -- Снижены пороги: 30% тиков сзади + 1 смена + любое движение
     local behindRatio = behindCount / math.max(n - 1, 1)
-    if behindRatio >= 0.35 and dirChanges >= 2 and avgSpeed > 0.5 then
+    if behindRatio >= 0.30 and dirChanges >= 1 and avgSpeed > 0.15 then
         return "токсичит_сзади"
-    elseif avgSpeed < 0.3 then
+    elseif avgSpeed < 0.15 then
         return "стоит"
     else
-        local myPos = myRoot and myRoot.Position or Vector3.zero
-        local d1 = (entries[1].pos - myPos).Magnitude
-        local d2 = (entries[n].pos - myPos).Magnitude
+        local myPos2 = myRoot and myRoot.Position or Vector3.zero
+        local d1 = (entries[1].pos - myPos2).Magnitude
+        local d2 = (entries[n].pos - myPos2).Magnitude
         if d2 < d1 - 2 then return "приближается"
         elseif d2 > d1 + 2 then return "удаляется"
         else return "ходит" end
     end
 end
 
--- Строит контекстную строку для промпта о ближайших игроках
 local function buildPlayerAwarenessContext(settings)
     if not settings.PlayerAwareness then return "" end
     local myRoot = getLocalRootPart()
@@ -1792,26 +1793,30 @@ local function buildPlayerAwarenessContext(settings)
                     local distStr   = math.floor(dist) .. " studs"
                     local name      = p.DisplayName or p.Name
 
-                    local behaviorRu = behavior == "стоит"         and "стоит неподвижно"
-                        or behavior == "приближается" and "идёт к тебе"
-                        or behavior == "удаляется"    and "уходит от тебя"
-                        or behavior == "ходит"        and "ходит рядом"
-                        or behavior == "токсичит_сзади" and "дёргается сзади тебя (токсичное поведение)"
-                        or "рядом"
+                    -- Токсик обнаружен — ставим флаг для проактивного алерта
+                    if behavior == "токсичит_сзади" then
+                        _toxicAlerts[p.UserId] = name
+                    end
+
+                    local behaviorDesc = behavior == "стоит"            and "standing still"
+                        or behavior == "приближается"  and "walking towards you"
+                        or behavior == "удаляется"     and "walking away"
+                        or behavior == "ходит"         and "moving around"
+                        or behavior == "токсичит_сзади" and "TOXIC: back-and-forth movement behind you"
+                        or "nearby"
 
                     table.insert(lines, string.format(
-                        '  "%s" — %s от тебя (%s), %s',
-                        name, direction, distStr, behaviorRu
+                        "  %s — %s (%s away), %s",
+                        name, direction, distStr, behaviorDesc
                     ))
                 end
             end
         end
     end
 
-    if #lines == 0 then
-        return "\n[NEARBY: рядом никого нет]"
-    end
-    return "\n[NEARBY — игроки рядом:\n" .. table.concat(lines, "\n") .. "\n]"
+    -- Если рядом никого — возвращаем пустую строку (не тратим токены на "nobody around")
+    if #lines == 0 then return "" end
+    return "\n[NEARBY:\n" .. table.concat(lines, "\n") .. "\n]"
 end
 
 -- Запускаем мониторинг поведения сразу
@@ -1974,21 +1979,34 @@ local function handleQueuedChat(item)
         end
     end
 
-    table.insert(apiMessages, { role = "user", content = userContent })
-
-    -- v17: PlayerAwareness — добавляем контекст о ближайших игроках
+    -- v17: PlayerAwareness — добавляем контекст о ближайших игроках ПЕРЕД user message
     if settings.PlayerAwareness then
         local nearbyCtx = buildPlayerAwarenessContext(settings)
+        -- Вставляем только если рядом есть игроки (пустая строка = никого нет)
         if nearbyCtx ~= "" then
-            -- Вставляем как системное сообщение перед user message
-            -- (не модифицируем userContent — чтобы история была чистой)
-            local lastIdx = #apiMessages
-            table.insert(apiMessages, lastIdx, {
-                role = "system",
-                content = "ТЕКУЩЕЕ ОКРУЖЕНИЕ:" .. nearbyCtx
+            table.insert(apiMessages, {
+                role    = "system",
+                content = "CURRENT SURROUNDINGS (live snapshot):" .. nearbyCtx
+            })
+        end
+
+        -- Проактивный токсик-алерт: если обнаружен токсик — добавляем явный алерт
+        -- Работает ДАЖЕ если в [NEARBY] его нет (например игрок вышел из зоны после детекта)
+        local toxicNames = {}
+        for uid, tname in pairs(_toxicAlerts) do
+            table.insert(toxicNames, tostring(tname))
+            _toxicAlerts[uid] = nil  -- очищаем после использования (не повторяем вечно)
+        end
+        if #toxicNames > 0 then
+            table.insert(apiMessages, {
+                role    = "system",
+                content = "⚠ TOXIC BEHAVIOR DETECTED: player(s) [" .. table.concat(toxicNames, ", ") 
+                    .. "] were repeatedly moving back-and-forth behind you. React naturally — call them out, say you noticed, or warn them."
             })
         end
     end
+
+    table.insert(apiMessages, { role = "user", content = userContent })
 
     local model = getModel(settings)
     if model == "" then return end
@@ -2014,6 +2032,10 @@ local function handleQueuedChat(item)
     if err or not text or text == "" then
         return
     end
+
+    -- FIX: удаляем [NAME:...] теги из ответа ИИ если модель их нечаянно скопировала
+    -- Это надёжнее чем надеяться только на промпт
+    text = text:gsub("%[NAME:[^%]]*%]%s*", "")
 
     -- v17: поворачиваемся к говорящему игроку (если CameraLook включён)
     if item.player and item.player.Character then
