@@ -1367,53 +1367,75 @@ local function startFollowingPlayer(targetPlayer)
 end
 
 -- ── ПРЫЖКИ ───────────────────────────────────────────────────────────────
--- jump/jump2/jump3/jumpN — от 1 до 10 прыжков
-local _isJumping = false
+local _isJumping        = false
+local _jumpTimeoutThread = nil  -- аварийный таймаут сброса флага
+
+-- Гарантированный сброс флага (через таймаут или по завершении)
+local function _clearJumpFlag()
+    _isJumping = false
+    if _jumpTimeoutThread then
+        pcall(task.cancel, _jumpTimeoutThread)
+        _jumpTimeoutThread = nil
+    end
+end
 
 local function doJump(count)
     if not ClientSettings.ActionsEnabled then return end
+    if _isJumping then return end
     count = math.max(1, math.min(count or 1, 10))
 
     _isJumping = true
+    -- Аварийный таймаут: через 15 сек флаг сбросится в любом случае
+    _jumpTimeoutThread = task.delay(15, _clearJumpFlag)
+
     task.spawn(function()
         for i = 1, count do
+            -- Каждая операция обёрнута в pcall отдельно — yield-safe
             local humanoid = getLocalHumanoid()
             if not humanoid then break end
 
-            -- Ждём пока персонаж на земле перед прыжком
-            -- (если уже в воздухе — humanoid.Jump = true игнорируется Roblox)
-            local state = humanoid:GetState()
-            if state == Enum.HumanoidStateType.Jumping
-            or state == Enum.HumanoidStateType.FreeFalling
-            or state == Enum.HumanoidStateType.FallingDown then
-                -- Ждём приземления максимум 3 сек
+            -- Проверяем стейт (без yield, безопасно)
+            local inAir = false
+            pcall(function()
+                local s = humanoid:GetState()
+                inAir = (s == Enum.HumanoidStateType.Jumping
+                      or s == Enum.HumanoidStateType.FreeFalling
+                      or s == Enum.HumanoidStateType.FallingDown)
+            end)
+
+            -- Если в воздухе — ждём приземления (yield внутри task.wait, не xpcall)
+            if inAir then
                 local landed = false
                 local conn
-                conn = humanoid.StateChanged:Connect(function(_, newState)
-                    if newState == Enum.HumanoidStateType.Landed
-                    or newState == Enum.HumanoidStateType.Running
-                    or newState == Enum.HumanoidStateType.RunningNoPhysics then
-                        landed = true
-                    end
+                pcall(function()
+                    conn = humanoid.StateChanged:Connect(function(_, ns)
+                        if ns == Enum.HumanoidStateType.Landed
+                        or ns == Enum.HumanoidStateType.Running
+                        or ns == Enum.HumanoidStateType.GettingUp then
+                            landed = true
+                        end
+                    end)
                 end)
                 local t0 = os.clock()
-                while not landed and (os.clock() - t0) < 3 do
+                while not landed and (os.clock() - t0) < 2.5 do
                     task.wait(0.05)
                 end
-                conn:Disconnect()
-                task.wait(0.05)  -- короткая пауза после приземления
+                if conn then pcall(function() conn:Disconnect() end) end
+                task.wait(0.05)
             end
 
             -- Прыгаем
-            local hum2 = getLocalHumanoid()
-            if hum2 then hum2.Jump = true end
+            pcall(function()
+                local h = getLocalHumanoid()
+                if h then h.Jump = true end
+            end)
 
+            -- Пауза между прыжками (не после последнего)
             if i < count then
-                -- Ждём начала прыжка (смена стейта)
-                task.wait(0.15)
+                task.wait(0.2)
             end
         end
-        _isJumping = false
+        _clearJumpFlag()  -- нормальное завершение
     end)
 end
 
@@ -1648,9 +1670,11 @@ local function getRelativeDirection(myRoot, theirRoot)
     end
 end
 
--- Оцениваем поведение игрока по его скорости + позиции относительно нас
-local _playerBehaviorHistory = {}  -- [userId] = { entries = {{pos,t,dir},...} }
-local BEHAVIOR_HISTORY_LEN = 20   -- ~6 секунд при 0.3с интервале (было 8 = 2.4с)
+-- Оцениваем поведение игрока
+-- isBehind записывается в момент тика — НЕ пересчитывается позже
+-- Это значит поворот бота не влияет на историю "сзади"
+local _playerBehaviorHistory = {}
+local BEHAVIOR_HISTORY_LEN = 20  -- ~6 сек при тике 0.3с
 local _behaviorThread = nil
 
 local function startBehaviorMonitor()
@@ -1659,6 +1683,9 @@ local function startBehaviorMonitor()
         while true do
             local myRoot = getLocalRootPart()
             if myRoot then
+                local myPos  = myRoot.Position
+                local myLook = myRoot.CFrame.LookVector  -- снапшот прямо сейчас
+
                 for _, p in ipairs(Players:GetPlayers()) do
                     if p ~= Players.LocalPlayer then
                         local char = p.Character
@@ -1669,10 +1696,19 @@ local function startBehaviorMonitor()
                                 _playerBehaviorHistory[uid] = { entries = {} }
                             end
                             local hist = _playerBehaviorHistory[uid]
+
+                            -- isBehind: dot < 0 → игрок за спиной (по снапшоту LookVector)
+                            local diff = root.Position - myPos
+                            local isBehind = false
+                            if diff.Magnitude > 0.1 then
+                                isBehind = diff.Unit:Dot(myLook) < 0
+                            end
+
                             table.insert(hist.entries, {
-                                pos  = root.Position,
-                                time = os.clock(),
-                                dir  = getRelativeDirection(myRoot, root),
+                                pos      = root.Position,
+                                time     = os.clock(),
+                                isBehind = isBehind,
+                                dir      = getRelativeDirection(myRoot, root),
                             })
                             if #hist.entries > BEHAVIOR_HISTORY_LEN then
                                 table.remove(hist.entries, 1)
@@ -1694,21 +1730,24 @@ local function detectBehavior(uid, myRoot)
     local entries = hist.entries
     local n = #entries
 
-    local totalDist = 0
+    local totalDist  = 0
     local dirChanges = 0
     local behindCount = 0
 
     for i = 2, n do
         totalDist = totalDist + (entries[i].pos - entries[i-1].pos).Magnitude
-        if entries[i].dir == "сзади" then behindCount = behindCount + 1 end
 
-        -- Смены направления движения (вперёд-назад = дёргание)
+        -- isBehind записан в момент снапшота — не меняется от поворота бота
+        if entries[i].isBehind then behindCount = behindCount + 1 end
+
+        -- Смены направления: вектор движения разворачивается
         if i >= 3 then
             local v1 = entries[i-1].pos - entries[i-2].pos
-            local v2 = entries[i].pos - entries[i-1].pos
-            if v1.Magnitude > 0.05 and v2.Magnitude > 0.05 then
-                local dot = v1.Unit:Dot(v2.Unit)
-                if dot < -0.3 then dirChanges = dirChanges + 1 end  -- было -0.5
+            local v2 = entries[i].pos   - entries[i-1].pos
+            if v1.Magnitude > 0.1 and v2.Magnitude > 0.1 then
+                if v1.Unit:Dot(v2.Unit) < -0.25 then
+                    dirChanges = dirChanges + 1
+                end
             end
         end
     end
@@ -1716,10 +1755,9 @@ local function detectBehavior(uid, myRoot)
     local dt = entries[n].time - entries[1].time
     local avgSpeed = dt > 0 and (totalDist / dt) or 0
 
-    -- FIX: снижены пороги: было behindCount>=5 и dirChanges>=2
-    -- Теперь: 40% тиков сзади + 1 смена направления = токсик
-    local behindRatio = behindCount / (n - 1)
-    if behindRatio >= 0.4 and dirChanges >= 1 and avgSpeed > 0.3 then
+    -- Токсик: >35% времени за спиной + 2+ смены направления + реально двигается
+    local behindRatio = behindCount / math.max(n - 1, 1)
+    if behindRatio >= 0.35 and dirChanges >= 2 and avgSpeed > 0.5 then
         return "токсичит_сзади"
     elseif avgSpeed < 0.3 then
         return "стоит"
@@ -1785,10 +1823,17 @@ startBehaviorMonitor()
 -- НЕ работает во время: ходьбы, прыжков, спина
 -- ═══════════════════════════════════════════════════════════════════════════
 
-local _cameraLookThread = nil
+local _cameraLookThread        = nil
+local _cameraLookTimeoutThread = nil  -- аварийный таймаут
 
--- Плавно поворачиваем HumanoidRootPart к targetPosition
--- Использует накопительный Lerp — гарантированно доворачивается до конца
+local function _clearCameraThread()
+    _cameraLookThread = nil
+    if _cameraLookTimeoutThread then
+        pcall(task.cancel, _cameraLookTimeoutThread)
+        _cameraLookTimeoutThread = nil
+    end
+end
+
 local function smoothLookAt(targetPos)
     if not ClientSettings.CameraLook then return end
     if _isFollowing or _isGoing or _isJumping or _isSpinning then return end
@@ -1796,13 +1841,17 @@ local function smoothLookAt(targetPos)
     local root = getLocalRootPart()
     if not root then return end
 
+    -- Отменяем предыдущий поворот
     if _cameraLookThread then
         pcall(task.cancel, _cameraLookThread)
-        _cameraLookThread = nil
+        _clearCameraThread()
     end
 
+    -- Аварийный таймаут: через 3 сек флаг сбросится в любом случае
+    _cameraLookTimeoutThread = task.delay(3, _clearCameraThread)
+
     _cameraLookThread = task.spawn(function()
-        local duration = 0.4  -- секунд на полный поворот
+        local duration = 0.4
         local dt       = 0.04
         local elapsed  = 0
 
@@ -1815,29 +1864,29 @@ local function smoothLookAt(targetPos)
             local dir = (targetPos - r.Position) * Vector3.new(1, 0, 1)
             if dir.Magnitude < 0.5 then break end
 
-            -- targetCF — куда смотреть
             local targetCF = CFrame.new(r.Position, r.Position + dir.Unit)
-
-            -- alpha = прогресс (0→1) за duration секунд
-            -- используем накопительный Lerp: каждый шаг двигаемся на alpha долю
-            -- итоговое суммарное движение = 1 - (1-alpha)^steps ≈ 1
             local alpha = math.min(dt / (duration - elapsed + 0.001), 1)
-            r.CFrame = r.CFrame:Lerp(targetCF, alpha)
+            -- pcall на CFrame write — если персонаж уничтожен не падаем
+            pcall(function() r.CFrame = r.CFrame:Lerp(targetCF, alpha) end)
 
             elapsed = elapsed + dt
             task.wait(dt)
         end
 
-        -- Финальная фиксация — гарантируем точный поворот
-        local r = getLocalRootPart()
-        if r and not (_isFollowing or _isGoing or _isJumping or _isSpinning) then
-            local dir = (targetPos - r.Position) * Vector3.new(1, 0, 1)
-            if dir.Magnitude >= 0.5 then
-                r.CFrame = CFrame.new(r.Position, r.Position + dir.Unit)
+        -- Финальная фиксация — точный поворот
+        if not (_isFollowing or _isGoing or _isJumping or _isSpinning) then
+            local r = getLocalRootPart()
+            if r then
+                local dir = (targetPos - r.Position) * Vector3.new(1, 0, 1)
+                if dir.Magnitude >= 0.5 then
+                    pcall(function()
+                        r.CFrame = CFrame.new(r.Position, r.Position + dir.Unit)
+                    end)
+                end
             end
         end
 
-        _cameraLookThread = nil
+        _clearCameraThread()
     end)
 end
 
