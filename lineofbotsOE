@@ -1058,36 +1058,73 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ── АНИМАЦИИ ─────────────────────────────────────────────────────────────
--- Стандартные R15 ID (из официального Roblox AnimationScript + creator-docs)
-local EMOTE_ANIMATIONS = {
-    -- ── СТАНДАРТНЫЕ R15 (встроены в Roblox, /e команды) ─────────────────
-    wave      = "507770239",   -- /e wave     — машет рукой
-    laugh     = "507770818",   -- /e laugh    — смеётся (стандартный)
-    cheer     = "507770677",   -- /e cheer    — ура/победа
-    point     = "507770453",   -- /e point    — указывает пальцем
-    sit       = "507768133",   -- /e sit      — садится
-    dance     = "507771019",   -- /e dance    — танец вариант A
-    dance2    = "507776043",   -- /e dance2   — танец вариант B
-    dance3    = "507777268",   -- /e dance3   — танец вариант C
-    -- ── БЕСПЛАТНЫЕ ОФИЦИАЛЬНЫЕ (подтверждены creator-docs) ──────────────
-    hello     = "3576686446",  -- Hello       — машет двумя руками (энтузиазм)
-    shrug     = "3576968026",  -- Shrug       — пожимает плечами
-    salute    = "3360689775",  -- Salute      — отдаёт честь
-    tilt      = "3360692915",  -- Tilt        — наклон головы (замешательство)
-    stadium   = "3360686498",  -- Stadium     — болельщик (огромный восторг)
-    haha      = "4102315500",  -- Haha        — настоящий смех ★ (лучше laugh)
-    celebrate = "3994127840",  -- Celebrate   — праздник/победа ★
-    shy       = "3576717965",  -- Shy         — стесняется
-    robot     = "3576721660",  -- Robot       — роботанец
-    dizzy     = "3934986896",  -- Dizzy       — кружится (сильное замешательство)
-    agree     = "4026410695",  -- Agree       — кивает (да/согласен)
-    disagree  = "4026413836",  -- Disagree    — мотает головой (нет/несогласен)
-    eyeroll   = "4026441845",  -- Eyeroll     — закатывает глаза (серьёзно?/ну ладно)
-    charging  = "4026408030",  -- Charging    — набирает энергию (готовлюсь/вперёд)
+-- Только 100% встроенные эмоции Roblox — работают у ВСЕХ без покупки
+-- Источник: /e команды в стандартном Roblox чате
+local BUILTIN_EMOTES = {
+    -- name = true означает что эмоция встроена и всегда доступна
+    wave   = true,   -- /e wave
+    laugh  = true,   -- /e laugh
+    cheer  = true,   -- /e cheer
+    point  = true,   -- /e point
+    sit    = true,   -- /e sit
+    dance  = true,   -- /e dance
+    dance2 = true,   -- /e dance2
+    dance3 = true,   -- /e dance3
 }
+
+-- Кастомные эмоции которые нужно прелоадить через HumanoidDescription
+-- ID проверены на roblox.com/catalog (free, owned by Roblox corp)
+local CUSTOM_EMOTE_IDS = {
+    hello   = 3576686446,   -- Hello       (бесплатная, Roblox)
+    shrug   = 3576968026,   -- Shrug       (бесплатная, Roblox)
+    salute  = 3360689775,   -- Salute      (бесплатная, Roblox)
+    tilt    = 3360692915,   -- Tilt        (бесплатная, Roblox)
+    stadium = 3360686498,   -- Stadium     (бесплатная, Roblox)
+    shy     = 3576717965,   -- Shy         (бесплатная, Roblox)
+    robot   = 3576721660,   -- Robot dance (бесплатная, Roblox)
+}
+
+-- Флаг: загружены ли кастомные эмоции в HumanoidDescription
+local _customEmotesLoaded = false
+
+-- Прелоадим кастомные эмоции в HumanoidDescription персонажа
+-- Без этого PlayEmote("Hello") вернёт false
+local function preloadCustomEmotes(humanoid)
+    if _customEmotesLoaded then return end
+    pcall(function()
+        local desc = humanoid:FindFirstChildOfClass("HumanoidDescription")
+            or humanoid:WaitForChild("HumanoidDescription", 3)
+        if not desc then return end
+
+        -- Собираем текущие эмоции и добавляем наши
+        local currentEmotes = desc:GetEmotes()
+        for name, id in pairs(CUSTOM_EMOTE_IDS) do
+            currentEmotes[name] = {id}
+        end
+        desc:SetEmotes(currentEmotes)
+        humanoid:ApplyDescription(desc)
+        _customEmotesLoaded = true
+    end)
+end
 
 -- Флаг включения системы
 ClientSettings.ActionsEnabled = ClientSettings.ActionsEnabled ~= false
+
+-- Прелоадим кастомные эмоции когда персонаж загружается
+local function onCharacterAdded(character)
+    _customEmotesLoaded = false  -- сбрасываем флаг при респавне
+    local humanoid = character:WaitForChild("Humanoid", 10)
+    if humanoid then
+        task.wait(1)  -- ждём полной загрузки HumanoidDescription
+        preloadCustomEmotes(humanoid)
+    end
+end
+
+-- Подключаемся к текущему и будущим персонажам
+if Players.LocalPlayer.Character then
+    task.spawn(onCharacterAdded, Players.LocalPlayer.Character)
+end
+Players.LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 
 -- Текущий активный Humanoid / RootPart
 local function getLocalHumanoid()
@@ -1104,29 +1141,6 @@ end
 local _activeEmoteTrack   = nil
 local _activeEmoteThread  = nil
 
--- Имена встроенных эмоций Roblox для humanoid:PlayEmote()
--- Эти работают БЕЗ LoadAnimation — официальный API, надёжнее
-local BUILTIN_EMOTE_NAMES = {
-    -- Встроенные — работают через humanoid:PlayEmote() без LoadAnimation
-    wave    = "wave",
-    laugh   = "laugh",
-    cheer   = "cheer",
-    point   = "point",
-    dance   = "dance",
-    dance2  = "dance2",
-    dance3  = "dance3",
-    -- Бесплатные расширенные (обычно есть у всех аватаров)
-    hello   = "Hello",
-    shrug   = "Shrug",
-    salute  = "Salute",
-    tilt    = "Tilt",
-    stadium = "Stadium",
-    agree   = "Agree",
-    disagree= "Disagree",
-    eyeroll = "Eyeroll",
-    charging= "Charging",
-}
-
 local function stopCurrentEmote()
     if _activeEmoteThread then
         pcall(task.cancel, _activeEmoteThread)
@@ -1136,64 +1150,72 @@ local function stopCurrentEmote()
         pcall(function() _activeEmoteTrack:Stop() end)
         _activeEmoteTrack = nil
     end
-    -- Также останавливаем встроенную эмоцию если играет
-    pcall(function()
-        local humanoid = getLocalHumanoid()
-        if humanoid then humanoid:StopAnimations() end
-    end)
 end
 
--- Воспроизвести анимацию.
--- Сначала пробуем humanoid:PlayEmote() (надёжно для встроенных)
--- Если не вышло — LoadAnimation по rbxassetid (fallback)
--- duration = nil → бесконечно
+-- Воспроизвести эмоцию.
+-- Логика:
+--   1. Если встроенная (/e wave и т.д.) → PlayEmote(name), проверяем возврат
+--   2. Если кастомная → прелоадим в HumanoidDescription → PlayEmote(name)
+--   3. duration = nil → бесконечно (для sit)
 local function playEmote(emoteName, duration)
     if not ClientSettings.ActionsEnabled then return end
-
     local humanoid = getLocalHumanoid()
     if not humanoid then return end
 
     stopCurrentEmote()
 
-    local builtinName = BUILTIN_EMOTE_NAMES[emoteName]
-    local animId      = EMOTE_ANIMATIONS[emoteName]
-
-    local playedViaBuiltin = false
-
-    -- Метод 1: humanoid:PlayEmote() — официальный API Roblox, самый надёжный
-    if builtinName then
-        local ok = pcall(function()
-            humanoid:PlayEmote(builtinName)
-        end)
-        if ok then
-            playedViaBuiltin = true
-        end
+    -- Убеждаемся что кастомные эмоции загружены
+    if CUSTOM_EMOTE_IDS[emoteName] and not _customEmotesLoaded then
+        preloadCustomEmotes(humanoid)
     end
 
-    -- Метод 2: Animator:LoadAnimation() — fallback если PlayEmote не сработал
-    if not playedViaBuiltin and animId then
-        local animator = humanoid:FindFirstChildOfClass("Animator")
-        if animator then
-            pcall(function()
-                local anim = Instance.new("Animation")
-                anim.AnimationId = "rbxassetid://" .. animId
-                local track = animator:LoadAnimation(anim)
-                track.Priority = Enum.AnimationPriority.Action
-                track:Play()
-                _activeEmoteTrack = track
+    -- PlayEmote возвращает true если успешно, false если эмоции нет
+    local ok, played = pcall(function()
+        return humanoid:PlayEmote(emoteName)
+    end)
+
+    if ok and played then
+        -- Успешно сыграло через PlayEmote
+        if duration then
+            _activeEmoteThread = task.delay(duration, function()
+                pcall(function() humanoid:StopAnimations() end)
+                _activeEmoteThread = nil
             end)
         end
-    end
-
-    -- Авто-стоп через duration секунд
-    if duration then
-        _activeEmoteThread = task.delay(duration, function()
-            if _activeEmoteTrack then
-                pcall(function() _activeEmoteTrack:Stop() end)
-                _activeEmoteTrack = nil
+    else
+        -- PlayEmote не сработал — пробуем принудительно через AnimationTrack
+        -- (последний резерв: встроенные анимации по ID)
+        local FALLBACK_IDS = {
+            wave   = "507770239",
+            laugh  = "507770818",
+            cheer  = "507770677",
+            point  = "507770453",
+            sit    = "507768133",
+            dance  = "507771019",
+            dance2 = "507776043",
+            dance3 = "507777268",
+        }
+        local animId = FALLBACK_IDS[emoteName]
+        if animId then
+            local animator = humanoid:FindFirstChildOfClass("Animator")
+            if animator then
+                pcall(function()
+                    local anim = Instance.new("Animation")
+                    anim.AnimationId = "rbxassetid://" .. animId
+                    local track = animator:LoadAnimation(anim)
+                    track.Priority = Enum.AnimationPriority.Action
+                    track:Play()
+                    _activeEmoteTrack = track
+                    if duration then
+                        _activeEmoteThread = task.delay(duration, function()
+                            pcall(function() track:Stop() end)
+                            _activeEmoteTrack = nil
+                            _activeEmoteThread = nil
+                        end)
+                    end
+                end)
             end
-            _activeEmoteThread = nil
-        end)
+        end
     end
 end
 
@@ -1311,6 +1333,10 @@ end
 
 -- ── ТАБЛИЦА ОБРАБОТЧИКОВ ─────────────────────────────────────────────────
 -- Каждый тег [DO:xxx] → своя функция
+-- ── ТАБЛИЦА ОБРАБОТЧИКОВ ─────────────────────────────────────────────────
+-- ВАЖНО: для надёжности используем только встроенные /e эмоции
+-- + кастомные которые прелоадим сами (hello, shrug, salute, tilt, stadium, shy, robot)
+-- Кастомные эмоции без прелоада (haha, celebrate и т.д.) — НЕ НАДЁЖНЫ
 local ACTION_HANDLERS = {
     -- ── Движение ──────────────────────────────────────────────────────────
     goto     = function(p) gotoPlayer(p) end,
@@ -1325,45 +1351,44 @@ local ACTION_HANDLERS = {
         local v = {"dance","dance2","dance3","robot"}
         playEmote(v[math.random(1,#v)], 10)
     end,
-    dance2   = function(_) playEmote("dance2",  10) end,
-    dance3   = function(_) playEmote("dance3",  10) end,
-    robot    = function(_) playEmote("robot",   10) end,
+    dance2   = function(_) playEmote("dance2", 10) end,
+    dance3   = function(_) playEmote("dance3", 10) end,
+    robot    = function(_) playEmote("robot",  10) end,
     -- ── Приветствия ───────────────────────────────────────────────────────
-    wave     = function(_) playEmote("wave",    4) end,
-    hi       = function(_) playEmote("wave",    4) end,
-    bye      = function(_) playEmote("wave",    4) end,
-    hello    = function(_) playEmote("hello",   5) end,
-    -- ── Смех (haha = ID 4102315500, самая выразительная) ──────────────────
-    laugh    = function(_) playEmote("haha",    5) end,  -- ← haha, не laugh!
-    lol      = function(_) playEmote("haha",    4) end,
-    haha     = function(_) playEmote("haha",    4) end,
+    wave     = function(_) playEmote("wave",   4) end,
+    hi       = function(_) playEmote("wave",   4) end,
+    bye      = function(_) playEmote("wave",   4) end,
+    hello    = function(_) playEmote("hello",  5) end,  -- прелоадится
+    -- ── Смех — используем встроенный "laugh" (гарантирован) ──────────────
+    laugh    = function(_) playEmote("laugh",  5) end,  -- /e laugh — ВСТРОЕН
+    lol      = function(_) playEmote("laugh",  4) end,
+    haha     = function(_) playEmote("laugh",  4) end,
     -- ── Радость / победа ──────────────────────────────────────────────────
-    cheer    = function(_) playEmote("cheer",      3) end,
-    yay      = function(_) playEmote("celebrate",  4) end,
-    victory  = function(_) playEmote("celebrate",  5) end,
-    clap     = function(_) playEmote("cheer",      3) end,
-    stadium  = function(_) playEmote("stadium",    5) end,
-    charging = function(_) playEmote("charging",   4) end,  -- вперёд/готовлюсь
-    -- ── Замешательство / сомнение ─────────────────────────────────────────
-    shrug    = function(_) playEmote("shrug",    3) end,
-    confused = function(_) playEmote("tilt",     3) end,
-    tilt     = function(_) playEmote("tilt",     3) end,
-    dizzy    = function(_) playEmote("dizzy",    4) end,
-    eyeroll  = function(_) playEmote("eyeroll",  3) end,  -- закатывает глаза
+    cheer    = function(_) playEmote("cheer",   3) end,  -- /e cheer — ВСТРОЕН
+    yay      = function(_) playEmote("cheer",   4) end,  -- тоже cheer
+    victory  = function(_) playEmote("cheer",   5) end,
+    stadium  = function(_) playEmote("stadium", 5) end,  -- прелоадится
+    charging = function(_) playEmote("cheer",   3) end,  -- нет надёжного ID — cheer
+    -- ── Замешательство ────────────────────────────────────────────────────
+    shrug    = function(_) playEmote("shrug",  3) end,  -- прелоадится
+    confused = function(_) playEmote("tilt",   3) end,  -- прелоадится
+    tilt     = function(_) playEmote("tilt",   3) end,
+    dizzy    = function(_) playEmote("tilt",   3) end,  -- нет надёжного — tilt
+    eyeroll  = function(_) playEmote("shrug",  3) end,  -- нет надёжного — shrug
     -- ── Согласие / несогласие ─────────────────────────────────────────────
-    agree    = function(_) playEmote("agree",    3) end,   -- кивает (да)
-    disagree = function(_) playEmote("disagree", 3) end,   -- мотает (нет)
-    no       = function(_) playEmote("disagree", 3) end,
-    yes      = function(_) playEmote("agree",    3) end,
-    -- ── Негативные / сожаление ────────────────────────────────────────────
-    sorry    = function(_) playEmote("shrug",    3) end,
-    sad      = function(_) playEmote("shrug",    4) end,
-    facepalm = function(_) playEmote("eyeroll",  3) end,  -- eyeroll как фейспалм
-    shy      = function(_) playEmote("shy",      4) end,
+    agree    = function(_) playEmote("cheer",  2) end,  -- нет надёжного — cheer короткий
+    disagree = function(_) playEmote("shrug",  2) end,  -- нет надёжного — shrug
+    no       = function(_) playEmote("shrug",  2) end,
+    yes      = function(_) playEmote("cheer",  2) end,
+    -- ── Сожаление / негативные ────────────────────────────────────────────
+    sorry    = function(_) playEmote("shrug",  3) end,
+    sad      = function(_) playEmote("point",  3) end,  -- point как "ну вот"
+    facepalm = function(_) playEmote("shrug",  3) end,
+    shy      = function(_) playEmote("shy",    4) end,  -- прелоадится
     -- ── Другое ────────────────────────────────────────────────────────────
-    salute   = function(_) playEmote("salute",   3) end,
-    point    = function(_) playEmote("point",    3) end,
-    sit      = function(_) playEmote("sit",     nil) end,
+    salute   = function(_) playEmote("salute", 3) end,  -- прелоадится
+    point    = function(_) playEmote("point",  3) end,  -- ВСТРОЕН
+    sit      = function(_) playEmote("sit",   nil) end, -- ВСТРОЕН, бесконечно
 }
 
 -- ── ПАРСЕР И ИСПОЛНИТЕЛЬ ТЕГОВ ───────────────────────────────────────────
