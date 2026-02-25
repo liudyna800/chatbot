@@ -84,6 +84,8 @@ local ClientSettings = {
     ActionsEnabled = true,  -- v16: команды и эмоции
     TokenEconomy = false,   -- v16: экономия токенов (короткий промпт для эмоций)
     PlaceAwareness = true,  -- v16.5: ИИ знает что она в Roblox, PlaceId и название игры
+    PlayerAwareness = true, -- v17: ИИ видит кто рядом, с какой стороны, как себя ведёт
+    CameraLook = true,      -- v17: бот плавно смотрит на говорящего игрока
     BlacklistUserIds = {},
     Blacklist = {
         Permanent = {},
@@ -813,6 +815,24 @@ local function makeSystemPrompt(settings)
         end
     end
 
+    -- v17: PlayerAwareness — ИИ знает кто рядом и как себя ведёт
+    if settings.PlayerAwareness then
+        if settings.TokenEconomy then
+            system = system
+                .. "\n[NEARBY] придёт в сообщении — реагируй на поведение игроков рядом естественно."
+        else
+            system = system
+                .. "\n\n== PLAYER AWARENESS =="
+                .. "\nВ каждом сообщении есть блок [NEARBY] — кто стоит рядом, с какой стороны и как ведёт себя."
+                .. "\nИспользуй эту информацию естественно. Примеры:"
+                .. "\n  ПЕРЕД тобой → 'вижу тебя, привет!'"
+                .. "\n  СЗАДИ → 'эй, чувствую тебя за спиной'"
+                .. "\n  приближается → 'о, идёшь ко мне?'"
+                .. "\n  токсичит_сзади → 'я всё вижу, перестань дёргаться сзади!'"
+                .. "\nНЕ пиши '[NEARBY]' в ответе. Говори как о реальности вокруг тебя."
+        end
+    end
+
     -- UsePlayerName
     if settings.UsePlayerName then
         if settings.TokenEconomy then
@@ -840,7 +860,8 @@ local function makeSystemPrompt(settings)
                 .. "\n\n" .. SYSTEM_ACTIONS_HEADER
                 .. "DO_TAGS(start of reply,1 per msg,silent):"
                 .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop"
-                .. "\n[DO:jump]=прыгни/jump [DO:jump2]=twice [DO:jump3]=3x"
+                .. "\n[DO:jump]=прыгни/jump [DO:jump2]=2x [DO:jump3]=3x [DO:jump5]=5x [DO:jump10]=10x"
+                .. "\n[DO:spin]=крутись/spin(3с) [DO:spin5]=5с [DO:spin10]=10с"
                 .. "\n[DO:dance]=танцуй/dance [DO:robot]=robot"
                 .. "\n[DO:wave]=привет/пока/hi/bye [DO:hello]=HELLO!/ДАРОВА"
                 .. "\n[DO:laugh]=lol/хаха/кек/ору/haha/ахаха/xd/смешно — ANY FUNNY"
@@ -863,7 +884,8 @@ local function makeSystemPrompt(settings)
                 .. "\n[DO:stop]   стой/stop/stay — stop moving"
                 .. "\n!! 'подойди'/'come here' = ALWAYS [DO:goto], never follow"
                 .. "\n"
-                .. "\nJUMPS: [DO:jump]=прыгни  [DO:jump2]=два  [DO:jump3]=три"
+                .. "\nJUMPS: [DO:jump]=1  [DO:jump2]=2  [DO:jump3]=3  [DO:jump5]=5  [DO:jump10]=10 — если просят N прыжков используй ближайший тег"
+                .. "\nSPIN: [DO:spin]=крутись/spin(3с)  [DO:spin5]=5с  [DO:spin10]=10с — кружиться/вертеться/spin"
                 .. "\nDANCES: [DO:dance]=случайный  [DO:dance2]  [DO:dance3]  [DO:robot]=роботанец"
                 .. "\n"
                 .. "\nGREETINGS:"
@@ -907,6 +929,8 @@ local function makeSystemPrompt(settings)
                 .. "\nда→[DO:agree]конечно   нет→[DO:disagree]неа   серьёзно?→[DO:eyeroll]боже"
                 .. "\nпривет→[DO:wave]хей   HELLO→[DO:hello]ЙО   потанцуй→[DO:dance]lets go"
                 .. "\nподойди→[DO:goto]иду   follow me→[DO:follow]ok   стой→[DO:stop]ок"
+                .. "\nпрыгни→[DO:jump]  прыгни 5 раз→[DO:jump5]wheee  прыгни 10→[DO:jump10]"
+                .. "\nкрутись→[DO:spin]ок  spin 10 сек→[DO:spin10]  вертись→[DO:spin]"
                 .. "\nidk→[DO:shrug]хз   sorry→[DO:sorry]всё ок   как дела?→без тега"
         end
     end
@@ -1319,15 +1343,59 @@ local function startFollowingPlayer(targetPlayer)
 end
 
 -- ── ПРЫЖКИ ───────────────────────────────────────────────────────────────
+-- jump/jump2/jump3/jumpN — от 1 до 10 прыжков
+-- Нужен флаг чтобы камера не поворачивала пока прыгаем
+local _isJumping = false
+
 local function doJump(count)
     if not ClientSettings.ActionsEnabled then return end
-    count = count or 1
+    count = math.max(1, math.min(count or 1, 10))  -- clamp 1..10
+    _isJumping = true
     task.spawn(function()
         for i = 1, count do
             local humanoid = getLocalHumanoid()
             if humanoid then humanoid.Jump = true end
-            if i < count then task.wait(0.6) end
+            if i < count then task.wait(0.7) end
         end
+        _isJumping = false
+    end)
+end
+
+-- ── СПИН (кружение) ───────────────────────────────────────────────────────
+-- [DO:spin] — бот кружится на месте от 1 до 10 секунд
+local _isSpinning = false
+local _spinThread  = nil
+
+local function stopSpin()
+    _isSpinning = false
+    if _spinThread then
+        pcall(task.cancel, _spinThread)
+        _spinThread = nil
+    end
+end
+
+-- seconds = 1..10, скорость поворота = 360°/сек
+local function doSpin(seconds)
+    if not ClientSettings.ActionsEnabled then return end
+    seconds = math.max(1, math.min(seconds or 3, 10))
+    stopSpin()
+    stopFollowing()  -- останавливаем ходьбу
+
+    local root = getLocalRootPart()
+    if not root then return end
+
+    _isSpinning = true
+    _spinThread = task.spawn(function()
+        local elapsed = 0
+        local dt = 0.03  -- ~33 fps
+        while _isSpinning and elapsed < seconds do
+            local r = root.CFrame
+            root.CFrame = r * CFrame.Angles(0, math.rad(360 * dt), 0)
+            elapsed = elapsed + dt
+            task.wait(dt)
+        end
+        _isSpinning = false
+        _spinThread = nil
     end)
 end
 
@@ -1342,10 +1410,22 @@ local ACTION_HANDLERS = {
     goto     = function(p) gotoPlayer(p) end,
     follow   = function(p) startFollowingPlayer(p) end,
     stop     = function(_) stopFollowing() end,
-    -- ── Прыжки ────────────────────────────────────────────────────────────
+    -- ── Прыжки (1-10) ─────────────────────────────────────────────────────
     jump     = function(_) doJump(1) end,
     jump2    = function(_) doJump(2) end,
     jump3    = function(_) doJump(3) end,
+    jump4    = function(_) doJump(4) end,
+    jump5    = function(_) doJump(5) end,
+    jump6    = function(_) doJump(6) end,
+    jump7    = function(_) doJump(7) end,
+    jump8    = function(_) doJump(8) end,
+    jump9    = function(_) doJump(9) end,
+    jump10   = function(_) doJump(10) end,
+    -- ── Спин / кружение ───────────────────────────────────────────────────
+    spin     = function(_) doSpin(3)  end,  -- 3 сек по умолч
+    spin5    = function(_) doSpin(5)  end,
+    spin10   = function(_) doSpin(10) end,
+    twirl    = function(_) doSpin(3)  end,  -- алиас
     -- ── Танцы ─────────────────────────────────────────────────────────────
     dance    = function(_)
         local v = {"dance","dance2","dance3","robot"}
@@ -1469,6 +1549,210 @@ task.spawn(function()
     fetchPlaceInfo()
 end)
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- v17: PLAYER AWARENESS SYSTEM
+-- ИИ видит: кто рядом, с какой стороны, двигается ли/стоит/ведёт себя странно
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Направление от нас к игроку относительно нашего взгляда
+-- Возвращает: "перед", "сзади", "слева", "справа"
+local function getRelativeDirection(myRoot, theirRoot)
+    if not myRoot or not theirRoot then return "рядом" end
+    local diff = (theirRoot.Position - myRoot.Position).Unit
+    local look  = myRoot.CFrame.LookVector
+    local right = myRoot.CFrame.RightVector
+
+    local forward = diff:Dot(look)
+    local lateral = diff:Dot(right)
+
+    if math.abs(forward) > math.abs(lateral) then
+        return forward > 0 and "перед" or "сзади"
+    else
+        return lateral > 0 and "справа" or "слева"
+    end
+end
+
+-- Оцениваем поведение игрока по его скорости + позиции относительно нас
+-- history: таблица { pos, time } последних N тиков
+local _playerBehaviorHistory = {}  -- [userId] = { entries = {{pos,t},...}, lastDir = "" }
+local BEHAVIOR_HISTORY_LEN = 8    -- сколько тиков хранить (~2.4 сек при 0.3с)
+local _behaviorThread = nil
+
+local function startBehaviorMonitor()
+    if _behaviorThread then return end
+    _behaviorThread = task.spawn(function()
+        while true do
+            local myRoot = getLocalRootPart()
+            if myRoot then
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= Players.LocalPlayer then
+                        local char = p.Character
+                        local root = char and char:FindFirstChild("HumanoidRootPart")
+                        if root then
+                            local uid = p.UserId
+                            if not _playerBehaviorHistory[uid] then
+                                _playerBehaviorHistory[uid] = { entries = {} }
+                            end
+                            local hist = _playerBehaviorHistory[uid]
+                            table.insert(hist.entries, {
+                                pos  = root.Position,
+                                time = os.clock(),
+                                dir  = getRelativeDirection(myRoot, root),
+                            })
+                            if #hist.entries > BEHAVIOR_HISTORY_LEN then
+                                table.remove(hist.entries, 1)
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(0.3)
+        end
+    end)
+end
+
+-- Определяем паттерн поведения игрока: "стоит", "ходит", "приближается",
+-- "удаляется", "кружится_сзади" (back-and-forth за спиной = токсик)
+local function detectBehavior(uid, myRoot)
+    local hist = _playerBehaviorHistory[uid]
+    if not hist or #hist.entries < 4 then return "стоит" end
+
+    local entries = hist.entries
+    local n = #entries
+
+    -- Средняя скорость
+    local totalDist = 0
+    local dirChanges = 0
+    local behindCount = 0
+    local prevDir = nil
+    for i = 2, n do
+        totalDist = totalDist + (entries[i].pos - entries[i-1].pos).Magnitude
+        if entries[i].dir == "сзади" then behindCount = behindCount + 1 end
+        -- считаем смены направления движения (признак дёргания)
+        if i >= 3 then
+            local v1 = entries[i-1].pos - entries[i-2].pos
+            local v2 = entries[i].pos - entries[i-1].pos
+            if v1.Magnitude > 0.1 and v2.Magnitude > 0.1 then
+                local dot = v1.Unit:Dot(v2.Unit)
+                if dot < -0.5 then dirChanges = dirChanges + 1 end
+            end
+        end
+    end
+
+    local dt = entries[n].time - entries[1].time
+    local avgSpeed = dt > 0 and (totalDist / dt) or 0
+
+    -- Логика паттернов
+    if behindCount >= 5 and dirChanges >= 2 then
+        return "токсичит_сзади"  -- дёргается за спиной
+    elseif avgSpeed < 0.5 then
+        return "стоит"
+    else
+        -- Двигается — приближается или удаляется?
+        local myPos = myRoot and myRoot.Position or Vector3.zero
+        local d1 = (entries[1].pos - myPos).Magnitude
+        local d2 = (entries[n].pos - myPos).Magnitude
+        if d2 < d1 - 2 then return "приближается"
+        elseif d2 > d1 + 2 then return "удаляется"
+        else return "ходит" end
+    end
+end
+
+-- Строит контекстную строку для промпта о ближайших игроках
+local function buildPlayerAwarenessContext(settings)
+    if not settings.PlayerAwareness then return "" end
+    local myRoot = getLocalRootPart()
+    if not myRoot then return "" end
+
+    local maxDist = (settings.Range.Enabled and settings.Range.Studs) or 20
+    local lines = {}
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= Players.LocalPlayer then
+            local char = p.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if root then
+                local dist = (root.Position - myRoot.Position).Magnitude
+                if dist <= maxDist then
+                    local direction = getRelativeDirection(myRoot, root)
+                    local behavior  = detectBehavior(p.UserId, myRoot)
+                    local distStr   = math.floor(dist) .. " studs"
+                    local name      = p.DisplayName or p.Name
+
+                    local behaviorRu = behavior == "стоит"         and "стоит неподвижно"
+                        or behavior == "приближается" and "идёт к тебе"
+                        or behavior == "удаляется"    and "уходит от тебя"
+                        or behavior == "ходит"        and "ходит рядом"
+                        or behavior == "токсичит_сзади" and "дёргается сзади тебя (токсичное поведение)"
+                        or "рядом"
+
+                    table.insert(lines, string.format(
+                        '  "%s" — %s от тебя (%s), %s',
+                        name, direction, distStr, behaviorRu
+                    ))
+                end
+            end
+        end
+    end
+
+    if #lines == 0 then
+        return "\n[NEARBY: рядом никого нет]"
+    end
+    return "\n[NEARBY — игроки рядом:\n" .. table.concat(lines, "\n") .. "\n]"
+end
+
+-- Запускаем мониторинг поведения сразу
+startBehaviorMonitor()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- v17: CAMERA LOOK SYSTEM
+-- Бот плавно поворачивает голову/тело к говорящему игроку
+-- НЕ работает во время: ходьбы, прыжков, спина
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local _cameraLookThread = nil
+
+-- Плавно поворачиваем HumanoidRootPart к targetPosition за ~0.5 сек
+local function smoothLookAt(targetPos)
+    if not ClientSettings.CameraLook then return end
+    -- Не крутимся если идём / прыгаем / спиним
+    if _isFollowing or _isGoing or _isJumping or _isSpinning then return end
+
+    local root = getLocalRootPart()
+    if not root then return end
+
+    -- Отменяем предыдущий поворот
+    if _cameraLookThread then
+        pcall(task.cancel, _cameraLookThread)
+        _cameraLookThread = nil
+    end
+
+    _cameraLookThread = task.spawn(function()
+        local steps = 12  -- шагов интерполяции
+        local dt     = 0.04  -- ~25 fps
+
+        for i = 1, steps do
+            -- Перепроверяем флаги на каждом шаге
+            if _isFollowing or _isGoing or _isJumping or _isSpinning then break end
+
+            local r = getLocalRootPart()
+            if not r then break end
+
+            -- Направление к цели (только горизонталь — Y не меняем)
+            local dir = (targetPos - r.Position) * Vector3.new(1, 0, 1)
+            if dir.Magnitude < 0.5 then break end
+
+            local targetCF = CFrame.new(r.Position, r.Position + dir.Unit)
+            -- Интерполируем: t от 1/steps до 1
+            local t = i / steps
+            r.CFrame = r.CFrame:Lerp(targetCF, t * 0.18)
+
+            task.wait(dt)
+        end
+        _cameraLookThread = nil
+    end)
+end
+
 -- Chat History Storage
 local ChatHistory = {}
 local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
@@ -1555,6 +1839,20 @@ local function handleQueuedChat(item)
 
     table.insert(apiMessages, { role = "user", content = userContent })
 
+    -- v17: PlayerAwareness — добавляем контекст о ближайших игроках
+    if settings.PlayerAwareness then
+        local nearbyCtx = buildPlayerAwarenessContext(settings)
+        if nearbyCtx ~= "" then
+            -- Вставляем как системное сообщение перед user message
+            -- (не модифицируем userContent — чтобы история была чистой)
+            local lastIdx = #apiMessages
+            table.insert(apiMessages, lastIdx, {
+                role = "system",
+                content = "ТЕКУЩЕЕ ОКРУЖЕНИЕ:" .. nearbyCtx
+            })
+        end
+    end
+
     local model = getModel(settings)
     if model == "" then return end
 
@@ -1578,6 +1876,14 @@ local function handleQueuedChat(item)
     local text, err = providerRouter:chatCompletions(payload)
     if err or not text or text == "" then
         return
+    end
+
+    -- v17: поворачиваемся к говорящему игроку (если CameraLook включён)
+    if item.player and item.player.Character then
+        local pRoot = item.player.Character:FindFirstChild("HumanoidRootPart")
+        if pRoot then
+            smoothLookAt(pRoot.Position)
+        end
     end
 
     -- v16: парсим тег [DO:xxx] из ответа ИИ
@@ -3040,13 +3346,13 @@ local sidebarTitle = makeTextLabel(sidebar, "LineOfBots", 19, "bold")
 sidebarTitle.Position = UDim2.new(0, 16, 0, 16)
 sidebarTitle.Size = UDim2.new(1, -16, 0, 22)
 
-local sidebarSubtitle = makeTextLabel(sidebar, "v16.5 Shell", 11, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebar, "v17 Shell", 11, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 16, 0, 40)
 sidebarSubtitle.Size = UDim2.new(1, -16, 0, 14)
 
 sidebarTitle.Text = "LineOfBots"
-sidebarSubtitle.Text = "v16.5 Shell"
+sidebarSubtitle.Text = "v17 Shell"
 
 -- Sidebar Title Animation Removed to keep static text
 
@@ -4119,7 +4425,29 @@ makeToggleRow(
     ClientSettings.PlaceAwareness ~= false,
     function(state)
         ClientSettings.PlaceAwareness = state
-        _placeInfo = nil  -- сбрасываем кэш чтобы перечитать при следующем запросе
+        _placeInfo = nil
+    end
+)
+
+-- v17: Сознание игроков
+makeToggleRow(
+    automation,
+    "👁️ Сознание игроков",
+    "ИИ видит кто стоит рядом (спереди/сзади/сбоку) и как ведёт себя. Реагирует на токсиков за спиной.",
+    ClientSettings.PlayerAwareness ~= false,
+    function(state)
+        ClientSettings.PlayerAwareness = state
+    end
+)
+
+-- v17: Поворот к игроку
+makeToggleRow(
+    automation,
+    "🎯 Поворот к игроку",
+    "Бот плавно поворачивается к говорящему игроку. Не работает во время ходьбы, прыжков и спина.",
+    ClientSettings.CameraLook ~= false,
+    function(state)
+        ClientSettings.CameraLook = state
     end
 )
 
