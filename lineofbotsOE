@@ -826,19 +826,20 @@ local function makeSystemPrompt(settings)
     if settings.PlayerAwareness then
         if settings.TokenEconomy then
             system = system
-                .. "\n[NEARBY] shows nearby players, direction, behavior. If ⚠ TOXIC BEHAVIOR alert appears — react to it in character."
+                .. "\n[NEARBY] shows nearby players and their position. Always mention it briefly."
         else
             system = system
                 .. "\n\n== PLAYER AWARENESS =="
-                .. "\nBefore each message you receive a [NEARBY] block listing nearby players, their direction from you, and behavior."
-                .. "\nDirections: перед=in front, сзади=behind, справа=right, слева=left, спереди-справа=front-right, etc."
-                .. "\nReact naturally, as if you physically perceive your surroundings:"
-                .. "\n  'in front' → 'I see you right there!'"
-                .. "\n  'behind' → 'I can feel someone behind me'"
-                .. "\n  'front-right' → 'hey, you on my right side'"
-                .. "\n  TOXIC BEHAVIOR alert → react with surprise/annoyance: 'I know what you're doing back there, stop it!'"
-                .. "\nNEVER print [NEARBY] or direction labels in your reply. Speak naturally."
-                .. "\nIf no [NEARBY] block is given, nobody notable is nearby."
+                .. "\nBefore each message you get a [NEARBY] block with players near you."
+                .. "\nEach entry: Name — direction (distance), behavior"
+                .. "\nDirections are in English: 'in front', 'behind', 'to your right', 'to your left', 'front-right', 'behind-left', etc."
+                .. "\n\nRULE: If [NEARBY] is present, you MUST briefly acknowledge the player's position in your reply."
+                .. "\nExamples:"
+                .. "\n  [NEARBY: Alex — in front (3 studs)] → 'hey Alex, right in front of me!'"
+                .. "\n  [NEARBY: Bob — behind (7 studs)] → 'I can feel someone behind me...'"
+                .. "\n  [NEARBY: Sam — to your right (4 studs)] → 'oh Sam, you're on my right side'"
+                .. "\n  [NEARBY: TOXIC] → 'I see what you're doing back there, stop it!'"
+                .. "\nNever print [NEARBY] tags in your reply. Speak naturally."
         end
     end
 
@@ -1665,30 +1666,28 @@ end)
 
 -- Направление от нас к игроку относительно нашего взгляда
 -- Возвращает: "перед", "сзади", "слева", "справа"
--- Направление от нас к игроку — 8 направлений
--- Используем порог 0.4 для диагоналей
+-- Направление от нас к игроку — 8 направлений, НА АНГЛИЙСКОМ
+-- (ИИ англоязычный — кириллица в [NEARBY] игнорируется моделью)
 local function getRelativeDirection(myRoot, theirRoot)
-    if not myRoot or not theirRoot then return "рядом" end
+    if not myRoot or not theirRoot then return "nearby" end
     local diff = (theirRoot.Position - myRoot.Position)
-    if diff.Magnitude < 0.1 then return "рядом" end
+    if diff.Magnitude < 0.1 then return "nearby" end
     local unit  = diff.Unit
     local look  = myRoot.CFrame.LookVector
     local right = myRoot.CFrame.RightVector
 
-    local fwd = unit:Dot(look)   -- +1 = прямо впереди, -1 = прямо сзади
-    local lat = unit:Dot(right)  -- +1 = прямо справа, -1 = прямо слева
+    local fwd = unit:Dot(look)
+    local lat = unit:Dot(right)
 
-    -- Порог диагонали: если оба компонента > 0.4 — комбинированное направление
     local DIAG = 0.42
-
-    if fwd > DIAG and lat > DIAG  then return "спереди-справа"
-    elseif fwd > DIAG and lat < -DIAG then return "спереди-слева"
-    elseif fwd < -DIAG and lat > DIAG  then return "сзади-справа"
-    elseif fwd < -DIAG and lat < -DIAG then return "сзади-слева"
-    elseif fwd > 0.3   then return "перед"
-    elseif fwd < -0.3  then return "сзади"
-    elseif lat > 0     then return "справа"
-    else                    return "слева"
+    if     fwd > DIAG  and lat > DIAG  then return "front-right"
+    elseif fwd > DIAG  and lat < -DIAG then return "front-left"
+    elseif fwd < -DIAG and lat > DIAG  then return "behind-right"
+    elseif fwd < -DIAG and lat < -DIAG then return "behind-left"
+    elseif fwd > 0.3   then return "in front"
+    elseif fwd < -0.3  then return "behind"
+    elseif lat > 0     then return "to your right"
+    else                    return "to your left"
     end
 end
 
@@ -1856,7 +1855,9 @@ end
 
 local function smoothLookAt(targetPos)
     if not ClientSettings.CameraLook then return end
+    -- Проверяем ОБЕ системы движения: старую (_isFollowing) и новую (FollowManager)
     if _isFollowing or _isGoing or _isJumping or _isSpinning then return end
+    if FollowManager and FollowManager.Active then return end
 
     local root = getLocalRootPart()
     if not root then return end
