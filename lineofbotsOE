@@ -5,6 +5,44 @@ local TextChatService = game:GetService("TextChatService")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 
+-- ══════════════════════════════════════════════════════════════
+-- КРИТИЧЕСКИЙ ФИХ v17.5: Anti-duplicate защита
+-- При каждом loadstring() старые соединения RunService/Players
+-- не отключались → накапливались → двойная обработка сообщений,
+-- двойные Heartbeat loops, баги с анимациями и движением.
+-- ══════════════════════════════════════════════════════════════
+local _genv = (getgenv and getgenv()) or _G
+
+-- Если уже был запущен — убиваем старый экземпляр полностью
+if _genv.__LOB_CLEANUP then
+    pcall(_genv.__LOB_CLEANUP)
+end
+
+-- Таблица всех соединений этого экземпляра
+local _allConnections = {}
+local function trackConn(conn)
+    if conn then table.insert(_allConnections, conn) end
+    return conn
+end
+
+-- Функция очистки — вызывается при следующем loadstring
+local function _lobCleanup()
+    -- Отключаем ВСЕ соединения этого экземпляра
+    for _, c in ipairs(_allConnections) do
+        pcall(function() if c and c.Disconnect then c:Disconnect() end end)
+    end
+    _allConnections = {}
+    -- Уничтожаем GUI
+    local pg = Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then
+        local oldGui = pg:FindFirstChild("LineOfBotsUI")
+        if oldGui then pcall(function() oldGui:Destroy() end) end
+    end
+    _genv.__LOB_CLEANUP = nil
+end
+
+_genv.__LOB_CLEANUP = _lobCleanup
+
 local player = Players.LocalPlayer
 if not player then
     return
@@ -2409,23 +2447,23 @@ local Themes = {
     LineOfBots = {
         -- Окно: тёмно-синее полупрозрачное — мир виден сквозь
         Window              = Color3.fromRGB(15, 20, 45),
-        WindowTransparency  = 0.30,   -- 30% прозрачность окна
+        WindowTransparency  = 0.18,   -- 30% прозрачность окна
 
         -- Сайдбар: чуть темнее, тоже стекло
         Sidebar             = Color3.fromRGB(10, 14, 35),
-        SidebarTransparency = 0.20,
+        SidebarTransparency = 0.12,
         SidebarSelected     = Color3.fromRGB(40, 70, 160),
         SidebarSelectedT    = 0.55,
 
         -- Карточки настроек: светлее фона, матовое стекло
         Card                = Color3.fromRGB(60, 90, 180),
-        CardTransparency    = 0.82,   -- сильно прозрачные — почти стекло
+        CardTransparency    = 0.55,   -- полупрозрачные карточки
 
         -- Тоггл строки
         Button              = Color3.fromRGB(50, 80, 160),
-        ButtonTransparency  = 0.85,
+        ButtonTransparency  = 0.60,
         ButtonHover         = Color3.fromRGB(80, 120, 220),
-        ButtonHoverT        = 0.70,
+        ButtonHoverT        = 0.45,
 
         -- Текст
         Text                = Color3.fromRGB(230, 240, 255),
@@ -2447,15 +2485,15 @@ local Themes = {
     },
     Default = {
         Window              = Color3.fromRGB(20, 22, 28),
-        WindowTransparency  = 0.28,
+        WindowTransparency  = 0.15,
         Sidebar             = Color3.fromRGB(14, 16, 22),
-        SidebarTransparency = 0.18,
+        SidebarTransparency = 0.10,
         SidebarSelected     = Color3.fromRGB(60, 80, 140),
         SidebarSelectedT    = 0.60,
         Card                = Color3.fromRGB(60, 75, 120),
-        CardTransparency    = 0.84,
+        CardTransparency    = 0.55,
         Button              = Color3.fromRGB(50, 65, 110),
-        ButtonTransparency  = 0.86,
+        ButtonTransparency  = 0.62,
         ButtonHover         = Color3.fromRGB(80, 100, 160),
         ButtonHoverT        = 0.72,
         Text                = Color3.fromRGB(235, 238, 248),
@@ -2472,15 +2510,15 @@ local Themes = {
     },
     PremiumDark = {
         Window              = Color3.fromRGB(18, 10, 30),
-        WindowTransparency  = 0.30,
+        WindowTransparency  = 0.18,
         Sidebar             = Color3.fromRGB(12, 8, 22),
-        SidebarTransparency = 0.20,
+        SidebarTransparency = 0.12,
         SidebarSelected     = Color3.fromRGB(80, 30, 150),
         SidebarSelectedT    = 0.55,
         Card                = Color3.fromRGB(90, 50, 180),
-        CardTransparency    = 0.84,
+        CardTransparency    = 0.55,
         Button              = Color3.fromRGB(70, 40, 140),
-        ButtonTransparency  = 0.86,
+        ButtonTransparency  = 0.62,
         ButtonHover         = Color3.fromRGB(110, 65, 200),
         ButtonHoverT        = 0.70,
         Text                = Color3.fromRGB(240, 235, 255),
@@ -2497,15 +2535,15 @@ local Themes = {
     },
     Obsidian = {
         Window              = Color3.fromRGB(12, 10, 18),
-        WindowTransparency  = 0.28,
+        WindowTransparency  = 0.15,
         Sidebar             = Color3.fromRGB(8, 7, 14),
-        SidebarTransparency = 0.18,
+        SidebarTransparency = 0.10,
         SidebarSelected     = Color3.fromRGB(60, 20, 110),
         SidebarSelectedT    = 0.55,
         Card                = Color3.fromRGB(80, 40, 150),
-        CardTransparency    = 0.85,
+        CardTransparency    = 0.56,
         Button              = Color3.fromRGB(60, 30, 120),
-        ButtonTransparency  = 0.86,
+        ButtonTransparency  = 0.62,
         ButtonHover         = Color3.fromRGB(100, 50, 180),
         ButtonHoverT        = 0.70,
         Text                = Color3.fromRGB(255, 248, 255),
@@ -2522,15 +2560,15 @@ local Themes = {
     },
     FrostedGlass = {
         Window              = Color3.fromRGB(200, 215, 240),
-        WindowTransparency  = 0.25,
+        WindowTransparency  = 0.15,
         Sidebar             = Color3.fromRGB(185, 200, 230),
-        SidebarTransparency = 0.18,
+        SidebarTransparency = 0.10,
         SidebarSelected     = Color3.fromRGB(140, 175, 240),
         SidebarSelectedT    = 0.50,
         Card                = Color3.fromRGB(200, 215, 245),
-        CardTransparency    = 0.60,
+        CardTransparency    = 0.35,
         Button              = Color3.fromRGB(185, 205, 240),
-        ButtonTransparency  = 0.65,
+        ButtonTransparency  = 0.40,
         ButtonHover         = Color3.fromRGB(160, 190, 235),
         ButtonHoverT        = 0.50,
         Text                = Color3.fromRGB(20, 30, 60),
@@ -2547,15 +2585,15 @@ local Themes = {
     },
     Dark = {
         Window              = Color3.fromRGB(10, 18, 14),
-        WindowTransparency  = 0.28,
+        WindowTransparency  = 0.15,
         Sidebar             = Color3.fromRGB(7, 13, 10),
-        SidebarTransparency = 0.18,
+        SidebarTransparency = 0.10,
         SidebarSelected     = Color3.fromRGB(20, 80, 50),
         SidebarSelectedT    = 0.55,
         Card                = Color3.fromRGB(30, 120, 75),
-        CardTransparency    = 0.84,
+        CardTransparency    = 0.55,
         Button              = Color3.fromRGB(20, 95, 60),
-        ButtonTransparency  = 0.86,
+        ButtonTransparency  = 0.62,
         ButtonHover         = Color3.fromRGB(35, 140, 85),
         ButtonHoverT        = 0.70,
         Text                = Color3.fromRGB(220, 252, 235),
@@ -3059,7 +3097,7 @@ local currentWaypoints = {}
 local lastPosition = nil
 local stuckTimer = 0
 
-RunService.Heartbeat:Connect(function(dt)
+trackConn(RunService.Heartbeat:Connect(function(dt)
     if not FollowManager.Active or not FollowManager.Target then return end
     
     local myChar = LocalCharacter or Players.LocalPlayer.Character
@@ -3638,7 +3676,7 @@ local function createInterface()
     -- Центральный aurora loop — один на всё окно, меняет только stroke рамки
     -- НЕ создаёт элементы поверх контента
     local _auroraClock = 0
-    RunService.Heartbeat:Connect(function(dt)
+    trackConn(RunService.Heartbeat:Connect(function(dt)
         if not windowStroke or not windowStroke.Parent then return end
         _auroraClock = _auroraClock + dt
         local palette = THEME.AuroraPalette or AURORA_COLORS
@@ -3650,7 +3688,7 @@ local function createInterface()
         local c = Color3.new(a.R+(b.R-a.R)*f, a.G+(b.G-a.G)*f, a.B+(b.B-a.B)*f)
         windowStroke.Color = c
         windowStroke.Transparency = 0.35
-    end)
+    end))
 
 -- Заголовок сайдбара
 local sidebarLogoArea = Instance.new("Frame")
@@ -3671,7 +3709,7 @@ makeCorner(logoAccent, 2)
 
 -- aurora только на этом маленьком акцент-блоке
 local _logoClock = 0
-RunService.Heartbeat:Connect(function(dt)
+trackConn(RunService.Heartbeat:Connect(function(dt)
     if not logoAccent or not logoAccent.Parent then return end
     _logoClock = _logoClock + dt
     local p = THEME.AuroraPalette or AURORA_COLORS
@@ -3679,7 +3717,7 @@ RunService.Heartbeat:Connect(function(dt)
     local i = math.floor(t)+1; local ni = (i % #p)+1; local f = t-math.floor(t)
     local a,b = p[i],p[ni]
     logoAccent.BackgroundColor3 = Color3.new(a.R+(b.R-a.R)*f,a.G+(b.G-a.G)*f,a.B+(b.B-a.B)*f)
-end)
+end))
 
 local sidebarTitle = makeTextLabel(sidebarLogoArea, "LineOfBots", 17, "bold")
 sidebarTitle.TextColor3 = THEME.Text  -- статичный белый — никакого aurora на тексте
@@ -4124,17 +4162,8 @@ local function makeSectionCard(parent, titleText, subtitleText)
     local card = Instance.new("Frame")
     card.Name = titleText:gsub("%W+", "") .. "Section"
     card.BackgroundColor3 = THEME.Card
-    card.BackgroundTransparency = THEME.CardTransparency or 0.82
+    card.BackgroundTransparency = THEME.CardTransparency or 0.55
     card.BorderSizePixel = 0
-    -- Frosted glass: белый матовый оверлей поверх карточки
-    local frostCard = Instance.new("Frame")
-    frostCard.BackgroundColor3 = Color3.fromRGB(255,255,255)
-    frostCard.BackgroundTransparency = 0.93
-    frostCard.BorderSizePixel = 0
-    frostCard.Size = UDim2.new(1,0,1,0)
-    frostCard.ZIndex = 0
-    frostCard.Parent = card
-    makeCorner(frostCard, 12)
     card.Size = UDim2.new(1, 0, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
     card.Parent = parent
@@ -4215,22 +4244,12 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
     row.BackgroundColor3 = THEME.Button
-    row.BackgroundTransparency = THEME.ButtonTransparency or 0.82
+    row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, descText and descText ~= "" and 56 or 46)
     row.Parent = parent
     makeCorner(row, 12)
     local st = makeStroke(row, 1, Color3.fromRGB(255,255,255), 0.78)
-
-    -- Frosted glass оверлей на строке
-    local frostRow = Instance.new("Frame")
-    frostRow.BackgroundColor3 = Color3.fromRGB(255,255,255)
-    frostRow.BackgroundTransparency = 0.91
-    frostRow.BorderSizePixel = 0
-    frostRow.Size = UDim2.new(1,0,1,0)
-    frostRow.ZIndex = 0
-    frostRow.Parent = row
-    makeCorner(frostRow, 12)
 
     -- Тонкая акцентная полоска слева — видна только когда включено
     local sideBar = Instance.new("Frame")
@@ -4348,7 +4367,7 @@ local function makeRightControlRow(parent, labelText, descText, controlWidth)
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
     row.BackgroundColor3 = THEME.Button
-    row.BackgroundTransparency = THEME.ButtonTransparency or 0.82
+    row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, 42) -- Match ToggleRow height
     row.Parent = parent
@@ -4359,15 +4378,6 @@ local function makeRightControlRow(parent, labelText, descText, controlWidth)
     pad.PaddingLeft = UDim.new(0, 12)
     pad.PaddingRight = UDim.new(0, 12)
     pad.Parent = row
-
-    local frostRow2 = Instance.new("Frame")
-    frostRow2.BackgroundColor3 = Color3.fromRGB(255,255,255)
-    frostRow2.BackgroundTransparency = 0.91
-    frostRow2.BorderSizePixel = 0
-    frostRow2.Size = UDim2.new(1,0,1,0)
-    frostRow2.ZIndex = 0
-    frostRow2.Parent = row
-    makeCorner(frostRow2, 12)
 
     local cw = controlWidth or 200
     local label = makeTextLabel(row, labelText, 13, "semibold") -- 14->13
@@ -4400,7 +4410,7 @@ local function makeKeybindRow(parent, labelText, descText, currentKey, onChanged
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
     row.BackgroundColor3 = THEME.Button
-    row.BackgroundTransparency = THEME.ButtonTransparency or 0.82
+    row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, 42) -- Standard height
     row.Parent = parent
@@ -4520,7 +4530,7 @@ local function makeSliderRow(parent, labelText, minVal, maxVal, currentVal, call
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
     row.BackgroundColor3 = THEME.Button
-    row.BackgroundTransparency = THEME.ButtonTransparency or 0.82
+    row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
     row.Size = UDim2.new(1, 0, 0, 42)
     row.Parent = parent
     makeCorner(row, 10)
@@ -5694,8 +5704,8 @@ local function refreshUserPicker()
 end
 
 searchBox:GetPropertyChangedSignal("Text"):Connect(refreshUserPicker)
-Players.PlayerAdded:Connect(refreshUserPicker)
-Players.PlayerRemoving:Connect(refreshUserPicker)
+trackConn(Players.PlayerAdded:Connect(refreshUserPicker))
+trackConn(Players.PlayerRemoving:Connect(refreshUserPicker))
 refreshUserPicker()
  
 -- Visualizer card was removed; range is handled by updateRangeVisualizer().
@@ -6870,12 +6880,12 @@ local function scheduleMod3Rebuild()
     end)
 end
 
-local mod3_connAdded = Players.PlayerAdded:Connect(function()
+local mod3_connAdded = trackConn(Players.PlayerAdded:Connect(function()
     if mod3_list.Parent then
         scheduleMod3Rebuild()
     end
 end)
-local mod3_connRemoving = Players.PlayerRemoving:Connect(function()
+local mod3_connRemoving = trackConn(Players.PlayerRemoving:Connect(function()
     if mod3_list.Parent then
         scheduleMod3Rebuild()
     end
@@ -7563,8 +7573,8 @@ mod2_rebuild = function()
 end
 
 mod2_searchInput:GetPropertyChangedSignal("Text"):Connect(mod2_rebuild)
-Players.PlayerAdded:Connect(mod2_rebuild)
-Players.PlayerRemoving:Connect(mod2_rebuild)
+trackConn(Players.PlayerAdded:Connect(mod2_rebuild))
+trackConn(Players.PlayerRemoving:Connect(mod2_rebuild))
 
 mod2_actionBtn.MouseButton1Click:Connect(function()
     if not mod2_selected.userId then return end
@@ -7719,7 +7729,7 @@ local function createPlayerRow(parentScroll, userId, displayName, name, isBlocke
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 62)
     row.BackgroundColor3 = THEME.Button
-    row.BackgroundTransparency = THEME.ButtonTransparency or 0.82
+    row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
     row.BorderSizePixel = 0
     row.Parent = parentScroll
     makeCorner(row, 12)
