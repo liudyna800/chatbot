@@ -2361,181 +2361,214 @@ updateChatListening()
 -- UI Components
 -- UI Components
 -- Themes configuration
--- ═══════════════════════════════════════════════════════════
--- v17.5 THEMES — Полностью переработанные темы
--- Каждая тема уникальна и имеет переливающиеся акценты
--- ═══════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════════════════
+-- v17.5 GLASS THEMES — Полупрозрачное стекло
+-- Окно прозрачное, виден мир Roblox сквозь него
+-- Карточки — матовое стекло чуть светлее фона
+-- ══════════════════════════════════════════════════════
 
--- Переливающиеся цвета для LineOfBots (aurora effect)
--- Анимируется через RunService в блоке UI
 local AURORA_COLORS = {
-    Color3.fromRGB(64, 156, 255),   -- электрический синий
-    Color3.fromRGB(120, 80, 255),   -- фиолетовый
-    Color3.fromRGB(0, 210, 255),    -- циановый
-    Color3.fromRGB(80, 120, 255),   -- индиго
-    Color3.fromRGB(64, 156, 255),   -- возврат к синему (петля)
+    Color3.fromRGB(100, 180, 255),
+    Color3.fromRGB(160, 110, 255),
+    Color3.fromRGB(60, 220, 255),
+    Color3.fromRGB(100, 140, 255),
+    Color3.fromRGB(100, 180, 255),
 }
-
 local AURORA_COLORS_OBSIDIAN = {
-    Color3.fromRGB(180, 50, 255),
-    Color3.fromRGB(255, 50, 180),
-    Color3.fromRGB(120, 0, 255),
     Color3.fromRGB(200, 80, 255),
-    Color3.fromRGB(180, 50, 255),
+    Color3.fromRGB(255, 80, 200),
+    Color3.fromRGB(150, 50, 255),
+    Color3.fromRGB(210, 100, 255),
+    Color3.fromRGB(200, 80, 255),
 }
-
 local AURORA_COLORS_EMERALD = {
-    Color3.fromRGB(0, 220, 130),
-    Color3.fromRGB(0, 200, 255),
-    Color3.fromRGB(50, 230, 160),
-    Color3.fromRGB(0, 180, 255),
-    Color3.fromRGB(0, 220, 130),
+    Color3.fromRGB(60, 230, 150),
+    Color3.fromRGB(60, 210, 255),
+    Color3.fromRGB(80, 240, 180),
+    Color3.fromRGB(50, 190, 255),
+    Color3.fromRGB(60, 230, 150),
 }
-
 local AURORA_COLORS_GOLD = {
-    Color3.fromRGB(255, 190, 50),
-    Color3.fromRGB(255, 140, 60),
-    Color3.fromRGB(255, 210, 80),
-    Color3.fromRGB(255, 160, 40),
-    Color3.fromRGB(255, 190, 50),
+    Color3.fromRGB(255, 200, 70),
+    Color3.fromRGB(255, 150, 80),
+    Color3.fromRGB(255, 215, 90),
+    Color3.fromRGB(255, 170, 60),
+    Color3.fromRGB(255, 200, 70),
 }
 
 local function lerpColor(a, b, t)
-    return Color3.new(
-        a.R + (b.R - a.R) * t,
-        a.G + (b.G - a.G) * t,
-        a.B + (b.B - a.B) * t
-    )
+    return Color3.new(a.R+(b.R-a.R)*t, a.G+(b.G-a.G)*t, a.B+(b.B-a.B)*t)
 end
-
--- Получить текущий переливающийся цвет по времени и палитре
 local function getAuroraColor(palette, speed)
     local t = (os.clock() * (speed or 0.4)) % #palette
     local idx = math.floor(t) + 1
-    local next = (idx % #palette) + 1
-    return lerpColor(palette[idx], palette[next], t - math.floor(t))
+    return lerpColor(palette[idx], palette[(idx % #palette)+1], t-math.floor(t))
 end
 
 local Themes = {
-    LineOfBots = { -- ── v17.5: Aurora Deep Space ─────────────────────────
-        Window              = Color3.fromRGB(8, 10, 22),
-        Sidebar             = Color3.fromRGB(6, 8, 18),
-        SidebarSelected     = Color3.fromRGB(18, 30, 72),
-        WindowTransparency  = 0,
-        Card                = Color3.fromRGB(12, 18, 42),
-        Text                = Color3.fromRGB(225, 235, 255),
-        TextDim             = Color3.fromRGB(100, 130, 190),
-        Button              = Color3.fromRGB(15, 22, 55),
-        ButtonHover         = Color3.fromRGB(25, 40, 95),
-        ToggleOn            = Color3.fromRGB(64, 156, 255),
-        ToggleOff           = Color3.fromRGB(25, 35, 70),
-        Stroke              = Color3.fromRGB(50, 85, 175),
-        StrokeTransparency  = 0.45,
-        IconTint            = Color3.fromRGB(130, 175, 255),
-        InputBg             = Color3.fromRGB(8, 12, 30),
-        Accent              = Color3.fromRGB(64, 156, 255),
+    LineOfBots = {
+        -- Окно: тёмно-синее полупрозрачное — мир виден сквозь
+        Window              = Color3.fromRGB(15, 20, 45),
+        WindowTransparency  = 0.30,   -- 30% прозрачность окна
+
+        -- Сайдбар: чуть темнее, тоже стекло
+        Sidebar             = Color3.fromRGB(10, 14, 35),
+        SidebarTransparency = 0.20,
+        SidebarSelected     = Color3.fromRGB(40, 70, 160),
+        SidebarSelectedT    = 0.55,
+
+        -- Карточки настроек: светлее фона, матовое стекло
+        Card                = Color3.fromRGB(60, 90, 180),
+        CardTransparency    = 0.82,   -- сильно прозрачные — почти стекло
+
+        -- Тоггл строки
+        Button              = Color3.fromRGB(50, 80, 160),
+        ButtonTransparency  = 0.85,
+        ButtonHover         = Color3.fromRGB(80, 120, 220),
+        ButtonHoverT        = 0.70,
+
+        -- Текст
+        Text                = Color3.fromRGB(230, 240, 255),
+        TextDim             = Color3.fromRGB(140, 165, 220),
+
+        -- Toggle
+        ToggleOn            = Color3.fromRGB(80, 160, 255),
+        ToggleOff           = Color3.fromRGB(30, 45, 100),
+
+        -- Рамки — светлые, почти белые для эффекта стекла
+        Stroke              = Color3.fromRGB(120, 160, 255),
+        StrokeTransparency  = 0.60,
+
+        IconTint            = Color3.fromRGB(160, 200, 255),
+        InputBg             = Color3.fromRGB(10, 15, 40),
+        Accent              = Color3.fromRGB(80, 160, 255),
         AuroraPalette       = AURORA_COLORS,
         AuroraSpeed         = 0.35,
     },
-    Default = { -- ── v17.5: Midnight Slate ────────────────────────────────
-        Window              = Color3.fromRGB(14, 16, 20),
-        Sidebar             = Color3.fromRGB(10, 12, 16),
-        SidebarSelected     = Color3.fromRGB(30, 35, 48),
-        WindowTransparency  = 0,
-        Card                = Color3.fromRGB(18, 22, 30),
-        Text                = Color3.fromRGB(235, 238, 245),
-        TextDim             = Color3.fromRGB(130, 140, 165),
-        Button              = Color3.fromRGB(22, 26, 36),
-        ButtonHover         = Color3.fromRGB(35, 42, 58),
-        ToggleOn            = Color3.fromRGB(99, 179, 255),
-        ToggleOff           = Color3.fromRGB(40, 48, 65),
-        Stroke              = Color3.fromRGB(55, 65, 90),
-        StrokeTransparency  = 0.35,
-        IconTint            = Color3.fromRGB(170, 185, 215),
-        InputBg             = Color3.fromRGB(12, 14, 20),
-        Accent              = Color3.fromRGB(99, 179, 255),
+    Default = {
+        Window              = Color3.fromRGB(20, 22, 28),
+        WindowTransparency  = 0.28,
+        Sidebar             = Color3.fromRGB(14, 16, 22),
+        SidebarTransparency = 0.18,
+        SidebarSelected     = Color3.fromRGB(60, 80, 140),
+        SidebarSelectedT    = 0.60,
+        Card                = Color3.fromRGB(60, 75, 120),
+        CardTransparency    = 0.84,
+        Button              = Color3.fromRGB(50, 65, 110),
+        ButtonTransparency  = 0.86,
+        ButtonHover         = Color3.fromRGB(80, 100, 160),
+        ButtonHoverT        = 0.72,
+        Text                = Color3.fromRGB(235, 238, 248),
+        TextDim             = Color3.fromRGB(145, 155, 185),
+        ToggleOn            = Color3.fromRGB(100, 180, 255),
+        ToggleOff           = Color3.fromRGB(40, 50, 80),
+        Stroke              = Color3.fromRGB(100, 130, 200),
+        StrokeTransparency  = 0.58,
+        IconTint            = Color3.fromRGB(170, 190, 230),
+        InputBg             = Color3.fromRGB(14, 16, 26),
+        Accent              = Color3.fromRGB(100, 180, 255),
         AuroraPalette       = AURORA_COLORS,
         AuroraSpeed         = 0.25,
     },
-    PremiumDark = { -- ── v17.5: Void Violet ───────────────────────────────
-        Window              = Color3.fromRGB(10, 8, 18),
-        Sidebar             = Color3.fromRGB(8, 6, 14),
-        SidebarSelected     = Color3.fromRGB(40, 20, 80),
-        WindowTransparency  = 0,
-        Card                = Color3.fromRGB(18, 12, 35),
+    PremiumDark = {
+        Window              = Color3.fromRGB(18, 10, 30),
+        WindowTransparency  = 0.30,
+        Sidebar             = Color3.fromRGB(12, 8, 22),
+        SidebarTransparency = 0.20,
+        SidebarSelected     = Color3.fromRGB(80, 30, 150),
+        SidebarSelectedT    = 0.55,
+        Card                = Color3.fromRGB(90, 50, 180),
+        CardTransparency    = 0.84,
+        Button              = Color3.fromRGB(70, 40, 140),
+        ButtonTransparency  = 0.86,
+        ButtonHover         = Color3.fromRGB(110, 65, 200),
+        ButtonHoverT        = 0.70,
         Text                = Color3.fromRGB(240, 235, 255),
-        TextDim             = Color3.fromRGB(150, 130, 200),
-        Button              = Color3.fromRGB(24, 16, 48),
-        ButtonHover         = Color3.fromRGB(45, 28, 85),
-        ToggleOn            = Color3.fromRGB(160, 90, 255),
-        ToggleOff           = Color3.fromRGB(40, 28, 70),
-        Stroke              = Color3.fromRGB(100, 60, 200),
-        StrokeTransparency  = 0.45,
-        IconTint            = Color3.fromRGB(190, 160, 255),
-        InputBg             = Color3.fromRGB(8, 6, 18),
-        Accent              = Color3.fromRGB(160, 90, 255),
+        TextDim             = Color3.fromRGB(170, 150, 215),
+        ToggleOn            = Color3.fromRGB(170, 100, 255),
+        ToggleOff           = Color3.fromRGB(50, 30, 90),
+        Stroke              = Color3.fromRGB(160, 100, 255),
+        StrokeTransparency  = 0.55,
+        IconTint            = Color3.fromRGB(200, 170, 255),
+        InputBg             = Color3.fromRGB(12, 8, 24),
+        Accent              = Color3.fromRGB(170, 100, 255),
         AuroraPalette       = AURORA_COLORS_OBSIDIAN,
-        AuroraSpeed         = 0.4,
+        AuroraSpeed         = 0.40,
     },
-    Obsidian = { -- ── v17.5: Neon Obsidian ─────────────────────────────────
-        Window              = Color3.fromRGB(10, 10, 12),
-        Sidebar             = Color3.fromRGB(7, 7, 9),
-        SidebarSelected     = Color3.fromRGB(30, 18, 50),
-        WindowTransparency  = 0,
-        Card                = Color3.fromRGB(16, 14, 22),
-        Text                = Color3.fromRGB(255, 250, 255),
-        TextDim             = Color3.fromRGB(160, 145, 185),
-        Button              = Color3.fromRGB(20, 16, 30),
-        ButtonHover         = Color3.fromRGB(35, 25, 55),
-        ToggleOn            = Color3.fromRGB(200, 80, 255),
-        ToggleOff           = Color3.fromRGB(38, 30, 55),
-        Stroke              = Color3.fromRGB(120, 50, 180),
-        StrokeTransparency  = 0.4,
-        IconTint            = Color3.fromRGB(210, 180, 255),
-        InputBg             = Color3.fromRGB(10, 8, 16),
-        Accent              = Color3.fromRGB(200, 80, 255),
+    Obsidian = {
+        Window              = Color3.fromRGB(12, 10, 18),
+        WindowTransparency  = 0.28,
+        Sidebar             = Color3.fromRGB(8, 7, 14),
+        SidebarTransparency = 0.18,
+        SidebarSelected     = Color3.fromRGB(60, 20, 110),
+        SidebarSelectedT    = 0.55,
+        Card                = Color3.fromRGB(80, 40, 150),
+        CardTransparency    = 0.85,
+        Button              = Color3.fromRGB(60, 30, 120),
+        ButtonTransparency  = 0.86,
+        ButtonHover         = Color3.fromRGB(100, 50, 180),
+        ButtonHoverT        = 0.70,
+        Text                = Color3.fromRGB(255, 248, 255),
+        TextDim             = Color3.fromRGB(180, 155, 210),
+        ToggleOn            = Color3.fromRGB(210, 90, 255),
+        ToggleOff           = Color3.fromRGB(50, 30, 80),
+        Stroke              = Color3.fromRGB(180, 80, 255),
+        StrokeTransparency  = 0.50,
+        IconTint            = Color3.fromRGB(215, 185, 255),
+        InputBg             = Color3.fromRGB(10, 8, 18),
+        Accent              = Color3.fromRGB(210, 90, 255),
         AuroraPalette       = AURORA_COLORS_OBSIDIAN,
-        AuroraSpeed         = 0.5,
+        AuroraSpeed         = 0.50,
     },
-    FrostedGlass = { -- ── v17.5: Arctic Glass ──────────────────────────────
-        Window              = Color3.fromRGB(225, 232, 245),
-        Sidebar             = Color3.fromRGB(210, 220, 238),
-        SidebarSelected     = Color3.fromRGB(185, 205, 235),
-        WindowTransparency  = 0.05,
-        Card                = Color3.fromRGB(235, 240, 250),
-        Text                = Color3.fromRGB(18, 25, 45),
-        TextDim             = Color3.fromRGB(90, 110, 150),
-        Button              = Color3.fromRGB(200, 215, 238),
-        ButtonHover         = Color3.fromRGB(175, 195, 228),
-        ToggleOn            = Color3.fromRGB(30, 120, 255),
-        ToggleOff           = Color3.fromRGB(170, 190, 220),
-        Stroke              = Color3.fromRGB(140, 175, 225),
-        StrokeTransparency  = 0.3,
-        IconTint            = Color3.fromRGB(50, 90, 160),
-        InputBg             = Color3.fromRGB(215, 225, 242),
-        Accent              = Color3.fromRGB(30, 120, 255),
+    FrostedGlass = {
+        Window              = Color3.fromRGB(200, 215, 240),
+        WindowTransparency  = 0.25,
+        Sidebar             = Color3.fromRGB(185, 200, 230),
+        SidebarTransparency = 0.18,
+        SidebarSelected     = Color3.fromRGB(140, 175, 240),
+        SidebarSelectedT    = 0.50,
+        Card                = Color3.fromRGB(200, 215, 245),
+        CardTransparency    = 0.60,
+        Button              = Color3.fromRGB(185, 205, 240),
+        ButtonTransparency  = 0.65,
+        ButtonHover         = Color3.fromRGB(160, 190, 235),
+        ButtonHoverT        = 0.50,
+        Text                = Color3.fromRGB(20, 30, 60),
+        TextDim             = Color3.fromRGB(80, 105, 160),
+        ToggleOn            = Color3.fromRGB(40, 130, 255),
+        ToggleOff           = Color3.fromRGB(160, 185, 225),
+        Stroke              = Color3.fromRGB(100, 150, 230),
+        StrokeTransparency  = 0.30,
+        IconTint            = Color3.fromRGB(50, 95, 180),
+        InputBg             = Color3.fromRGB(195, 210, 238),
+        Accent              = Color3.fromRGB(40, 130, 255),
         AuroraPalette       = AURORA_COLORS,
-        AuroraSpeed         = 0.2,
+        AuroraSpeed         = 0.20,
     },
-    Dark = { -- ── v17.5: Emerald Night ─────────────────────────────────────
-        Window              = Color3.fromRGB(8, 14, 12),
-        Sidebar             = Color3.fromRGB(6, 10, 9),
-        SidebarSelected     = Color3.fromRGB(15, 45, 32),
-        WindowTransparency  = 0,
-        Card                = Color3.fromRGB(12, 22, 18),
-        Text                = Color3.fromRGB(225, 248, 235),
-        TextDim             = Color3.fromRGB(100, 160, 130),
-        Button              = Color3.fromRGB(14, 28, 22),
-        ButtonHover         = Color3.fromRGB(22, 48, 36),
-        ToggleOn            = Color3.fromRGB(0, 220, 130),
-        ToggleOff           = Color3.fromRGB(22, 48, 36),
-        Stroke              = Color3.fromRGB(30, 140, 90),
-        StrokeTransparency  = 0.4,
-        IconTint            = Color3.fromRGB(120, 230, 170),
-        InputBg             = Color3.fromRGB(6, 12, 10),
-        Accent              = Color3.fromRGB(0, 220, 130),
+    Dark = {
+        Window              = Color3.fromRGB(10, 18, 14),
+        WindowTransparency  = 0.28,
+        Sidebar             = Color3.fromRGB(7, 13, 10),
+        SidebarTransparency = 0.18,
+        SidebarSelected     = Color3.fromRGB(20, 80, 50),
+        SidebarSelectedT    = 0.55,
+        Card                = Color3.fromRGB(30, 120, 75),
+        CardTransparency    = 0.84,
+        Button              = Color3.fromRGB(20, 95, 60),
+        ButtonTransparency  = 0.86,
+        ButtonHover         = Color3.fromRGB(35, 140, 85),
+        ButtonHoverT        = 0.70,
+        Text                = Color3.fromRGB(220, 252, 235),
+        TextDim             = Color3.fromRGB(110, 175, 140),
+        ToggleOn            = Color3.fromRGB(0, 225, 135),
+        ToggleOff           = Color3.fromRGB(20, 60, 38),
+        Stroke              = Color3.fromRGB(40, 180, 105),
+        StrokeTransparency  = 0.50,
+        IconTint            = Color3.fromRGB(130, 235, 175),
+        InputBg             = Color3.fromRGB(7, 14, 10),
+        Accent              = Color3.fromRGB(0, 225, 135),
         AuroraPalette       = AURORA_COLORS_EMERALD,
-        AuroraSpeed         = 0.3,
+        AuroraSpeed         = 0.30,
     },
 }
 local THEME = Themes[ClientSettings.Theme] or Themes.LineOfBots
@@ -3576,7 +3609,7 @@ local function createInterface()
         window.Position = computeWindowPosition()
     end
     window.BackgroundColor3 = THEME.Window
-    window.BackgroundTransparency = THEME.WindowTransparency or 0
+    window.BackgroundTransparency = THEME.WindowTransparency or 0.28
     window.ClipsDescendants = true
     window.Parent = gui
     makeCorner(window, 18)
@@ -3588,6 +3621,7 @@ local function createInterface()
     local sidebar = Instance.new("Frame")
     sidebar.Size = UDim2.new(0, sidebarWidth, 1, 0)
     sidebar.BackgroundColor3 = THEME.Sidebar
+    sidebar.BackgroundTransparency = THEME.SidebarTransparency or 0.20
     sidebar.BorderSizePixel = 0
     sidebar.Parent = window
     makeCorner(sidebar, 18)
@@ -4090,13 +4124,23 @@ local function makeSectionCard(parent, titleText, subtitleText)
     local card = Instance.new("Frame")
     card.Name = titleText:gsub("%W+", "") .. "Section"
     card.BackgroundColor3 = THEME.Card
-    card.BackgroundTransparency = 0
+    card.BackgroundTransparency = THEME.CardTransparency or 0.82
     card.BorderSizePixel = 0
+    -- Frosted glass: белый матовый оверлей поверх карточки
+    local frostCard = Instance.new("Frame")
+    frostCard.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    frostCard.BackgroundTransparency = 0.93
+    frostCard.BorderSizePixel = 0
+    frostCard.Size = UDim2.new(1,0,1,0)
+    frostCard.ZIndex = 0
+    frostCard.Parent = card
+    makeCorner(frostCard, 12)
     card.Size = UDim2.new(1, 0, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
     card.Parent = parent
     makeCorner(card, 12)
-    makeStroke(card, 1, THEME.Stroke, THEME.StrokeTransparency)
+    -- Белая рамка — ключ к эффекту стекла
+    makeStroke(card, 1, Color3.fromRGB(255, 255, 255), 0.72)
 
     local pad = Instance.new("UIPadding")
     pad.PaddingTop    = UDim.new(0, 10)
@@ -4170,13 +4214,23 @@ end
 local function makeToggleRow(parent, labelText, descText, initialState, onChanged)
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
-    row.BackgroundColor3 = THEME.Card
-    row.BackgroundTransparency = 0
+    row.BackgroundColor3 = THEME.Button
+    row.BackgroundTransparency = THEME.ButtonTransparency or 0.82
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, descText and descText ~= "" and 56 or 46)
     row.Parent = parent
     makeCorner(row, 12)
-    local st = makeStroke(row, 1, THEME.Stroke, THEME.StrokeTransparency)
+    local st = makeStroke(row, 1, Color3.fromRGB(255,255,255), 0.78)
+
+    -- Frosted glass оверлей на строке
+    local frostRow = Instance.new("Frame")
+    frostRow.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    frostRow.BackgroundTransparency = 0.91
+    frostRow.BorderSizePixel = 0
+    frostRow.Size = UDim2.new(1,0,1,0)
+    frostRow.ZIndex = 0
+    frostRow.Parent = row
+    makeCorner(frostRow, 12)
 
     -- Тонкая акцентная полоска слева — видна только когда включено
     local sideBar = Instance.new("Frame")
@@ -4293,18 +4347,27 @@ end
 local function makeRightControlRow(parent, labelText, descText, controlWidth)
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
-    row.BackgroundColor3 = THEME.Card
-    row.BackgroundTransparency = 0
+    row.BackgroundColor3 = THEME.Button
+    row.BackgroundTransparency = THEME.ButtonTransparency or 0.82
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, 42) -- Match ToggleRow height
     row.Parent = parent
     makeCorner(row, 10)
-    local st = makeStroke(row, 1, THEME.Stroke, 0.6) -- Match ToggleRow stroke
+    local st = makeStroke(row, 1, Color3.fromRGB(255,255,255), 0.78)
 
     local pad = Instance.new("UIPadding")
     pad.PaddingLeft = UDim.new(0, 12)
     pad.PaddingRight = UDim.new(0, 12)
     pad.Parent = row
+
+    local frostRow2 = Instance.new("Frame")
+    frostRow2.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    frostRow2.BackgroundTransparency = 0.91
+    frostRow2.BorderSizePixel = 0
+    frostRow2.Size = UDim2.new(1,0,1,0)
+    frostRow2.ZIndex = 0
+    frostRow2.Parent = row
+    makeCorner(frostRow2, 12)
 
     local cw = controlWidth or 200
     local label = makeTextLabel(row, labelText, 13, "semibold") -- 14->13
@@ -4336,8 +4399,8 @@ end
 local function makeKeybindRow(parent, labelText, descText, currentKey, onChanged)
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
-    row.BackgroundColor3 = THEME.Card
-    row.BackgroundTransparency = 0
+    row.BackgroundColor3 = THEME.Button
+    row.BackgroundTransparency = THEME.ButtonTransparency or 0.82
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, 42) -- Standard height
     row.Parent = parent
@@ -4456,8 +4519,8 @@ end
 local function makeSliderRow(parent, labelText, minVal, maxVal, currentVal, callback)
     local row = Instance.new("Frame")
     row.Name = labelText:gsub("%W+", "") .. "Row"
-    row.BackgroundColor3 = THEME.Card
-    row.BackgroundTransparency = 0
+    row.BackgroundColor3 = THEME.Button
+    row.BackgroundTransparency = THEME.ButtonTransparency or 0.82
     row.Size = UDim2.new(1, 0, 0, 42)
     row.Parent = parent
     makeCorner(row, 10)
@@ -7655,8 +7718,8 @@ end
 local function createPlayerRow(parentScroll, userId, displayName, name, isBlocked, onAction)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 62)
-    row.BackgroundColor3 = THEME.Window
-    row.BackgroundTransparency = 0
+    row.BackgroundColor3 = THEME.Button
+    row.BackgroundTransparency = THEME.ButtonTransparency or 0.82
     row.BorderSizePixel = 0
     row.Parent = parentScroll
     makeCorner(row, 12)
