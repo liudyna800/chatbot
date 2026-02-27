@@ -108,7 +108,9 @@ local ClientSettings = {
     },
     AdminUserIds = {},
     FollowingEnabled = true,
-    FollowMode = "Pathfinding", -- "Pathfinding" or "Linear"
+    FollowMode = "Pathfinding",
+    AntiSpam = true,         -- v17.5: игнорировать одинаковые сообщения подряд
+    ReactToMention = true,   -- v17.5: реагировать на упоминание своего ника
 }
 
 local ClientSecrets = {
@@ -1931,9 +1933,9 @@ end
 -- Chat History Storage
 local ChatHistory = {}
 local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
--- MAX_HISTORY = количество ПАР сообщений (user+assistant) которые хранятся
--- Итого сообщений в API = MAX_HISTORY * 2
 local MAX_HISTORY = 10
+
+
 
 -- Безопасно добавить пару в историю и обрезать до лимита
 local function appendHistory(history, userMsg, assistantMsg)
@@ -2113,6 +2115,9 @@ local function runChatQueue(userId)
     end)
 end
 
+-- v17.5: Антиспам — один словарь на весь модуль
+local _lastMsgPerUser = {}
+
 -- Main chat processing function
 local function processChatMessage(player, rawMessage)
     local settings = ClientSettings
@@ -2149,10 +2154,26 @@ local function processChatMessage(player, rawMessage)
     -- Blacklist check
     if isBlacklisted(settings, player.UserId) then return end
 
+    -- v17.5: Антиспам — игнорируем если то же самое сообщение подряд
+    if settings.AntiSpam then
+        local lastData = _lastMsgPerUser[player.UserId]
+        local msgLower = rawMessage:lower():gsub("%s+", " "):match("^%s*(.-)%s*$")
+        local nowTime = os.clock()
+        if lastData and lastData.text == msgLower and (nowTime - lastData.time) < 8 then
+            return -- то же сообщение в течение 8 секунд — игнорируем
+        end
+        _lastMsgPerUser[player.UserId] = { text = msgLower, time = nowTime }
+    end
+
+    -- v17.5: ReactToMention — отвечаем даже без триггера если упомянули наш ник
+    local myDisplayName = player.Character and Players.LocalPlayer.Name or Players.LocalPlayer.Name
+    local msgLowerForMention = rawMessage:lower()
+    local mentionHit = settings.ReactToMention
+        and (msgLowerForMention:find(Players.LocalPlayer.Name:lower())
+          or msgLowerForMention:find(Players.LocalPlayer.DisplayName:lower()))
+
     -- ВАЖНО: passesTrigger проверяем на оригинальном сообщении ДО нормализации
-    -- normalizeOneLine удаляет '#', поэтому если триггер = "#что-то" он никогда не сработает
-    -- если проверять после normalizeOneLine
-    if not passesTrigger(settings, rawMessage) then
+    if not mentionHit and not passesTrigger(settings, rawMessage) then
         return
     end
 
@@ -4822,8 +4843,23 @@ makeToggleRow(
     end
 )
 
--- v16: Команды и эмоции
+-- v17.5: Антиспам — игнорировать одинаковые сообщения подряд
 makeToggleRow(
+    automation,
+    "🔇 Антиспам",
+    "Игнорировать если игрок отправляет одно и то же сообщение подряд.",
+    ClientSettings.AntiSpam ~= false,
+    function(state) ClientSettings.AntiSpam = state end
+)
+
+-- v17.5: Авто-реакция на упоминание ника бота
+makeToggleRow(
+    automation,
+    "📢 Реакция на имя",
+    "Бот реагирует когда кто-то упоминает его ник в чате, даже без триггера.",
+    ClientSettings.ReactToMention ~= false,
+    function(state) ClientSettings.ReactToMention = state end
+)
     automation,
     "🎭 Команды и эмоции",
     "ИИ сам решает когда прыгнуть, подойти, потанцевать или помахать — по просьбе игрока.",
@@ -7940,7 +7976,7 @@ logLayout.Parent = logScroll
 -- Log scroll kept for future use but Logger removed
 
 -- ═══════════════════════════════════════════════════════════
--- ЧАТ С ИИ — вкладка для прямого тестирования бота
+-- ЧАТ С ИИ — полностью переработанный интерфейс v17.5
 -- ═══════════════════════════════════════════════════════════
 local chatTestFrame = Instance.new("CanvasGroup")
 chatTestFrame.BackgroundTransparency = 1
@@ -7950,161 +7986,207 @@ chatTestFrame.GroupTransparency = 1
 chatTestFrame.Parent = contentArea
 tabFrames["Чат с ИИ"] = chatTestFrame
 
-local ctTitle = makeTextLabel(chatTestFrame, "Чат с ИИ", 24, "bold")
-ctTitle.Size = UDim2.new(1, 0, 0, 30)
+-- Хедер: заголовок + счётчик токенов справа
+local ctHeader = Instance.new("Frame")
+ctHeader.BackgroundTransparency = 1
+ctHeader.Size = UDim2.new(1, 0, 0, 40)
+ctHeader.Parent = chatTestFrame
 
-local ctDesc = makeTextLabel(chatTestFrame, "Тестируй бота напрямую — без реального чата.", 13, "semibold")
-ctDesc.TextColor3 = THEME.TextDim
-ctDesc.Position = UDim2.new(0, 0, 0, 32)
-ctDesc.Size = UDim2.new(1, 0, 0, 16)
+local ctTitle = makeTextLabel(ctHeader, "Чат с ИИ", 18, "bold")
+ctTitle.Size = UDim2.new(0.6, 0, 1, 0)
+ctTitle.TextXAlignment = Enum.TextXAlignment.Left
 
+-- Счётчик сообщений (справа в хедере)
+local ctCountLbl = makeTextLabel(ctHeader, "0 сообщений", 11, "semibold")
+ctCountLbl.Size = UDim2.new(0.4, 0, 1, 0)
+ctCountLbl.Position = UDim2.new(0.6, 0, 0, 0)
+ctCountLbl.TextXAlignment = Enum.TextXAlignment.Right
+ctCountLbl.TextColor3 = THEME.TextDim
+
+-- Область чата (лог сообщений)
 local ctLog = Instance.new("ScrollingFrame")
 ctLog.Name = "ChatLog"
-ctLog.BackgroundColor3 = THEME.Card
-ctLog.BackgroundTransparency = 0.4
+ctLog.BackgroundColor3 = THEME.InputBg
+ctLog.BackgroundTransparency = 0.3
 ctLog.BorderSizePixel = 0
-ctLog.Position = UDim2.new(0, 0, 0, 55)
-ctLog.Size = UDim2.new(1, 0, 1, -116)
+ctLog.Position = UDim2.new(0, 0, 0, 46)
+ctLog.Size = UDim2.new(1, 0, 1, -104)
 ctLog.CanvasSize = UDim2.new(0, 0, 0, 0)
-ctLog.ScrollBarThickness = 4
-ctLog.ScrollBarImageTransparency = 0.75
+ctLog.ScrollBarThickness = 3
+ctLog.ScrollBarImageTransparency = 0.7
+ctLog.ScrollBarImageColor3 = THEME.Accent
 ctLog.Parent = chatTestFrame
-makeCorner(ctLog, 12)
-makeStroke(ctLog, 1, THEME.Stroke, 0.5)
+makeCorner(ctLog, 14)
+makeStroke(ctLog, 1, THEME.Stroke, THEME.StrokeTransparency)
 
 local ctLogLayout = Instance.new("UIListLayout")
-ctLogLayout.Padding = UDim.new(0, 6)
+ctLogLayout.Padding = UDim.new(0, 8)
 ctLogLayout.SortOrder = Enum.SortOrder.LayoutOrder
 ctLogLayout.Parent = ctLog
 
 local ctLogPad = Instance.new("UIPadding")
-ctLogPad.PaddingTop = UDim.new(0, 8)
-ctLogPad.PaddingBottom = UDim.new(0, 8)
-ctLogPad.PaddingLeft = UDim.new(0, 10)
-ctLogPad.PaddingRight = UDim.new(0, 10)
+ctLogPad.PaddingTop = UDim.new(0, 12)
+ctLogPad.PaddingBottom = UDim.new(0, 12)
+ctLogPad.PaddingLeft = UDim.new(0, 12)
+ctLogPad.PaddingRight = UDim.new(0, 12)
 ctLogPad.Parent = ctLog
 
 ctLogLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    ctLog.CanvasSize = UDim2.new(0, 0, 0, ctLogLayout.AbsoluteContentSize.Y + 20)
-    ctLog.CanvasPosition = Vector2.new(0, math.max(0, ctLogLayout.AbsoluteContentSize.Y - ctLog.AbsoluteSize.Y + 20))
+    ctLog.CanvasSize = UDim2.new(0, 0, 0, ctLogLayout.AbsoluteContentSize.Y + 28)
+    ctLog.CanvasPosition = Vector2.new(0, math.max(0, ctLogLayout.AbsoluteContentSize.Y - ctLog.AbsoluteSize.Y + 28))
 end)
 
 local ctMsgCounter = 0
 local ctSending = false
 local ChatTestCallback = nil
+local ctTotalMsgs = 0  -- для счётчика
 
 local function ctAddMessage(text, isBot, isError)
     ctMsgCounter = ctMsgCounter + 1
+    ctTotalMsgs = ctTotalMsgs + 1
+    local pairCount = math.floor(ctTotalMsgs / 2)
+    ctCountLbl.Text = ctTotalMsgs > 0 and (tostring(ctTotalMsgs) .. " сообщ.") or ""
+
+    -- Внешний контейнер (выравнивание пузыря)
+    local row = Instance.new("Frame")
+    row.BackgroundTransparency = 1
+    row.Size = UDim2.new(1, 0, 0, 0)
+    row.AutomaticSize = Enum.AutomaticSize.Y
+    row.LayoutOrder = ctMsgCounter
+    row.Parent = ctLog
+
+    -- Пузырь
     local bubble = Instance.new("Frame")
-    bubble.BackgroundTransparency = 1
-    bubble.Size = UDim2.new(1, 0, 0, 0)
-    bubble.AutomaticSize = Enum.AutomaticSize.Y
-    bubble.LayoutOrder = ctMsgCounter
-    bubble.Parent = ctLog
+    bubble.BorderSizePixel = 0
+    bubble.AutomaticSize = Enum.AutomaticSize.XY
+    bubble.BackgroundTransparency = 0
+    bubble.Parent = row
+    makeCorner(bubble, 14)
 
-    local inner = Instance.new("Frame")
-    inner.BorderSizePixel = 0
-    inner.AutomaticSize = Enum.AutomaticSize.XY
-    inner.BackgroundTransparency = 0.25
-    inner.Parent = bubble
-    makeCorner(inner, 10)
-
-    local innerPad = Instance.new("UIPadding")
-    innerPad.PaddingTop = UDim.new(0, 6)
-    innerPad.PaddingBottom = UDim.new(0, 6)
-    innerPad.PaddingLeft = UDim.new(0, 10)
-    innerPad.PaddingRight = UDim.new(0, 10)
-    innerPad.Parent = inner
+    local bubblePad = Instance.new("UIPadding")
+    bubblePad.PaddingTop    = UDim.new(0, 8)
+    bubblePad.PaddingBottom = UDim.new(0, 8)
+    bubblePad.PaddingLeft   = UDim.new(0, 12)
+    bubblePad.PaddingRight  = UDim.new(0, 12)
+    bubblePad.Parent = bubble
 
     if isBot then
-        inner.BackgroundColor3 = isError and Color3.fromRGB(90,28,35) or THEME.SidebarSelected
-        inner.AnchorPoint = Vector2.new(0, 0)
-        inner.Position = UDim2.new(0, 0, 0, 0)
+        -- Пузырь бота — слева, цвет темы
+        bubble.BackgroundColor3 = isError
+            and Color3.fromRGB(80, 22, 28)
+            or THEME.Button
+        bubble.BackgroundTransparency = isError and 0.1 or (THEME.ButtonTransparency or 0.6)
+        bubble.AnchorPoint = Vector2.new(0, 0)
+        bubble.Position = UDim2.new(0, 0, 0, 0)
+        if not isError then
+            makeStroke(bubble, 1, THEME.Stroke, THEME.StrokeTransparency)
+        end
     else
-        inner.BackgroundColor3 = THEME.Accent
-        inner.AnchorPoint = Vector2.new(1, 0)
-        inner.Position = UDim2.new(1, 0, 0, 0)
+        -- Пузырь юзера — справа, акцентный цвет
+        bubble.BackgroundColor3 = THEME.Accent
+        bubble.BackgroundTransparency = 0.15
+        bubble.AnchorPoint = Vector2.new(1, 0)
+        bubble.Position = UDim2.new(1, 0, 0, 0)
     end
 
-    local prefix = isBot and ("🤖 " .. (ClientSettings.PersonalityId or "Бот")) or "👤 Ты"
-    local prefixLbl = makeTextLabel(inner, prefix, 11, "bold")
-    prefixLbl.Size = UDim2.new(0, 200, 0, 14)
-    prefixLbl.TextColor3 = isBot and THEME.TextDim or Color3.fromRGB(255,255,255)
-    prefixLbl.TextTransparency = 0.3
+    -- Имя отправителя (маленькое, сверху)
+    local senderName = isBot
+        and ("🤖 " .. (ClientSettings.PersonalityId or "Бот"))
+        or "Ты"
+    local nameLbl = makeTextLabel(bubble, senderName, 10, "bold")
+    nameLbl.Size = UDim2.new(0, 240, 0, 13)
+    nameLbl.TextColor3 = isBot
+        and (isError and Color3.fromRGB(255, 120, 120) or THEME.Accent)
+        or Color3.fromRGB(255, 255, 255)
+    nameLbl.TextTransparency = 0.2
 
-    local msgLbl = makeTextLabel(inner, text, 13, "medium")
-    msgLbl.Size = UDim2.new(0, 260, 0, 0)
+    -- Текст сообщения
+    local maxW = isBot and 280 or 240
+    local msgLbl = makeTextLabel(bubble, text, 13, "medium")
+    msgLbl.Size = UDim2.new(0, maxW, 0, 0)
     msgLbl.AutomaticSize = Enum.AutomaticSize.Y
-    msgLbl.Position = UDim2.new(0, 0, 0, 17)
+    msgLbl.Position = UDim2.new(0, 0, 0, 16)
     msgLbl.TextWrapped = true
-    msgLbl.TextColor3 = isBot and THEME.Text or Color3.fromRGB(255,255,255)
+    msgLbl.TextColor3 = isBot
+        and (isError and Color3.fromRGB(255, 160, 160) or THEME.Text)
+        or Color3.fromRGB(255, 255, 255)
     msgLbl.TextXAlignment = Enum.TextXAlignment.Left
 end
 
--- Поле ввода + отправить
-local ctInputRow = Instance.new("Frame")
-ctInputRow.BackgroundTransparency = 1
-ctInputRow.Position = UDim2.new(0, 0, 1, -50)
-ctInputRow.Size = UDim2.new(1, 0, 0, 46)
-ctInputRow.Parent = chatTestFrame
+-- ── Строка ввода (внизу) ──────────────────────────────────────────
+local ctInputArea = Instance.new("Frame")
+ctInputArea.BackgroundTransparency = 1
+ctInputArea.Position = UDim2.new(0, 0, 1, -52)
+ctInputArea.Size = UDim2.new(1, 0, 0, 48)
+ctInputArea.Parent = chatTestFrame
 
+-- Поле ввода
 local ctInputFrame = Instance.new("Frame")
 ctInputFrame.BackgroundColor3 = THEME.InputBg or THEME.Button
 ctInputFrame.BackgroundTransparency = 0.2
-ctInputFrame.Size = UDim2.new(1, -58, 1, 0)
-ctInputFrame.Parent = ctInputRow
-makeCorner(ctInputFrame, 10)
-makeStroke(ctInputFrame, 1, THEME.Stroke, 0.5)
+ctInputFrame.Size = UDim2.new(1, -100, 1, -4)
+ctInputFrame.Position = UDim2.new(0, 0, 0, 2)
+ctInputFrame.Parent = ctInputArea
+makeCorner(ctInputFrame, 22)
+makeStroke(ctInputFrame, 1, THEME.Stroke, THEME.StrokeTransparency)
 
 local ctInputBox = Instance.new("TextBox")
 ctInputBox.BackgroundTransparency = 1
-ctInputBox.Size = UDim2.new(1, -16, 1, 0)
-ctInputBox.Position = UDim2.new(0, 8, 0, 0)
+ctInputBox.Size = UDim2.new(1, -20, 1, 0)
+ctInputBox.Position = UDim2.new(0, 12, 0, 0)
 ctInputBox.Font = Enum.Font.GothamMedium
 ctInputBox.TextSize = 13
 ctInputBox.TextColor3 = THEME.Text
-ctInputBox.PlaceholderText = "Напиши что-нибудь и нажми Enter..."
+ctInputBox.PlaceholderText = "Напиши сообщение..."
 ctInputBox.PlaceholderColor3 = THEME.TextDim
 ctInputBox.TextXAlignment = Enum.TextXAlignment.Left
 ctInputBox.ClearTextOnFocus = false
 ctInputBox.Parent = ctInputFrame
 
+-- Кнопка отправить (круглая)
 local ctSendBtn = Instance.new("TextButton")
-ctSendBtn.Size = UDim2.new(0, 50, 1, 0)
-ctSendBtn.Position = UDim2.new(1, -50, 0, 0)
+ctSendBtn.Size = UDim2.new(0, 40, 0, 40)
+ctSendBtn.Position = UDim2.new(1, -88, 0.5, -20)
 ctSendBtn.BackgroundColor3 = THEME.Accent
-ctSendBtn.Text = "→"
+ctSendBtn.Text = "➤"
 ctSendBtn.Font = Enum.Font.GothamBold
-ctSendBtn.TextSize = 20
+ctSendBtn.TextSize = 16
 ctSendBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ctSendBtn.AutoButtonColor = false
-ctSendBtn.Parent = ctInputRow
-makeCorner(ctSendBtn, 10)
+ctSendBtn.Parent = ctInputArea
+makeCorner(ctSendBtn, 999)
 ctSendBtn.MouseEnter:Connect(function() tween(ctSendBtn, TWEEN_FAST, { BackgroundTransparency = 0.2 }) end)
 ctSendBtn.MouseLeave:Connect(function() tween(ctSendBtn, TWEEN_FAST, { BackgroundTransparency = 0 }) end)
 
--- Кнопка очистить
+-- Кнопка очистить (круглая, маленькая — как в ChatGPT/Gemini)
 local ctClearBtn = Instance.new("TextButton")
-ctClearBtn.Size = UDim2.new(1, 0, 0, 26)
-ctClearBtn.Position = UDim2.new(0, 0, 1, -80)
+ctClearBtn.Size = UDim2.new(0, 40, 0, 40)
+ctClearBtn.Position = UDim2.new(1, -44, 0.5, -20)
 ctClearBtn.BackgroundColor3 = THEME.Button
-ctClearBtn.BackgroundTransparency = 0.6
-ctClearBtn.Text = "Очистить историю"
-ctClearBtn.Font = Enum.Font.GothamMedium
-ctClearBtn.TextSize = 12
+ctClearBtn.BackgroundTransparency = THEME.ButtonTransparency or 0.6
+ctClearBtn.Text = "🗑"
+ctClearBtn.Font = Enum.Font.GothamBold
+ctClearBtn.TextSize = 16
 ctClearBtn.TextColor3 = THEME.TextDim
 ctClearBtn.AutoButtonColor = false
-ctClearBtn.Parent = chatTestFrame
-makeCorner(ctClearBtn, 7)
+ctClearBtn.Parent = ctInputArea
+makeCorner(ctClearBtn, 999)
+makeStroke(ctClearBtn, 1, THEME.Stroke, THEME.StrokeTransparency)
+ctClearBtn.MouseEnter:Connect(function()
+    tween(ctClearBtn, TWEEN_FAST, { BackgroundTransparency = 0.3, TextColor3 = Color3.fromRGB(255, 100, 100) })
+end)
+ctClearBtn.MouseLeave:Connect(function()
+    tween(ctClearBtn, TWEEN_FAST, { BackgroundTransparency = THEME.ButtonTransparency or 0.6, TextColor3 = THEME.TextDim })
+end)
 
 ctClearBtn.MouseButton1Click:Connect(function()
-    -- Очищаем историю директ-чата (массив, не словарь)
     for i = #DirectChatHistory, 1, -1 do DirectChatHistory[i] = nil end
-    -- Очищаем визуал
     for _, c in ipairs(ctLog:GetChildren()) do
         if not c:IsA("UILayout") and not c:IsA("UIPadding") then c:Destroy() end
     end
     ctMsgCounter = 0
+    ctTotalMsgs = 0
+    ctCountLbl.Text = ""
     ctAddMessage("История очищена.", true, false)
 end)
 
@@ -8113,8 +8195,6 @@ end)
 local function ctDoSend()
     local rawMsg = ctInputBox.Text:gsub("^%s+",""):gsub("%s+$","")
     if rawMsg == "" or ctSending then return end
-    ctSending = true
-    ctInputBox.Text = ""
 
     -- Применяем фильтр # точно так же как в игровом чате
     local msg = rawMsg
@@ -8122,16 +8202,29 @@ local function ctDoSend()
         msg = msg:gsub("#", "")
         msg = msg:gsub("%s+", " "):match("^%s*(.-)%s*$")
     end
-    if msg == "" then
+    if msg == "" then return end  -- БАГ-ФИХ: не забываем сбросить ctSending
+
+    ctSending = true
+    ctInputBox.Text = ""
+    -- Визуальная блокировка кнопки
+    ctSendBtn.BackgroundTransparency = 0.7
+    ctSendBtn.Text = "..."
+    local function unblockSend()
         ctSending = false
-        return
+        pcall(function()
+            ctSendBtn.BackgroundTransparency = 0.4
+            ctSendBtn.Text = "➤"
+        end)
     end
 
     -- Показываем оригинальный текст пользователя (до фильтра)
     ctAddMessage(rawMsg, false, false)
 
-    local typingIdx = ctMsgCounter + 1
+    -- БАГ-ФИХ: сохраняем ID ДО инкремента счётчика
+    local thisReqId = ctMsgCounter
     ctMsgCounter = ctMsgCounter + 1
+    local typingIdx = ctMsgCounter
+
     local typingBubble = Instance.new("Frame")
     typingBubble.BackgroundTransparency = 1
     typingBubble.Size = UDim2.new(1, 0, 0, 26)
@@ -8142,7 +8235,7 @@ local function ctDoSend()
     typingLbl.Size = UDim2.new(1, 0, 1, 0)
 
     ChatTestCallback = function(response, isErr)
-        ctSending = false
+        unblockSend()
         pcall(function() typingBubble:Destroy() end)
         ctAddMessage(response, true, isErr)
         ChatTestCallback = nil
@@ -8164,21 +8257,29 @@ local function ctDoSend()
         end
         table.insert(apiMsgs, { role = "user", content = userContent })
 
-        -- В директ-чате max_tokens берём из настроек но не ограничиваем как в игровом чате
-        -- Для инструкций нужно больше токенов
         local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 200, 1024)
-
         local payload = {
             model       = getModel(settings),
             temperature = tonumber(settings.Temperature) or 0.7,
             max_tokens  = directMaxTokens,
             messages    = apiMsgs,
         }
-        -- Qwen3 — отключаем цепочку рассуждений через reasoning_effort
         if payload.model == "qwen/qwen3-32b" then
             payload.reasoning_effort = "none"
         end
+
         local text, err = providerRouter:chatCompletions(payload)
+
+        -- Авто-retry при сетевой ошибке (1 попытка)
+        if not text and err then
+            local errL = tostring(err):lower()
+            local isNetErr = errL:find("timeout") or errL:find("timed") or errL:find("network") or errL:find("connection")
+            if isNetErr then
+                task.wait(2)
+                text, err = providerRouter:chatCompletions(payload)
+            end
+        end
+
         if text and text ~= "" and settings.MemoryEnabled then
             appendHistory(DirectChatHistory, userContent, text)
         end
@@ -8195,7 +8296,7 @@ local function ctDoSend()
                 elseif errLower:find("400") or errLower:find("bad request") then
                     friendlyErr = "⚠️ Модель не поддерживает этот запрос. Попробуй другую."
                 elseif errLower:find("timeout") or errLower:find("timed") then
-                    friendlyErr = "⏱️ Таймаут. Попробуй ещё раз."
+                    friendlyErr = "⏱️ Таймаут даже после retry. Попробуй позже."
                 else
                     friendlyErr = "❌ Ошибка: " .. tostring(err)
                 end
@@ -8205,8 +8306,13 @@ local function ctDoSend()
             end
         end
     end)
-    task.delay(30, function()
-        if ChatTestCallback then ChatTestCallback("⏱️ Нет ответа (таймаут 30с)", true) end
+
+    -- БАГ-ФИХ таймаута: thisReqId сохранён ДО инкремента счётчика
+    -- Таймер сработает только если этот конкретный запрос завис
+    task.delay(90, function()
+        if ChatTestCallback and ctMsgCounter - 1 == thisReqId then
+            ChatTestCallback("⏱️ Нет ответа (90с). Проверь интернет или смени модель.", true)
+        end
     end)
 end
 
