@@ -826,20 +826,22 @@ local function makeSystemPrompt(settings)
     if settings.PlayerAwareness then
         if settings.TokenEconomy then
             system = system
-                .. "\n[NEARBY] shows nearby players and their position. Always mention it briefly."
+                .. "\n[NEARBY] shows nearby players. Mention position only when relevant to the chat."
         else
             system = system
                 .. "\n\n== PLAYER AWARENESS =="
                 .. "\nBefore each message you get a [NEARBY] block with players near you."
                 .. "\nEach entry: Name — direction (distance), behavior"
-                .. "\nDirections are in English: 'in front', 'behind', 'to your right', 'to your left', 'front-right', 'behind-left', etc."
-                .. "\n\nRULE: If [NEARBY] is present, you MUST briefly acknowledge the player's position in your reply."
+                .. "\nDirections: 'in front', 'behind', 'to your right', 'to your left', 'front-right', 'behind-left', etc."
+                .. "\n\nRULE: Only mention position/direction when it's actually relevant to the conversation."
+                .. "\n  MENTION IT when: player asks where they are, someone is sneaking behind you, toxic behavior detected."
+                .. "\n  IGNORE IT when: player asks about random topics, jokes, games — just answer normally."
+                .. "\n  NEVER list all nearby players every reply — that is annoying and unnatural."
                 .. "\nExamples:"
-                .. "\n  [NEARBY: Alex — in front (3 studs)] → 'hey Alex, right in front of me!'"
-                .. "\n  [NEARBY: Bob — behind (7 studs)] → 'I can feel someone behind me...'"
-                .. "\n  [NEARBY: Sam — to your right (4 studs)] → 'oh Sam, you're on my right side'"
-                .. "\n  [NEARBY: TOXIC] → 'I see what you're doing back there, stop it!'"
-                .. "\nNever print [NEARBY] tags in your reply. Speak naturally."
+                .. "\n  'где я?' + [NEARBY: Bob — behind] → 'you're right behind me'"
+                .. "\n  'как дела?' + [NEARBY: Bob — in front] → just answer normally, skip position"
+                .. "\n  [NEARBY: TOXIC detected] → always react: 'I see what you're doing back there!'"
+                .. "\nNever print [NEARBY] tags in your reply."
         end
     end
 
@@ -2359,121 +2361,181 @@ updateChatListening()
 -- UI Components
 -- UI Components
 -- Themes configuration
+-- ═══════════════════════════════════════════════════════════
+-- v17.5 THEMES — Полностью переработанные темы
+-- Каждая тема уникальна и имеет переливающиеся акценты
+-- ═══════════════════════════════════════════════════════════
+
+-- Переливающиеся цвета для LineOfBots (aurora effect)
+-- Анимируется через RunService в блоке UI
+local AURORA_COLORS = {
+    Color3.fromRGB(64, 156, 255),   -- электрический синий
+    Color3.fromRGB(120, 80, 255),   -- фиолетовый
+    Color3.fromRGB(0, 210, 255),    -- циановый
+    Color3.fromRGB(80, 120, 255),   -- индиго
+    Color3.fromRGB(64, 156, 255),   -- возврат к синему (петля)
+}
+
+local AURORA_COLORS_OBSIDIAN = {
+    Color3.fromRGB(180, 50, 255),
+    Color3.fromRGB(255, 50, 180),
+    Color3.fromRGB(120, 0, 255),
+    Color3.fromRGB(200, 80, 255),
+    Color3.fromRGB(180, 50, 255),
+}
+
+local AURORA_COLORS_EMERALD = {
+    Color3.fromRGB(0, 220, 130),
+    Color3.fromRGB(0, 200, 255),
+    Color3.fromRGB(50, 230, 160),
+    Color3.fromRGB(0, 180, 255),
+    Color3.fromRGB(0, 220, 130),
+}
+
+local AURORA_COLORS_GOLD = {
+    Color3.fromRGB(255, 190, 50),
+    Color3.fromRGB(255, 140, 60),
+    Color3.fromRGB(255, 210, 80),
+    Color3.fromRGB(255, 160, 40),
+    Color3.fromRGB(255, 190, 50),
+}
+
+local function lerpColor(a, b, t)
+    return Color3.new(
+        a.R + (b.R - a.R) * t,
+        a.G + (b.G - a.G) * t,
+        a.B + (b.B - a.B) * t
+    )
+end
+
+-- Получить текущий переливающийся цвет по времени и палитре
+local function getAuroraColor(palette, speed)
+    local t = (os.clock() * (speed or 0.4)) % #palette
+    local idx = math.floor(t) + 1
+    local next = (idx % #palette) + 1
+    return lerpColor(palette[idx], palette[next], t - math.floor(t))
+end
+
 local Themes = {
-    LineOfBots = { -- ── Фирменная тема LineOfBots ──────────────────────────
-        Window              = Color3.fromRGB(13, 17, 35),      -- тёмно-синий, видимый фон
-        Sidebar             = Color3.fromRGB(9, 12, 26),       -- чуть темнее окна
-        SidebarSelected     = Color3.fromRGB(25, 45, 95),      -- яркое выделение
+    LineOfBots = { -- ── v17.5: Aurora Deep Space ─────────────────────────
+        Window              = Color3.fromRGB(8, 10, 22),
+        Sidebar             = Color3.fromRGB(6, 8, 18),
+        SidebarSelected     = Color3.fromRGB(18, 30, 72),
         WindowTransparency  = 0,
-
-        Card                = Color3.fromRGB(18, 25, 52),      -- карточки чуть светлее окна
-
-        Text                = Color3.fromRGB(220, 230, 255),   -- мягкий белый с синевой
-        TextDim             = Color3.fromRGB(120, 145, 200),   -- приглушённый синий
-
-        Button              = Color3.fromRGB(22, 32, 68),
-        ButtonHover         = Color3.fromRGB(32, 50, 105),
-
-        ToggleOn            = Color3.fromRGB(55, 135, 255),    -- электрический синий
-        ToggleOff           = Color3.fromRGB(35, 45, 80),
-
-        Stroke              = Color3.fromRGB(55, 90, 180),     -- видимая рамка
-        StrokeTransparency  = 0.55,
-
-        IconTint            = Color3.fromRGB(150, 185, 255),
-        InputBg             = Color3.fromRGB(11, 16, 36),
-
-        Accent              = Color3.fromRGB(55, 135, 255),    -- фирменный синий
+        Card                = Color3.fromRGB(12, 18, 42),
+        Text                = Color3.fromRGB(225, 235, 255),
+        TextDim             = Color3.fromRGB(100, 130, 190),
+        Button              = Color3.fromRGB(15, 22, 55),
+        ButtonHover         = Color3.fromRGB(25, 40, 95),
+        ToggleOn            = Color3.fromRGB(64, 156, 255),
+        ToggleOff           = Color3.fromRGB(25, 35, 70),
+        Stroke              = Color3.fromRGB(50, 85, 175),
+        StrokeTransparency  = 0.45,
+        IconTint            = Color3.fromRGB(130, 175, 255),
+        InputBg             = Color3.fromRGB(8, 12, 30),
+        Accent              = Color3.fromRGB(64, 156, 255),
+        AuroraPalette       = AURORA_COLORS,
+        AuroraSpeed         = 0.35,
     },
-    Default = { -- Стандартная тёмная
-        Window = Color3.fromRGB(20, 20, 20),
-        Sidebar = Color3.fromRGB(15, 15, 15),
-        SidebarSelected = Color3.fromHex("#2a2a2e"),
-        WindowTransparency = 0.1,
-        Card = Color3.fromHex("#1c1c1f"),
-        Text = Color3.fromRGB(240, 240, 240),
-        TextDim = Color3.fromRGB(150, 150, 150),
-        Button = Color3.fromRGB(30, 30, 30),
-        ButtonHover = Color3.fromRGB(45, 45, 45),
-        ToggleOn = Color3.fromRGB(59, 130, 246),
-        ToggleOff = Color3.fromRGB(60, 60, 60),
-        Stroke = Color3.fromRGB(45, 45, 45),
-        StrokeTransparency = 0,
-        IconTint = Color3.fromRGB(200, 200, 200),
-        InputBg = Color3.fromRGB(25, 25, 25),
-        Accent = Color3.fromRGB(59, 130, 246),
+    Default = { -- ── v17.5: Midnight Slate ────────────────────────────────
+        Window              = Color3.fromRGB(14, 16, 20),
+        Sidebar             = Color3.fromRGB(10, 12, 16),
+        SidebarSelected     = Color3.fromRGB(30, 35, 48),
+        WindowTransparency  = 0,
+        Card                = Color3.fromRGB(18, 22, 30),
+        Text                = Color3.fromRGB(235, 238, 245),
+        TextDim             = Color3.fromRGB(130, 140, 165),
+        Button              = Color3.fromRGB(22, 26, 36),
+        ButtonHover         = Color3.fromRGB(35, 42, 58),
+        ToggleOn            = Color3.fromRGB(99, 179, 255),
+        ToggleOff           = Color3.fromRGB(40, 48, 65),
+        Stroke              = Color3.fromRGB(55, 65, 90),
+        StrokeTransparency  = 0.35,
+        IconTint            = Color3.fromRGB(170, 185, 215),
+        InputBg             = Color3.fromRGB(12, 14, 20),
+        Accent              = Color3.fromRGB(99, 179, 255),
+        AuroraPalette       = AURORA_COLORS,
+        AuroraSpeed         = 0.25,
     },
-    PremiumDark = {
-        Window = Color3.fromRGB(12, 12, 13),
-        Sidebar = Color3.fromRGB(10, 10, 11),
-        SidebarSelected = Color3.fromRGB(39, 39, 44),
-        WindowTransparency = 0,
-        Card = Color3.fromRGB(28, 28, 30),
-        Text = Color3.fromRGB(255, 255, 255),
-        TextDim = Color3.fromRGB(190, 190, 190),
-        Button = Color3.fromRGB(28, 28, 30),
-        ButtonHover = Color3.fromRGB(38, 38, 40),
-        ToggleOn = Color3.fromRGB(110, 100, 255),
-        ToggleOff = Color3.fromHex("#3A3A3A"),
-        Stroke = Color3.fromRGB(255, 255, 255),
-        StrokeTransparency = 0.9,
-        IconTint = Color3.fromRGB(180, 180, 180),
-        InputBg = Color3.fromRGB(22, 22, 24),
-        Accent = Color3.fromRGB(110, 100, 255),
+    PremiumDark = { -- ── v17.5: Void Violet ───────────────────────────────
+        Window              = Color3.fromRGB(10, 8, 18),
+        Sidebar             = Color3.fromRGB(8, 6, 14),
+        SidebarSelected     = Color3.fromRGB(40, 20, 80),
+        WindowTransparency  = 0,
+        Card                = Color3.fromRGB(18, 12, 35),
+        Text                = Color3.fromRGB(240, 235, 255),
+        TextDim             = Color3.fromRGB(150, 130, 200),
+        Button              = Color3.fromRGB(24, 16, 48),
+        ButtonHover         = Color3.fromRGB(45, 28, 85),
+        ToggleOn            = Color3.fromRGB(160, 90, 255),
+        ToggleOff           = Color3.fromRGB(40, 28, 70),
+        Stroke              = Color3.fromRGB(100, 60, 200),
+        StrokeTransparency  = 0.45,
+        IconTint            = Color3.fromRGB(190, 160, 255),
+        InputBg             = Color3.fromRGB(8, 6, 18),
+        Accent              = Color3.fromRGB(160, 90, 255),
+        AuroraPalette       = AURORA_COLORS_OBSIDIAN,
+        AuroraSpeed         = 0.4,
     },
-    Obsidian = {
-        Window = Color3.fromRGB(18, 18, 20),
-        Sidebar = Color3.fromRGB(14, 14, 16),
-        SidebarSelected = Color3.fromRGB(28, 28, 32),
-        WindowTransparency = 0.1,
-        Card = Color3.fromRGB(24, 24, 28),
-        Text = Color3.fromRGB(255, 255, 255),
-        TextDim = Color3.fromRGB(180, 180, 180),
-        Button = Color3.fromRGB(22, 22, 26),
-        ButtonHover = Color3.fromRGB(30, 30, 36),
-        ToggleOn = Color3.fromRGB(144, 41, 246),
-        ToggleOff = Color3.fromRGB(45, 45, 52),
-        Stroke = Color3.fromRGB(60, 60, 72),
-        StrokeTransparency = 0.55,
-        IconTint = Color3.fromRGB(255, 255, 255),
-        InputBg = Color3.fromRGB(18, 18, 22),
-        Accent = Color3.fromRGB(144, 41, 246),
+    Obsidian = { -- ── v17.5: Neon Obsidian ─────────────────────────────────
+        Window              = Color3.fromRGB(10, 10, 12),
+        Sidebar             = Color3.fromRGB(7, 7, 9),
+        SidebarSelected     = Color3.fromRGB(30, 18, 50),
+        WindowTransparency  = 0,
+        Card                = Color3.fromRGB(16, 14, 22),
+        Text                = Color3.fromRGB(255, 250, 255),
+        TextDim             = Color3.fromRGB(160, 145, 185),
+        Button              = Color3.fromRGB(20, 16, 30),
+        ButtonHover         = Color3.fromRGB(35, 25, 55),
+        ToggleOn            = Color3.fromRGB(200, 80, 255),
+        ToggleOff           = Color3.fromRGB(38, 30, 55),
+        Stroke              = Color3.fromRGB(120, 50, 180),
+        StrokeTransparency  = 0.4,
+        IconTint            = Color3.fromRGB(210, 180, 255),
+        InputBg             = Color3.fromRGB(10, 8, 16),
+        Accent              = Color3.fromRGB(200, 80, 255),
+        AuroraPalette       = AURORA_COLORS_OBSIDIAN,
+        AuroraSpeed         = 0.5,
     },
-    FrostedGlass = {
-        Window = Color3.fromRGB(255, 255, 255),
-        Sidebar = Color3.fromRGB(245, 245, 245),
-        SidebarSelected = Color3.fromRGB(230, 230, 230),
-        WindowTransparency = 0.2,
-        Card = Color3.fromRGB(255, 255, 255),
-        Text = Color3.fromRGB(20, 20, 20),
-        TextDim = Color3.fromRGB(100, 100, 100),
-        Button = Color3.fromRGB(240, 240, 240),
-        ButtonHover = Color3.fromRGB(220, 220, 220),
-        ToggleOn = Color3.fromRGB(0, 0, 0),
-        ToggleOff = Color3.fromRGB(200, 200, 200),
-        Stroke = Color3.fromRGB(200, 200, 200),
-        StrokeTransparency = 0,
-        IconTint = Color3.fromRGB(50, 50, 50),
-        InputBg = Color3.fromRGB(235, 235, 235),
-        Accent = Color3.fromRGB(0, 0, 0),
+    FrostedGlass = { -- ── v17.5: Arctic Glass ──────────────────────────────
+        Window              = Color3.fromRGB(225, 232, 245),
+        Sidebar             = Color3.fromRGB(210, 220, 238),
+        SidebarSelected     = Color3.fromRGB(185, 205, 235),
+        WindowTransparency  = 0.05,
+        Card                = Color3.fromRGB(235, 240, 250),
+        Text                = Color3.fromRGB(18, 25, 45),
+        TextDim             = Color3.fromRGB(90, 110, 150),
+        Button              = Color3.fromRGB(200, 215, 238),
+        ButtonHover         = Color3.fromRGB(175, 195, 228),
+        ToggleOn            = Color3.fromRGB(30, 120, 255),
+        ToggleOff           = Color3.fromRGB(170, 190, 220),
+        Stroke              = Color3.fromRGB(140, 175, 225),
+        StrokeTransparency  = 0.3,
+        IconTint            = Color3.fromRGB(50, 90, 160),
+        InputBg             = Color3.fromRGB(215, 225, 242),
+        Accent              = Color3.fromRGB(30, 120, 255),
+        AuroraPalette       = AURORA_COLORS,
+        AuroraSpeed         = 0.2,
     },
-    Dark = {
-        Window = Color3.fromRGB(35, 36, 40),
-        Sidebar = Color3.fromRGB(30, 31, 35),
-        SidebarSelected = Color3.fromRGB(50, 51, 55),
-        WindowTransparency = 0,
-        Card = Color3.fromRGB(35, 36, 40),
-        Text = Color3.fromRGB(255, 255, 255),
-        TextDim = Color3.fromRGB(160, 160, 160),
-        Button = Color3.fromRGB(27, 28, 32),
-        ButtonHover = Color3.fromRGB(45, 46, 50),
-        ToggleOn = Color3.fromRGB(55, 204, 149),
-        ToggleOff = Color3.fromRGB(60, 60, 60),
-        Stroke = Color3.fromRGB(60, 60, 60),
-        StrokeTransparency = 0,
-        IconTint = Color3.fromRGB(220, 220, 220),
-        InputBg = Color3.fromRGB(27, 28, 32),
-        Accent = Color3.fromRGB(55, 204, 149),
+    Dark = { -- ── v17.5: Emerald Night ─────────────────────────────────────
+        Window              = Color3.fromRGB(8, 14, 12),
+        Sidebar             = Color3.fromRGB(6, 10, 9),
+        SidebarSelected     = Color3.fromRGB(15, 45, 32),
+        WindowTransparency  = 0,
+        Card                = Color3.fromRGB(12, 22, 18),
+        Text                = Color3.fromRGB(225, 248, 235),
+        TextDim             = Color3.fromRGB(100, 160, 130),
+        Button              = Color3.fromRGB(14, 28, 22),
+        ButtonHover         = Color3.fromRGB(22, 48, 36),
+        ToggleOn            = Color3.fromRGB(0, 220, 130),
+        ToggleOff           = Color3.fromRGB(22, 48, 36),
+        Stroke              = Color3.fromRGB(30, 140, 90),
+        StrokeTransparency  = 0.4,
+        IconTint            = Color3.fromRGB(120, 230, 170),
+        InputBg             = Color3.fromRGB(6, 12, 10),
+        Accent              = Color3.fromRGB(0, 220, 130),
+        AuroraPalette       = AURORA_COLORS_EMERALD,
+        AuroraSpeed         = 0.3,
     },
 }
 local THEME = Themes[ClientSettings.Theme] or Themes.LineOfBots
@@ -2672,10 +2734,9 @@ local function makeScrollingTextBox(parent, placeholder, defaultText, height)
     return container, box
 end
 
-local function makeButton(parent, text, icon, style) 
+local function makeButton(parent, text, icon, style)
     if type(icon) == "table" and style == nil then
-        style = icon
-        icon = nil
+        style = icon; icon = nil
     end
     style = style or {}
 
@@ -2683,60 +2744,61 @@ local function makeButton(parent, text, icon, style)
     btn.AutoButtonColor = false
     btn.Text = ""
     btn.BackgroundTransparency = 1
-    btn.Size = UDim2.new(1, 0, 0, 36) -- 40->36 (Default button height)
-    makeCorner(btn, 8)
-    
+    btn.Size = UDim2.new(1, 0, 0, 38)
+    makeCorner(btn, 10)
+
     local content = Instance.new("Frame")
     content.Name = "Content"
     content.BackgroundTransparency = 0
     content.BackgroundColor3 = style.BaseBg or THEME.Button
     content.Size = UDim2.new(1, 0, 1, 0)
     content.Parent = btn
-    makeCorner(content, 8)
-    local contentStroke = makeStroke(content, 1, style.StrokeColor or THEME.Stroke, (style.StrokeT ~= nil) and style.StrokeT or 0.15)
+    makeCorner(content, 10)
+    local contentStroke = makeStroke(content, 1, style.StrokeColor or THEME.Stroke,
+        (style.StrokeT ~= nil) and style.StrokeT or THEME.StrokeTransparency)
     contentStroke.Name = "Stroke"
-    
-    local padding = makePadding(content, style.Padding or 10) -- 12->10
 
-    local label = makeTextLabel(content, text, 14, "semibold")
+    makePadding(content, style.Padding or 10)
+
+    local label = makeTextLabel(content, text, 13, "semibold")
     label.Name = "Label"
-    label.Size = UDim2.new(1, -20, 1, 0) 
+    label.Size = UDim2.new(1, -18, 1, 0)
     label.TextXAlignment = style.TextXAlignment or Enum.TextXAlignment.Left
     label.TextColor3 = style.TextColor or THEME.Text
-    
-    local arrow = makeTextLabel(content, ">", 14, "bold")
+
+    local arrow = makeTextLabel(content, "›", 16, "bold")
     arrow.Name = "Arrow"
-    arrow.Size = UDim2.new(0, 10, 1, 0)
-    arrow.Position = UDim2.new(1, -10, 0, 0)
+    arrow.Size = UDim2.new(0, 14, 1, 0)
+    arrow.Position = UDim2.new(1, -14, 0, 0)
     arrow.AnchorPoint = Vector2.new(1, 0)
-    arrow.TextColor3 = style.ArrowColor or THEME.TextDim
-    arrow.BackgroundTransparency = 1 
+    arrow.TextColor3 = style.ArrowColor or THEME.Accent
+    arrow.BackgroundTransparency = 1
 
     if icon == "noArrow" then
         arrow.Visible = false
         label.Size = UDim2.new(1, 0, 1, 0)
     end
-    
-    if style.BgT ~= nil then
-        content.BackgroundTransparency = style.BgT
-    end
 
-    local baseBg = style.BaseBg or THEME.Button
+    if style.BgT ~= nil then content.BackgroundTransparency = style.BgT end
+
+    local baseBg  = style.BaseBg  or THEME.Button
     local hoverBg = style.HoverBg or THEME.ButtonHover
 
     btn.MouseEnter:Connect(function()
         tween(content, TWEEN_FAST, { BackgroundColor3 = hoverBg })
-        if style.HoverStrokeT ~= nil then
-            tween(contentStroke, TWEEN_FAST, { Transparency = style.HoverStrokeT })
+        -- v17.5: aurora на стрелке при наведении
+        if arrow.Visible ~= false then
+            local palette = THEME.AuroraPalette or AURORA_COLORS
+            arrow.TextColor3 = getAuroraColor(palette, THEME.AuroraSpeed or 0.35)
         end
+        tween(contentStroke, TWEEN_FAST, { Transparency = 0.1 })
     end)
     btn.MouseLeave:Connect(function()
         tween(content, TWEEN_FAST, { BackgroundColor3 = baseBg })
-        if style.HoverStrokeT ~= nil then
-            tween(contentStroke, TWEEN_FAST, { Transparency = (style.StrokeT ~= nil) and style.StrokeT or 0.15 })
-        end
+        arrow.TextColor3 = style.ArrowColor or THEME.Accent
+        tween(contentStroke, TWEEN_FAST, { Transparency = (style.StrokeT ~= nil) and style.StrokeT or THEME.StrokeTransparency })
     end)
-    
+
     btn.Parent = parent
     return btn
 end
@@ -3086,46 +3148,80 @@ end
 local function makeToggle(parent, text, initialState, callback)
     local container = Instance.new("Frame")
     container.BackgroundTransparency = 0
-    container.Size = UDim2.new(1, 0, 0, 40)
-    makeCorner(container, 10)
-    container.BackgroundColor3 = THEME.Button 
-    makeStroke(container, 1, THEME.Stroke, 0.15)
+    container.Size = UDim2.new(1, 0, 0, 52)
+    makeCorner(container, 12)
+    container.BackgroundColor3 = THEME.Card
+    makeStroke(container, 1, THEME.Stroke, THEME.StrokeTransparency)
     container.Parent = parent
-    
-    -- In this style, the whole row is the button, effectively
-    -- But usually toggle is a pill inside the row.
-    -- Let's make the container the background pill.
-    
+
+    -- Тонкая акцентная полоска слева (видна только когда включено)
+    local sideAccent = Instance.new("Frame")
+    sideAccent.Name = "SideAccent"
+    sideAccent.Size = UDim2.new(0, 3, 0.6, 0)
+    sideAccent.AnchorPoint = Vector2.new(0, 0.5)
+    sideAccent.Position = UDim2.new(0, 0, 0.5, 0)
+    sideAccent.BackgroundColor3 = THEME.Accent
+    sideAccent.BackgroundTransparency = initialState and 0 or 1
+    sideAccent.BorderSizePixel = 0
+    sideAccent.Parent = container
+    makeCorner(sideAccent, 2)
+
     local label = makeTextLabel(container, text, 14, "semibold")
-    label.Size = UDim2.new(1, -60, 1, 0)
-    label.Position = UDim2.new(0, 12, 0, 0)
-    
+    label.Size = UDim2.new(1, -72, 0, 20)
+    label.Position = UDim2.new(0, 14, 0, 9)
+
+    -- Switch pill — более крупный и красивый
     local switchBg = Instance.new("Frame")
-    switchBg.Size = UDim2.new(0, 44, 0, 22)
+    switchBg.Size = UDim2.new(0, 48, 0, 26)
     switchBg.AnchorPoint = Vector2.new(1, 0.5)
-    switchBg.Position = UDim2.new(1, -12, 0.5, 0)
+    switchBg.Position = UDim2.new(1, -14, 0.5, 0)
     switchBg.BackgroundColor3 = initialState and THEME.ToggleOn or THEME.ToggleOff
-    makeCorner(switchBg, 11)
+    makeCorner(switchBg, 13)
     switchBg.Parent = container
 
+    -- Внутренняя тень переключателя
+    makeStroke(switchBg, 1, Color3.fromRGB(255,255,255), initialState and 0.75 or 0.92)
+
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.new(0, 18, 0, 18)
+    knob.Size = UDim2.new(0, 20, 0, 20)
     knob.AnchorPoint = Vector2.new(0, 0.5)
-    -- Position logic: if Off, left aligned. If On, right aligned.
-    -- On: 44 - 18 - 2 = 24. Off: 2.
-    knob.Position = initialState and UDim2.new(0, 24, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
+    knob.Position = initialState and UDim2.new(0, 25, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
     knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    -- If background is light (active), knob might need to be dark? 
-    -- Reference shows ToggleOn is white, ToggleOff is gray. Knob is usually white? 
-    -- If ToggleOn is White, Knob should be Dark? 
-    -- Let's stick to standard: Active=Green/Color, Knob=White.
-    -- But Theme says ToggleOn = 220,220,220 (White). So Knob must be darker?
-    -- Shadow62: Active = White Pill, Knob = ? Maybe knob is dark gray.
-    if initialState then knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255) end
-    
-    makeCorner(knob, 9)
+    makeCorner(knob, 10)
     knob.Parent = switchBg
-    
+
+    -- Тень кнопки (тонкая подсветка снизу)
+    local knobShadow = Instance.new("UIStroke")
+    knobShadow.Color = Color3.fromRGB(0,0,0)
+    knobShadow.Transparency = 0.6
+    knobShadow.Thickness = 1
+    knobShadow.Parent = knob
+
+    -- Aurora эффект на переключателе когда включён
+    local _switchAuroraConn = nil
+    local function startSwitchAurora()
+        if _switchAuroraConn then return end
+        _switchAuroraConn = RunService.Heartbeat:Connect(function()
+            if not switchBg or not switchBg.Parent then
+                if _switchAuroraConn then _switchAuroraConn:Disconnect() end
+                _switchAuroraConn = nil
+                return
+            end
+            local palette = THEME.AuroraPalette or AURORA_COLORS
+            local speed = (THEME.AuroraSpeed or 0.35) * 1.2
+            switchBg.BackgroundColor3 = getAuroraColor(palette, speed)
+        end)
+    end
+    local function stopSwitchAurora()
+        if _switchAuroraConn then
+            _switchAuroraConn:Disconnect()
+            _switchAuroraConn = nil
+        end
+        switchBg.BackgroundColor3 = THEME.ToggleOff
+    end
+
+    if initialState then startSwitchAurora() end
+
     local interact = Instance.new("TextButton")
     interact.BackgroundTransparency = 1
     interact.Text = ""
@@ -3136,31 +3232,41 @@ local function makeToggle(parent, text, initialState, callback)
         tween(container, TWEEN_FAST, { BackgroundColor3 = THEME.ButtonHover })
     end)
     interact.MouseLeave:Connect(function()
-        tween(container, TWEEN_FAST, { BackgroundColor3 = THEME.Button })
+        tween(container, TWEEN_FAST, { BackgroundColor3 = THEME.Card })
     end)
 
     local state = initialState
-    
+
     interact.MouseButton1Click:Connect(function()
         state = not state
-        
-        local bgCol = state and THEME.ToggleOn or THEME.ToggleOff
-        local knobPos = state and UDim2.new(0, 24, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
-        local knobCol = Color3.fromRGB(255, 255, 255)
-        
-        tween(switchBg, TWEEN_MED, { BackgroundColor3 = bgCol })
-        tween(knob, TWEEN_MED, { Position = knobPos, BackgroundColor3 = knobCol })
-        
+        if state then
+            startSwitchAurora()
+            tween(knob, TWEEN_MED, { Position = UDim2.new(0, 25, 0.5, 0) })
+            tween(sideAccent, TWEEN_MED, { BackgroundTransparency = 0 })
+            TweenService:Create(switchBg:FindFirstChildOfClass("UIStroke"), TWEEN_MED, { Transparency = 0.75 }):Play()
+        else
+            stopSwitchAurora()
+            tween(knob, TWEEN_MED, { Position = UDim2.new(0, 3, 0.5, 0) })
+            tween(sideAccent, TWEEN_MED, { BackgroundTransparency = 1 })
+            TweenService:Create(switchBg:FindFirstChildOfClass("UIStroke"), TWEEN_MED, { Transparency = 0.92 }):Play()
+        end
         if callback then callback(state) end
     end)
-    
+
     return {
         Frame = container,
         Set = function(v)
             state = not not v
-            switchBg.BackgroundColor3 = state and THEME.ToggleOn or THEME.ToggleOff
-            knob.Position = state and UDim2.new(0, 24, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
-            knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            if state then
+                startSwitchAurora()
+                knob.Position = UDim2.new(0, 25, 0.5, 0)
+                sideAccent.BackgroundTransparency = 0
+            else
+                stopSwitchAurora()
+                switchBg.BackgroundColor3 = THEME.ToggleOff
+                knob.Position = UDim2.new(0, 3, 0.5, 0)
+                sideAccent.BackgroundTransparency = 1
+            end
         end,
         Get = function() return state end
     }
@@ -3486,55 +3592,86 @@ local function createInterface()
         window.Position = computeWindowPosition()
     end
     window.BackgroundColor3 = THEME.Window
-    window.BackgroundTransparency = THEME.WindowTransparency or 0.1
+    window.BackgroundTransparency = THEME.WindowTransparency or 0
     window.ClipsDescendants = true
     window.Parent = gui
-    makeCorner(window, 14) -- Main window 14px (tighter)
-    makeStroke(window, 1, THEME.Stroke, 0.2) 
+    makeCorner(window, 16)
+    local windowStroke = makeStroke(window, 1.5, THEME.Stroke, 0.3)
     makeDraggable(window)
 
-    -- Нет градиента — тема LineOfBots и так выглядит правильно без него
-    if false then end -- gradient removed
+    -- v17.5: Переливающаяся рамка окна (aurora border)
+    RunService.Heartbeat:Connect(function()
+        if not windowStroke or not windowStroke.Parent then return end
+        local palette = THEME.AuroraPalette or AURORA_COLORS
+        local speed   = (THEME.AuroraSpeed or 0.35) * 0.6
+        windowStroke.Color = getAuroraColor(palette, speed)
+        windowStroke.Transparency = 0.25
+    end)
 
-    -- Sidebar (Flush Left) - narrower on mobile
-    local sidebarWidth = isMobile and 130 or 170
+    -- v17.5: Sidebar — шире, красивее
+    local sidebarWidth = isMobile and 138 or 178
     local sidebar = Instance.new("Frame")
     sidebar.Size = UDim2.new(0, sidebarWidth, 1, 0)
     sidebar.BackgroundColor3 = THEME.Sidebar
     sidebar.BorderSizePixel = 0
     sidebar.Parent = window
-    makeCorner(sidebar, 14) -- Re-added rounding to match window
-    
-    -- Fix for corner clipping: The sidebar needs to NOT round the right side ideally, 
-    -- but full round is better than square poking out. 
-    -- We can use a Frame to hide the right corners if needed, but for now simple round is safer.
+    makeCorner(sidebar, 16)
 
+    -- v17.5: Переливающийся разделитель сайдбара
     local sidebarDivider = Instance.new("Frame")
-    sidebarDivider.BackgroundColor3 = THEME.Stroke
-    sidebarDivider.BackgroundTransparency = 0.5 -- Subtle
+    sidebarDivider.BackgroundColor3 = THEME.Accent
+    sidebarDivider.BackgroundTransparency = 0.6
     sidebarDivider.BorderSizePixel = 0
     sidebarDivider.Position = UDim2.new(1, -1, 0, 0)
     sidebarDivider.Size = UDim2.new(0, 1, 1, 0)
     sidebarDivider.Parent = sidebar
+    RunService.Heartbeat:Connect(function()
+        if not sidebarDivider or not sidebarDivider.Parent then return end
+        local palette = THEME.AuroraPalette or AURORA_COLORS
+        sidebarDivider.BackgroundColor3 = getAuroraColor(palette, (THEME.AuroraSpeed or 0.35) * 0.8)
+    end)
 
-local sidebarTitle = makeTextLabel(sidebar, "LineOfBots", 19, "bold")
-sidebarTitle.Position = UDim2.new(0, 16, 0, 16)
-sidebarTitle.Size = UDim2.new(1, -16, 0, 22)
+-- v17.5: Заголовок сайдбара — крупнее и красивее
+local sidebarTitle = makeTextLabel(sidebar, "LineOfBots", 20, "bold")
+sidebarTitle.Position = UDim2.new(0, 14, 0, 14)
+sidebarTitle.Size = UDim2.new(1, -14, 0, 24)
 
-local sidebarSubtitle = makeTextLabel(sidebar, "v17 Shell", 11, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebar, "v17.5 Shell", 10, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
-sidebarSubtitle.Position = UDim2.new(0, 16, 0, 40)
-sidebarSubtitle.Size = UDim2.new(1, -16, 0, 14)
+sidebarSubtitle.Position = UDim2.new(0, 14, 0, 40)
+sidebarSubtitle.Size = UDim2.new(1, -14, 0, 13)
 
 sidebarTitle.Text = "LineOfBots"
-sidebarSubtitle.Text = "v17 Shell"
+sidebarSubtitle.Text = "v17.5 Shell"
 
--- Sidebar Title Animation Removed to keep static text
+-- v17.5: Переливающийся цвет заголовка "LineOfBots"
+RunService.Heartbeat:Connect(function()
+    if not sidebarTitle or not sidebarTitle.Parent then return end
+    local palette = THEME.AuroraPalette or AURORA_COLORS
+    sidebarTitle.TextColor3 = getAuroraColor(palette, THEME.AuroraSpeed or 0.35)
+end)
+
+-- Акцентная линия под заголовком (переливается)
+local titleAccentLine = Instance.new("Frame")
+titleAccentLine.Name = "TitleAccentLine"
+titleAccentLine.Size = UDim2.new(0, 36, 0, 2)
+titleAccentLine.Position = UDim2.new(0, 14, 0, 57)
+titleAccentLine.BackgroundColor3 = THEME.Accent
+titleAccentLine.BorderSizePixel = 0
+titleAccentLine.Parent = sidebar
+makeCorner(titleAccentLine, 1)
+RunService.Heartbeat:Connect(function()
+    if not titleAccentLine or not titleAccentLine.Parent then return end
+    titleAccentLine.BackgroundColor3 = getAuroraColor(
+        THEME.AuroraPalette or AURORA_COLORS,
+        (THEME.AuroraSpeed or 0.35) * 1.4
+    )
+end)
 
 local tabContainer = Instance.new("Frame")
 tabContainer.BackgroundTransparency = 1
-tabContainer.Position = UDim2.new(0, 6, 0, 60) -- Pulled up
-tabContainer.Size = UDim2.new(1, -12, 1, -60)
+tabContainer.Position = UDim2.new(0, 6, 0, 68) -- Под акцентной линией
+tabContainer.Size = UDim2.new(1, -12, 1, -68)
 tabContainer.Parent = sidebar
 
 local tabLayout = Instance.new("UIListLayout")
@@ -3564,39 +3701,56 @@ end
 local function setTabButtonState(tabName, selected, instant)
     local btn = tabButtons[tabName]
     if not btn then return end
-    
-    -- Check for Premium components
+
     local strip = btn:FindFirstChild("AccentStrip")
+    local glowBg = btn:FindFirstChild("GlowBg")
     local container = btn:FindFirstChild("ContentContainer")
     local icon = container and container:FindFirstChild("Icon") or btn:FindFirstChild("Icon")
     local label = container and container:FindFirstChild("Label") or btn:FindFirstChild("Label")
 
-    local bgCol = selected and THEME.SidebarSelected or THEME.Sidebar
-    local bgTran = selected and 0 or 1 
-
     if strip then
         strip.Visible = selected
 
-        local txtCol = selected and THEME.Accent or THEME.TextDim
-        local iconCol = selected and THEME.Accent or THEME.IconTint
-        
-        -- Floating Animation Target
-        local targetPos = selected and UDim2.new(0, 6, 0, 0) or UDim2.new(0, 0, 0, 0)
-        
+        -- Aurora анимация на активной полоске
+        if selected then
+            -- Запускаем aurora на strip через RunService (уже есть глобальный)
+            RunService.Heartbeat:Connect(function()
+                if not strip or not strip.Parent or not strip.Visible then return end
+                local palette = THEME.AuroraPalette or AURORA_COLORS
+                local speed = (THEME.AuroraSpeed or 0.35) * 1.5
+                strip.BackgroundColor3 = getAuroraColor(palette, speed)
+            end)
+        end
+
+        local txtCol  = selected and THEME.Text     or THEME.TextDim
+        local iconCol = selected and THEME.Accent    or THEME.IconTint
+        local bgTrans = selected and 0.82           or 1
+        local bgCol   = selected and THEME.SidebarSelected or THEME.Sidebar
+
+        -- Glow подсветка фона
+        if glowBg then
+            local glowTrans = selected and 0.88 or 1
+            if instant then
+                glowBg.BackgroundTransparency = glowTrans
+            else
+                tween(glowBg, TWEEN_MED, { BackgroundTransparency = glowTrans })
+            end
+        end
+
         if instant then
-            btn.BackgroundTransparency = bgTran
+            btn.BackgroundTransparency = bgTrans
             btn.BackgroundColor3 = bgCol
             if label then label.TextColor3 = txtCol end
-            if icon then icon.ImageColor3 = iconCol end
-            if container then container.Position = targetPos end
+            if icon  then icon.ImageColor3  = iconCol end
         else
-            tween(btn, TWEEN_MED, { BackgroundTransparency = bgTran, BackgroundColor3 = bgCol })
+            tween(btn, TWEEN_MED, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
             if label then tween(label, TWEEN_MED, { TextColor3 = txtCol }) end
-            if icon then tween(icon, TWEEN_MED, { ImageColor3 = iconCol }) end
-            if container then tween(container, TWEEN_MED, { Position = targetPos }) end
+            if icon  then tween(icon,  TWEEN_MED, { ImageColor3 = iconCol }) end
         end
     else
-        -- Legacy/Fallback
+        -- Legacy fallback
+        local bgCol  = selected and THEME.SidebarSelected or THEME.Sidebar
+        local bgTran = selected and 0 or 1
         if instant then
             btn.BackgroundColor3 = bgCol
             btn.BackgroundTransparency = bgTran
@@ -3615,22 +3769,35 @@ local function setTabButtonState(tabName, selected, instant)
 end
 
     local contentArea = Instance.new("Frame")
-    contentArea.BackgroundTransparency = 1 -- Transparent allows "Glass" feel from Window
-    contentArea.Position = UDim2.new(0, sidebarWidth, 0, 0) -- Flush with sidebar
+    contentArea.BackgroundTransparency = 1
+    contentArea.Position = UDim2.new(0, sidebarWidth, 0, 0)
     contentArea.Size = UDim2.new(1, -sidebarWidth, 1, 0)
     contentArea.ClipsDescendants = true
     contentArea.Parent = window
-    
-    -- Optional: Inner container for padding - reduced on mobile
-    local contentPadValue = isMobile and 12 or 20
-    local contentPad = Instance.new("UIPadding")
-    contentPad.PaddingTop = UDim.new(0, contentPadValue)
-    contentPad.PaddingBottom = UDim.new(0, contentPadValue)
-    contentPad.PaddingLeft = UDim.new(0, contentPadValue)
-    contentPad.PaddingRight = UDim.new(0, contentPadValue)
-    contentPad.Parent = contentArea
 
-    -- Content Shadow removed
+    -- v17.5: Тонкая aurora линия сверху контентной зоны
+    local contentTopBar = Instance.new("Frame")
+    contentTopBar.Size = UDim2.new(1, 0, 0, 2)
+    contentTopBar.Position = UDim2.new(0, 0, 0, 0)
+    contentTopBar.BackgroundColor3 = THEME.Accent
+    contentTopBar.BackgroundTransparency = 0.3
+    contentTopBar.BorderSizePixel = 0
+    contentTopBar.Parent = contentArea
+    RunService.Heartbeat:Connect(function()
+        if not contentTopBar or not contentTopBar.Parent then return end
+        contentTopBar.BackgroundColor3 = getAuroraColor(
+            THEME.AuroraPalette or AURORA_COLORS,
+            (THEME.AuroraSpeed or 0.35) * 0.9
+        )
+    end)
+
+    local contentPadValue = isMobile and 12 or 18
+    local contentPad = Instance.new("UIPadding")
+    contentPad.PaddingTop    = UDim.new(0, contentPadValue + 2)
+    contentPad.PaddingBottom = UDim.new(0, contentPadValue)
+    contentPad.PaddingLeft   = UDim.new(0, contentPadValue)
+    contentPad.PaddingRight  = UDim.new(0, contentPadValue)
+    contentPad.Parent = contentArea
     
 local function cancelFrameTweens(frame)
     local arr = tabFrameTweens[frame]
@@ -3792,25 +3959,37 @@ end
 local function makeTabButton(name, iconId)
     local btn = Instance.new("TextButton")
     btn.Text = ""
-    btn.Size = UDim2.new(1, 0, 0, 42)
+    btn.Size = UDim2.new(1, 0, 0, 44)
     btn.BackgroundTransparency = 1
     btn.BackgroundColor3 = THEME.SidebarSelected
     btn.ClipsDescendants = true
     btn.Parent = tabContainer
-    makeCorner(btn, 8) 
-    
-    -- Accent Strip (stays direct child, absolute position)
+    makeCorner(btn, 10)
+
+    -- Акцентная полоска (переливается когда активна)
     local strip = Instance.new("Frame")
     strip.Name = "AccentStrip"
     strip.BackgroundColor3 = THEME.Accent
     strip.BorderSizePixel = 0
-    strip.Size = UDim2.new(0, 3, 0, 18)
-    strip.Position = UDim2.new(0, 3, 0.5, -9) -- Push strip slightly
-    strip.Visible = false 
+    strip.Size = UDim2.new(0, 3, 0, 22)
+    strip.Position = UDim2.new(0, 4, 0.5, -11)
+    strip.Visible = false
     strip.Parent = btn
     makeCorner(strip, 2)
-    
-    -- Content Container (Floating Target)
+
+    -- Aurora на полоске когда активна
+    local _stripConn = nil
+
+    -- Внутреннее свечение при выборе (подсветка фона)
+    local glowBg = Instance.new("Frame")
+    glowBg.Name = "GlowBg"
+    glowBg.Size = UDim2.new(1, 0, 1, 0)
+    glowBg.BackgroundColor3 = THEME.Accent
+    glowBg.BackgroundTransparency = 1
+    glowBg.BorderSizePixel = 0
+    glowBg.Parent = btn
+    makeCorner(glowBg, 10)
+
     local container = Instance.new("Frame")
     container.Name = "ContentContainer"
     container.Size = UDim2.new(1, 0, 1, 0)
@@ -3822,27 +4001,29 @@ local function makeTabButton(name, iconId)
     i.Name = "Icon"
     i.BackgroundTransparency = 1
     i.Image = iconId
-    i.ImageColor3 = THEME.IconTint 
+    i.ImageColor3 = THEME.IconTint
     i.Size = UDim2.new(0, 20, 0, 20)
-    i.Position = UDim2.new(0, 14, 0.5, -10)
-    i.Parent = container -- Parent to container
-    
-    local l = makeTextLabel(container, name, 15, "semibold") -- Parent to container
+    i.Position = UDim2.new(0, 16, 0.5, -10)
+    i.Parent = container
+
+    local l = makeTextLabel(container, name, 14, "semibold")
     l.Name = "Label"
     l.Size = UDim2.new(1, -50, 1, 0)
-    l.Position = UDim2.new(0, 44, 0, 0)
+    l.Position = UDim2.new(0, 46, 0, 0)
     l.TextColor3 = THEME.TextDim
-    
+
     btn.MouseEnter:Connect(function()
         if currentTab ~= name then
-            tween(btn, TWEEN_FAST, { BackgroundTransparency = 0.85 })
-            l.TextColor3 = THEME.Text
+            tween(btn, TWEEN_FAST, { BackgroundTransparency = 0.88 })
+            tween(l, TWEEN_FAST, { TextColor3 = THEME.Text })
+            tween(i, TWEEN_FAST, { ImageColor3 = THEME.Text })
         end
     end)
     btn.MouseLeave:Connect(function()
         if currentTab ~= name then
             tween(btn, TWEEN_FAST, { BackgroundTransparency = 1 })
-            l.TextColor3 = THEME.TextDim
+            tween(l, TWEEN_FAST, { TextColor3 = THEME.TextDim })
+            tween(i, TWEEN_FAST, { ImageColor3 = THEME.IconTint })
         end
     end)
 
@@ -4013,51 +4194,87 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     row.BackgroundColor3 = THEME.Card
     row.BackgroundTransparency = 0
     row.BorderSizePixel = 0
-    row.Size = UDim2.new(1, 0, 0, 42)
+    row.Size = UDim2.new(1, 0, 0, descText and descText ~= "" and 56 or 46)
     row.Parent = parent
-    makeCorner(row, 10)
-    local st = makeStroke(row, 1, THEME.Stroke, 0.6)
+    makeCorner(row, 12)
+    local st = makeStroke(row, 1, THEME.Stroke, THEME.StrokeTransparency)
+
+    -- Тонкая акцентная полоска слева — видна только когда включено
+    local sideBar = Instance.new("Frame")
+    sideBar.Size = UDim2.new(0, 3, 0.55, 0)
+    sideBar.AnchorPoint = Vector2.new(0, 0.5)
+    sideBar.Position = UDim2.new(0, 0, 0.5, 0)
+    sideBar.BackgroundColor3 = THEME.Accent
+    sideBar.BackgroundTransparency = initialState and 0 or 1
+    sideBar.BorderSizePixel = 0
+    sideBar.Parent = row
+    makeCorner(sideBar, 2)
 
     local pad = Instance.new("UIPadding")
-    pad.PaddingLeft = UDim.new(0, 12)
-    pad.PaddingRight = UDim.new(0, 12)
+    pad.PaddingLeft  = UDim.new(0, 14)
+    pad.PaddingRight = UDim.new(0, 14)
     pad.Parent = row
 
-    local label = makeTextLabel(row, labelText, 13, "semibold") -- 14->13
+    local hasDesc = descText and descText ~= ""
+    local label = makeTextLabel(row, labelText, 13, "semibold")
     label.Name = "Label"
-    label.Size = UDim2.new(1, -60, 0, 18)
-    label.Position = UDim2.new(0, 0, 0.5, -9)
-    if descText and descText ~= "" then
-        label.Position = UDim2.new(0, 0, 0, 6)
-        local desc = makeTextLabel(row, descText, 11, "medium") -- Description slightly smaller/dimmer
+    label.Size = UDim2.new(1, -62, 0, 18)
+    label.Position = hasDesc and UDim2.new(0, 0, 0, 8) or UDim2.new(0, 0, 0.5, -9)
+
+    if hasDesc then
+        local desc = makeTextLabel(row, descText, 11, "medium")
         desc.Name = "Description"
-        local dimStrong = (THEME.TextDim and THEME.Text and THEME.TextDim:Lerp(THEME.Text, 0.18)) or THEME.TextDim
-        desc.TextColor3 = dimStrong or THEME.TextDim
-        desc.Position = UDim2.new(0, 0, 0, 22)
-        desc.Size = UDim2.new(1, -60, 0, 14)
-        -- Adjust height if description exists
-        row.Size = UDim2.new(1, 0, 0, 48) -- Slightly taller for desc
+        desc.TextColor3 = THEME.TextDim
+        desc.Position = UDim2.new(0, 0, 0, 27)
+        desc.Size = UDim2.new(1, -62, 0, 14)
+        desc.TextTruncate = Enum.TextTruncate.AtEnd
     end
 
+    -- v17.5: Крупный красивый переключатель
     local switchBg = Instance.new("Frame")
     switchBg.Name = "SwitchBg"
-    switchBg.Size = UDim2.new(0, 36, 0, 20) -- Reduced switch size
+    switchBg.Size = UDim2.new(0, 44, 0, 24)
     switchBg.AnchorPoint = Vector2.new(1, 0.5)
     switchBg.Position = UDim2.new(1, 0, 0.5, 0)
-    switchBg.BackgroundColor3 = (initialState and true or false) and THEME.ToggleOn or THEME.ToggleOff
+    switchBg.BackgroundColor3 = initialState and THEME.ToggleOn or THEME.ToggleOff
     switchBg.BorderSizePixel = 0
     switchBg.Parent = row
-    makeCorner(switchBg, 10)
+    makeCorner(switchBg, 12)
+    local switchStroke = Instance.new("UIStroke")
+    switchStroke.Color = Color3.fromRGB(255,255,255)
+    switchStroke.Transparency = initialState and 0.7 or 0.92
+    switchStroke.Thickness = 1
+    switchStroke.Parent = switchBg
 
     local knob = Instance.new("Frame")
     knob.Name = "Knob"
-    knob.Size = UDim2.new(0, 16, 0, 16)
+    knob.Size = UDim2.new(0, 18, 0, 18)
     knob.AnchorPoint = Vector2.new(0, 0.5)
-    knob.Position = (initialState and true or false) and UDim2.new(1, -18, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
+    knob.Position = initialState and UDim2.new(0, 23, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
     knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     knob.BorderSizePixel = 0
     knob.Parent = switchBg
-    makeCorner(knob, 8)
+    makeCorner(knob, 9)
+
+    -- Aurora на переключателе когда включён
+    local _aConn = nil
+    local function startAurora()
+        if _aConn then return end
+        _aConn = RunService.Heartbeat:Connect(function()
+            if not switchBg or not switchBg.Parent then
+                if _aConn then _aConn:Disconnect() end; _aConn = nil; return
+            end
+            switchBg.BackgroundColor3 = getAuroraColor(
+                THEME.AuroraPalette or AURORA_COLORS,
+                (THEME.AuroraSpeed or 0.35) * 1.1
+            )
+        end)
+    end
+    local function stopAurora()
+        if _aConn then _aConn:Disconnect(); _aConn = nil end
+        switchBg.BackgroundColor3 = THEME.ToggleOff
+    end
+    if initialState then startAurora() end
 
     local hit = Instance.new("TextButton")
     hit.Name = "Hit"
@@ -4066,11 +4283,27 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     hit.Size = UDim2.new(1, 0, 1, 0)
     hit.Parent = row
 
-    local state = (initialState and true or false)
+    hit.MouseEnter:Connect(function()
+        tween(row, TWEEN_FAST, { BackgroundColor3 = THEME.ButtonHover })
+    end)
+    hit.MouseLeave:Connect(function()
+        tween(row, TWEEN_FAST, { BackgroundColor3 = THEME.Card })
+    end)
+
+    local state = initialState and true or false
     hit.MouseButton1Click:Connect(function()
         state = not state
-        tween(switchBg, TWEEN_MED, { BackgroundColor3 = state and THEME.ToggleOn or THEME.ToggleOff })
-        tween(knob, TWEEN_MED, { Position = state and UDim2.new(1, -18, 0.5, 0) or UDim2.new(0, 2, 0.5, 0) })
+        if state then
+            startAurora()
+            tween(knob, TWEEN_MED, { Position = UDim2.new(0, 23, 0.5, 0) })
+            tween(sideBar, TWEEN_MED, { BackgroundTransparency = 0 })
+            TweenService:Create(switchStroke, TWEEN_MED, { Transparency = 0.7 }):Play()
+        else
+            stopAurora()
+            tween(knob, TWEEN_MED, { Position = UDim2.new(0, 3, 0.5, 0) })
+            tween(sideBar, TWEEN_MED, { BackgroundTransparency = 1 })
+            TweenService:Create(switchStroke, TWEEN_MED, { Transparency = 0.92 }):Play()
+        end
         if onChanged then onChanged(state) end
     end)
 
@@ -4078,8 +4311,10 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
         Get = function() return state end,
         Set = function(v)
             state = not not v
-            switchBg.BackgroundColor3 = state and THEME.ToggleOn or THEME.ToggleOff
-            knob.Position = state and UDim2.new(1, -18, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
+            if state then startAurora() else stopAurora() end
+            knob.Position = state and UDim2.new(0, 23, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
+            sideBar.BackgroundTransparency = state and 0 or 1
+            switchStroke.Transparency = state and 0.7 or 0.92
         end,
     }
 end
