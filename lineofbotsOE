@@ -5,43 +5,20 @@ local TextChatService = game:GetService("TextChatService")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 
--- ══════════════════════════════════════════════════════════════
--- КРИТИЧЕСКИЙ ФИХ v17.5: Anti-duplicate защита
--- При каждом loadstring() старые соединения RunService/Players
--- не отключались → накапливались → двойная обработка сообщений,
--- двойные Heartbeat loops, баги с анимациями и движением.
--- ══════════════════════════════════════════════════════════════
-local _genv = (getgenv and getgenv()) or _G
-
--- Если уже был запущен — убиваем старый экземпляр полностью
-if _genv.__LOB_CLEANUP then
-    pcall(_genv.__LOB_CLEANUP)
-end
-
--- Таблица всех соединений этого экземпляра
-local _allConnections = {}
-local function trackConn(conn)
-    if conn then table.insert(_allConnections, conn) end
-    return conn
-end
-
--- Функция очистки — вызывается при следующем loadstring
-local function _lobCleanup()
-    -- Отключаем ВСЕ соединения этого экземпляра
-    for _, c in ipairs(_allConnections) do
-        pcall(function() if c and c.Disconnect then c:Disconnect() end end)
+-- Очистка предыдущего GUI при перезапуске
+do
+    local ok, pg = pcall(function()
+        return Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
+    end)
+    if ok and pg then
+        local old = pg:FindFirstChild("LineOfBotsUI")
+        if old then pcall(function() old:Destroy() end) end
     end
-    _allConnections = {}
-    -- Уничтожаем GUI
-    local pg = Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
-    if pg then
-        local oldGui = pg:FindFirstChild("LineOfBotsUI")
-        if oldGui then pcall(function() oldGui:Destroy() end) end
-    end
-    _genv.__LOB_CLEANUP = nil
 end
 
-_genv.__LOB_CLEANUP = _lobCleanup
+-- trackConn: заглушка — Delta не поддерживает getgenv
+-- соединения просто создаются нормально
+local function trackConn(conn) return conn end
 
 local player = Players.LocalPlayer
 if not player then
@@ -3183,7 +3160,7 @@ trackConn(RunService.Heartbeat:Connect(function(dt)
             humanoid:MoveTo(theirRoot.Position)
         end
     end
-end)
+end))
 
 local rateLimitNoticeAt = 0
 local function handleRateLimitNotice(force)
@@ -6884,12 +6861,12 @@ local mod3_connAdded = trackConn(Players.PlayerAdded:Connect(function()
     if mod3_list.Parent then
         scheduleMod3Rebuild()
     end
-end)
+end))
 local mod3_connRemoving = trackConn(Players.PlayerRemoving:Connect(function()
     if mod3_list.Parent then
         scheduleMod3Rebuild()
     end
-end)
+end))
 
 moderationFrame.Destroying:Connect(function()
     if mod3_connAdded then mod3_connAdded:Disconnect() end
