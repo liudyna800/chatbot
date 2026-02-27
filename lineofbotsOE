@@ -3197,26 +3197,10 @@ local function makeToggle(parent, text, initialState, callback)
     knobShadow.Thickness = 1
     knobShadow.Parent = knob
 
-    -- Aurora эффект на переключателе когда включён
-    local _switchAuroraConn = nil
     local function startSwitchAurora()
-        if _switchAuroraConn then return end
-        _switchAuroraConn = RunService.Heartbeat:Connect(function()
-            if not switchBg or not switchBg.Parent then
-                if _switchAuroraConn then _switchAuroraConn:Disconnect() end
-                _switchAuroraConn = nil
-                return
-            end
-            local palette = THEME.AuroraPalette or AURORA_COLORS
-            local speed = (THEME.AuroraSpeed or 0.35) * 1.2
-            switchBg.BackgroundColor3 = getAuroraColor(palette, speed)
-        end)
+        switchBg.BackgroundColor3 = THEME.ToggleOn
     end
     local function stopSwitchAurora()
-        if _switchAuroraConn then
-            _switchAuroraConn:Disconnect()
-            _switchAuroraConn = nil
-        end
         switchBg.BackgroundColor3 = THEME.ToggleOff
     end
 
@@ -3595,83 +3579,97 @@ local function createInterface()
     window.BackgroundTransparency = THEME.WindowTransparency or 0
     window.ClipsDescendants = true
     window.Parent = gui
-    makeCorner(window, 16)
-    local windowStroke = makeStroke(window, 1.5, THEME.Stroke, 0.3)
+    makeCorner(window, 18)
+    local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
     makeDraggable(window)
 
-    -- v17.5: Переливающаяся рамка окна (aurora border)
-    RunService.Heartbeat:Connect(function()
-        if not windowStroke or not windowStroke.Parent then return end
-        local palette = THEME.AuroraPalette or AURORA_COLORS
-        local speed   = (THEME.AuroraSpeed or 0.35) * 0.6
-        windowStroke.Color = getAuroraColor(palette, speed)
-        windowStroke.Transparency = 0.25
-    end)
-
-    -- v17.5: Sidebar — шире, красивее
-    local sidebarWidth = isMobile and 138 or 178
+    -- Sidebar
+    local sidebarWidth = isMobile and 140 or 182
     local sidebar = Instance.new("Frame")
     sidebar.Size = UDim2.new(0, sidebarWidth, 1, 0)
     sidebar.BackgroundColor3 = THEME.Sidebar
     sidebar.BorderSizePixel = 0
     sidebar.Parent = window
-    makeCorner(sidebar, 16)
+    makeCorner(sidebar, 18)
 
-    -- v17.5: Переливающийся разделитель сайдбара
+    -- Тонкий разделитель (статичный, не перекрывает)
     local sidebarDivider = Instance.new("Frame")
-    sidebarDivider.BackgroundColor3 = THEME.Accent
-    sidebarDivider.BackgroundTransparency = 0.6
+    sidebarDivider.BackgroundColor3 = THEME.Stroke
+    sidebarDivider.BackgroundTransparency = THEME.StrokeTransparency
     sidebarDivider.BorderSizePixel = 0
-    sidebarDivider.Position = UDim2.new(1, -1, 0, 0)
-    sidebarDivider.Size = UDim2.new(0, 1, 1, 0)
+    sidebarDivider.Position = UDim2.new(1, -1, 0.05, 0)
+    sidebarDivider.Size = UDim2.new(0, 1, 0.9, 0)
     sidebarDivider.Parent = sidebar
-    RunService.Heartbeat:Connect(function()
-        if not sidebarDivider or not sidebarDivider.Parent then return end
+
+    -- Центральный aurora loop — один на всё окно, меняет только stroke рамки
+    -- НЕ создаёт элементы поверх контента
+    local _auroraClock = 0
+    RunService.Heartbeat:Connect(function(dt)
+        if not windowStroke or not windowStroke.Parent then return end
+        _auroraClock = _auroraClock + dt
         local palette = THEME.AuroraPalette or AURORA_COLORS
-        sidebarDivider.BackgroundColor3 = getAuroraColor(palette, (THEME.AuroraSpeed or 0.35) * 0.8)
+        local t = (_auroraClock * (THEME.AuroraSpeed or 0.35)) % #palette
+        local idx  = math.floor(t) + 1
+        local nidx = (idx % #palette) + 1
+        local f = t - math.floor(t)
+        local a, b = palette[idx], palette[nidx]
+        local c = Color3.new(a.R+(b.R-a.R)*f, a.G+(b.G-a.G)*f, a.B+(b.B-a.B)*f)
+        windowStroke.Color = c
+        windowStroke.Transparency = 0.35
     end)
 
--- v17.5: Заголовок сайдбара — крупнее и красивее
-local sidebarTitle = makeTextLabel(sidebar, "LineOfBots", 20, "bold")
-sidebarTitle.Position = UDim2.new(0, 14, 0, 14)
-sidebarTitle.Size = UDim2.new(1, -14, 0, 24)
+-- Заголовок сайдбара
+local sidebarLogoArea = Instance.new("Frame")
+sidebarLogoArea.Size = UDim2.new(1, 0, 0, 62)
+sidebarLogoArea.BackgroundTransparency = 1
+sidebarLogoArea.Position = UDim2.new(0, 0, 0, 0)
+sidebarLogoArea.Parent = sidebar
 
-local sidebarSubtitle = makeTextLabel(sidebar, "v17.5 Shell", 10, "semibold")
+-- Цветной блок-акцент слева от заголовка
+local logoAccent = Instance.new("Frame")
+logoAccent.Size = UDim2.new(0, 4, 0, 28)
+logoAccent.AnchorPoint = Vector2.new(0, 0.5)
+logoAccent.Position = UDim2.new(0, 12, 0.5, 0)
+logoAccent.BackgroundColor3 = THEME.Accent
+logoAccent.BorderSizePixel = 0
+logoAccent.Parent = sidebarLogoArea
+makeCorner(logoAccent, 2)
+
+-- aurora только на этом маленьком акцент-блоке
+local _logoClock = 0
+RunService.Heartbeat:Connect(function(dt)
+    if not logoAccent or not logoAccent.Parent then return end
+    _logoClock = _logoClock + dt
+    local p = THEME.AuroraPalette or AURORA_COLORS
+    local t = (_logoClock * (THEME.AuroraSpeed or 0.35) * 1.2) % #p
+    local i = math.floor(t)+1; local ni = (i % #p)+1; local f = t-math.floor(t)
+    local a,b = p[i],p[ni]
+    logoAccent.BackgroundColor3 = Color3.new(a.R+(b.R-a.R)*f,a.G+(b.G-a.G)*f,a.B+(b.B-a.B)*f)
+end)
+
+local sidebarTitle = makeTextLabel(sidebarLogoArea, "LineOfBots", 17, "bold")
+sidebarTitle.TextColor3 = THEME.Text  -- статичный белый — никакого aurora на тексте
+sidebarTitle.Position = UDim2.new(0, 22, 0, 14)
+sidebarTitle.Size = UDim2.new(1, -24, 0, 20)
+
+local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v17.5 Shell", 10, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
-sidebarSubtitle.Position = UDim2.new(0, 14, 0, 40)
-sidebarSubtitle.Size = UDim2.new(1, -14, 0, 13)
+sidebarSubtitle.Position = UDim2.new(0, 22, 0, 36)
+sidebarSubtitle.Size = UDim2.new(1, -24, 0, 13)
 
-sidebarTitle.Text = "LineOfBots"
-sidebarSubtitle.Text = "v17.5 Shell"
-
--- v17.5: Переливающийся цвет заголовка "LineOfBots"
-RunService.Heartbeat:Connect(function()
-    if not sidebarTitle or not sidebarTitle.Parent then return end
-    local palette = THEME.AuroraPalette or AURORA_COLORS
-    sidebarTitle.TextColor3 = getAuroraColor(palette, THEME.AuroraSpeed or 0.35)
-end)
-
--- Акцентная линия под заголовком (переливается)
-local titleAccentLine = Instance.new("Frame")
-titleAccentLine.Name = "TitleAccentLine"
-titleAccentLine.Size = UDim2.new(0, 36, 0, 2)
-titleAccentLine.Position = UDim2.new(0, 14, 0, 57)
-titleAccentLine.BackgroundColor3 = THEME.Accent
-titleAccentLine.BorderSizePixel = 0
-titleAccentLine.Parent = sidebar
-makeCorner(titleAccentLine, 1)
-RunService.Heartbeat:Connect(function()
-    if not titleAccentLine or not titleAccentLine.Parent then return end
-    titleAccentLine.BackgroundColor3 = getAuroraColor(
-        THEME.AuroraPalette or AURORA_COLORS,
-        (THEME.AuroraSpeed or 0.35) * 1.4
-    )
-end)
+-- Горизонтальный разделитель под заголовком
+local titleDivider = Instance.new("Frame")
+titleDivider.Size = UDim2.new(1, -24, 0, 1)
+titleDivider.Position = UDim2.new(0, 12, 0, 60)
+titleDivider.BackgroundColor3 = THEME.Stroke
+titleDivider.BackgroundTransparency = THEME.StrokeTransparency
+titleDivider.BorderSizePixel = 0
+titleDivider.Parent = sidebar
 
 local tabContainer = Instance.new("Frame")
 tabContainer.BackgroundTransparency = 1
-tabContainer.Position = UDim2.new(0, 6, 0, 68) -- Под акцентной линией
-tabContainer.Size = UDim2.new(1, -12, 1, -68)
+tabContainer.Position = UDim2.new(0, 6, 0, 70)
+tabContainer.Size = UDim2.new(1, -12, 1, -70)
 tabContainer.Parent = sidebar
 
 local tabLayout = Instance.new("UIListLayout")
@@ -3702,69 +3700,40 @@ local function setTabButtonState(tabName, selected, instant)
     local btn = tabButtons[tabName]
     if not btn then return end
 
-    local strip = btn:FindFirstChild("AccentStrip")
-    local glowBg = btn:FindFirstChild("GlowBg")
+    local strip    = btn:FindFirstChild("AccentStrip")
+    local glowBg   = btn:FindFirstChild("GlowBg")
     local container = btn:FindFirstChild("ContentContainer")
-    local icon = container and container:FindFirstChild("Icon") or btn:FindFirstChild("Icon")
+    local icon  = container and container:FindFirstChild("Icon")  or btn:FindFirstChild("Icon")
     local label = container and container:FindFirstChild("Label") or btn:FindFirstChild("Label")
+
+    local bgTrans = selected and 0 or 1
+    local bgCol   = selected and THEME.SidebarSelected or THEME.Sidebar
+    local txtCol  = selected and THEME.Text   or THEME.TextDim
+    local iconCol = selected and THEME.Accent or THEME.IconTint
 
     if strip then
         strip.Visible = selected
+        -- Статичный цвет — НЕ создаём aurora loop (он накапливается каждый клик!)
+        strip.BackgroundColor3 = THEME.Accent
+    end
 
-        -- Aurora анимация на активной полоске
-        if selected then
-            -- Запускаем aurora на strip через RunService (уже есть глобальный)
-            RunService.Heartbeat:Connect(function()
-                if not strip or not strip.Parent or not strip.Visible then return end
-                local palette = THEME.AuroraPalette or AURORA_COLORS
-                local speed = (THEME.AuroraSpeed or 0.35) * 1.5
-                strip.BackgroundColor3 = getAuroraColor(palette, speed)
-            end)
-        end
-
-        local txtCol  = selected and THEME.Text     or THEME.TextDim
-        local iconCol = selected and THEME.Accent    or THEME.IconTint
-        local bgTrans = selected and 0.82           or 1
-        local bgCol   = selected and THEME.SidebarSelected or THEME.Sidebar
-
-        -- Glow подсветка фона
-        if glowBg then
-            local glowTrans = selected and 0.88 or 1
-            if instant then
-                glowBg.BackgroundTransparency = glowTrans
-            else
-                tween(glowBg, TWEEN_MED, { BackgroundTransparency = glowTrans })
-            end
-        end
-
+    if glowBg then
         if instant then
-            btn.BackgroundTransparency = bgTrans
-            btn.BackgroundColor3 = bgCol
-            if label then label.TextColor3 = txtCol end
-            if icon  then icon.ImageColor3  = iconCol end
+            glowBg.BackgroundTransparency = selected and 0.88 or 1
         else
-            tween(btn, TWEEN_MED, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
-            if label then tween(label, TWEEN_MED, { TextColor3 = txtCol }) end
-            if icon  then tween(icon,  TWEEN_MED, { ImageColor3 = iconCol }) end
+            tween(glowBg, TWEEN_MED, { BackgroundTransparency = selected and 0.88 or 1 })
         end
+    end
+
+    if instant then
+        btn.BackgroundTransparency = bgTrans
+        btn.BackgroundColor3 = bgCol
+        if label then label.TextColor3 = txtCol end
+        if icon  then icon.ImageColor3  = iconCol end
     else
-        -- Legacy fallback
-        local bgCol  = selected and THEME.SidebarSelected or THEME.Sidebar
-        local bgTran = selected and 0 or 1
-        if instant then
-            btn.BackgroundColor3 = bgCol
-            btn.BackgroundTransparency = bgTran
-        else
-            tween(btn, TWEEN_MED, { BackgroundColor3 = bgCol, BackgroundTransparency = bgTran })
-        end
-        if icon then
-            local iconCol = selected and THEME.ToggleOn or THEME.IconTint
-            if instant then icon.ImageColor3 = iconCol else tween(icon, TWEEN_MED, { ImageColor3 = iconCol }) end
-        end
-        if label then
-            local textCol = selected and THEME.Text or THEME.TextDim
-            if instant then label.TextColor3 = textCol else tween(label, TWEEN_MED, { TextColor3 = textCol }) end
-        end
+        tween(btn, TWEEN_MED, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
+        if label then tween(label, TWEEN_MED, { TextColor3 = txtCol }) end
+        if icon  then tween(icon,  TWEEN_MED, { ImageColor3 = iconCol }) end
     end
 end
 
@@ -3775,25 +3744,9 @@ end
     contentArea.ClipsDescendants = true
     contentArea.Parent = window
 
-    -- v17.5: Тонкая aurora линия сверху контентной зоны
-    local contentTopBar = Instance.new("Frame")
-    contentTopBar.Size = UDim2.new(1, 0, 0, 2)
-    contentTopBar.Position = UDim2.new(0, 0, 0, 0)
-    contentTopBar.BackgroundColor3 = THEME.Accent
-    contentTopBar.BackgroundTransparency = 0.3
-    contentTopBar.BorderSizePixel = 0
-    contentTopBar.Parent = contentArea
-    RunService.Heartbeat:Connect(function()
-        if not contentTopBar or not contentTopBar.Parent then return end
-        contentTopBar.BackgroundColor3 = getAuroraColor(
-            THEME.AuroraPalette or AURORA_COLORS,
-            (THEME.AuroraSpeed or 0.35) * 0.9
-        )
-    end)
-
-    local contentPadValue = isMobile and 12 or 18
+    local contentPadValue = isMobile and 14 or 20
     local contentPad = Instance.new("UIPadding")
-    contentPad.PaddingTop    = UDim.new(0, contentPadValue + 2)
+    contentPad.PaddingTop    = UDim.new(0, contentPadValue)
     contentPad.PaddingBottom = UDim.new(0, contentPadValue)
     contentPad.PaddingLeft   = UDim.new(0, contentPadValue)
     contentPad.PaddingRight  = UDim.new(0, contentPadValue)
@@ -4134,54 +4087,80 @@ local function nextLOHome()
 end
 
 local function makeSectionCard(parent, titleText, subtitleText)
-    -- Now essentially a wrapper + header, not a visual card
     local card = Instance.new("Frame")
     card.Name = titleText:gsub("%W+", "") .. "Section"
-    card.BackgroundTransparency = 1
+    card.BackgroundColor3 = THEME.Card
+    card.BackgroundTransparency = 0
     card.BorderSizePixel = 0
     card.Size = UDim2.new(1, 0, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
-    -- card.LayoutOrder = nextLOHome() -- We will handle layout order manually or let UIListLayout handle it naturally
     card.Parent = parent
-    
+    makeCorner(card, 12)
+    makeStroke(card, 1, THEME.Stroke, THEME.StrokeTransparency)
+
     local pad = Instance.new("UIPadding")
-    pad.PaddingTop = UDim.new(0, 0)
-    pad.PaddingBottom = UDim.new(0, 6) -- Reduced 12->6
+    pad.PaddingTop    = UDim.new(0, 10)
+    pad.PaddingBottom = UDim.new(0, 10)
+    pad.PaddingLeft   = UDim.new(0, 0)
+    pad.PaddingRight  = UDim.new(0, 0)
     pad.Parent = card
 
     local cardLayout = Instance.new("UIListLayout")
     cardLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    cardLayout.Padding = UDim.new(0, 4) -- Tight spacing within sections
+    cardLayout.Padding = UDim.new(0, 0)
     cardLayout.Parent = card
 
-    -- Header
+    -- Заголовок секции
     local headerRow = Instance.new("Frame")
     headerRow.Name = "HeaderRow"
     headerRow.BackgroundTransparency = 1
-    headerRow.Size = UDim2.new(1, 0, 0, 20) -- Reduced 24->20
+    headerRow.Size = UDim2.new(1, 0, 0, 32)
+    headerRow.LayoutOrder = 0
     headerRow.Parent = card
 
-    local title = makeTextLabel(headerRow, titleText, 14, "bold")
-    title.Name = "Title"
-    title.TextColor3 = THEME.Text
-    title.Size = UDim2.new(1, 0, 1, 0)
-    title.Position = UDim2.new(0, 4, 0, 0) -- Slight indent
+    -- Маленький цветной квадрат-маркер
+    local marker = Instance.new("Frame")
+    marker.Size = UDim2.new(0, 3, 0, 14)
+    marker.AnchorPoint = Vector2.new(0, 0.5)
+    marker.Position = UDim2.new(0, 14, 0.5, 0)
+    marker.BackgroundColor3 = THEME.Accent
+    marker.BorderSizePixel = 0
+    marker.Parent = headerRow
+    makeCorner(marker, 2)
 
-    if subtitleText and subtitleText ~= "" then
-        -- Append subtitle next to title or below? Layout suggests clean header.
-        -- Let's just put it to the right or ignore for cleanliness if long.
-        -- But for now, let's skip subtitle in header to keep it sleek, or make it very subtle.
-    end
+    local title = makeTextLabel(headerRow, titleText, 12, "bold")
+    title.Name = "Title"
+    title.TextColor3 = THEME.Accent
+    title.Size = UDim2.new(1, -30, 1, 0)
+    title.Position = UDim2.new(0, 24, 0, 0)
+    title.TextTransparency = 0.1
+
+    -- Тонкая разделительная линия под заголовком
+    local divider = Instance.new("Frame")
+    divider.Size = UDim2.new(1, -28, 0, 1)
+    divider.Position = UDim2.new(0, 14, 1, -1)
+    divider.BackgroundColor3 = THEME.Stroke
+    divider.BackgroundTransparency = THEME.StrokeTransparency + 0.1
+    divider.BorderSizePixel = 0
+    divider.Parent = headerRow
 
     local content = Instance.new("Frame")
     content.Name = "Content"
     content.BackgroundTransparency = 1
     content.Size = UDim2.new(1, 0, 0, 0)
     content.AutomaticSize = Enum.AutomaticSize.Y
+    content.LayoutOrder = 1
     content.Parent = card
 
+    local contentPad = Instance.new("UIPadding")
+    contentPad.PaddingLeft  = UDim.new(0, 10)
+    contentPad.PaddingRight = UDim.new(0, 10)
+    contentPad.PaddingTop   = UDim.new(0, 4)
+    contentPad.PaddingBottom = UDim.new(0, 0)
+    contentPad.Parent = content
+
     local contentLayout = Instance.new("UIListLayout")
-    contentLayout.Padding = UDim.new(0, 6) -- Gap between items (8->6)
+    contentLayout.Padding = UDim.new(0, 5)
     contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
     contentLayout.Parent = content
 
@@ -4256,25 +4235,17 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     knob.Parent = switchBg
     makeCorner(knob, 9)
 
-    -- Aurora на переключателе когда включён
-    local _aConn = nil
+    -- Чистая анимация без накапливающихся Heartbeat loops
     local function startAurora()
-        if _aConn then return end
-        _aConn = RunService.Heartbeat:Connect(function()
-            if not switchBg or not switchBg.Parent then
-                if _aConn then _aConn:Disconnect() end; _aConn = nil; return
-            end
-            switchBg.BackgroundColor3 = getAuroraColor(
-                THEME.AuroraPalette or AURORA_COLORS,
-                (THEME.AuroraSpeed or 0.35) * 1.1
-            )
-        end)
+        -- Просто ставим цвет темы — без RunService loop
+        switchBg.BackgroundColor3 = THEME.ToggleOn
+        TweenService:Create(switchStroke, TWEEN_MED, { Transparency = 0.65 }):Play()
     end
     local function stopAurora()
-        if _aConn then _aConn:Disconnect(); _aConn = nil end
         switchBg.BackgroundColor3 = THEME.ToggleOff
+        TweenService:Create(switchStroke, TWEEN_MED, { Transparency = 0.92 }):Play()
     end
-    if initialState then startAurora() end
+    if initialState then switchBg.BackgroundColor3 = THEME.ToggleOn end
 
     local hit = Instance.new("TextButton")
     hit.Name = "Hit"
