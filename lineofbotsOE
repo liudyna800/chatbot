@@ -799,15 +799,16 @@ local function makeSystemPrompt(settings)
         system = "You are a helpful assistant in a Roblox game. Answer questions naturally and helpfully."
     end
 
-    -- FIX #4: ЯЗЫК — добавляем ПЕРВЫМ (до всех остальных блоков)
-    -- Это перебивает любые русские слова в системном промпте
+    -- FIX ЯЗЫК: правило в конце промпта игнорируется моделями с русским контекстом.
+    -- Решение: детектируем язык сообщения и вставляем явный тег ПРЯМО в user message.
+    -- Модель видит [LANG:EN] или [LANG:RU] как часть запроса — не может проигнорировать.
     system = system
         .. "\n\nCRITICAL LANGUAGE RULE: Always reply in the SAME language the player used."
-        .. " If they wrote in English → reply in English."
-        .. " If they wrote in Russian → reply in Russian."
-        .. " If they wrote in any other language → use that language."
-        .. " NEVER switch languages unless the player switches first."
-        .. " The system context blocks ([NEARBY], [NAME:], etc.) are metadata — ignore their language for your reply."
+        .. " The player's message starts with [LANG:XX] tag — XX is the language code."
+        .. " [LANG:EN] = reply ONLY in English. [LANG:RU] = reply ONLY in Russian."
+        .. " [LANG:OTHER] = reply in whatever language the player used."
+        .. " NEVER use Russian if [LANG:EN]. NEVER use English if [LANG:RU]."
+        .. " This rule OVERRIDES everything else including personality instructions."
 
     -- Честность про актуальные данные — только в полном режиме
     if not settings.TokenEconomy then
@@ -1257,16 +1258,41 @@ local R6_ANIM_IDS = {
 local function playAnimDirect(animId, duration)
     local humanoid = getLocalHumanoid()
     if not humanoid then return false end
-    local animator = humanoid:FindFirstChildOfClass("Animator")
-    if not animator then return false end
 
-    local ok = pcall(function()
+    local success = false
+    pcall(function()
         local anim = Instance.new("Animation")
         anim.AnimationId = "rbxassetid://" .. tostring(animId)
-        local track = animator:LoadAnimation(anim)
-        track.Priority = Enum.AnimationPriority.Action
+
+        -- Предзагружаем анимацию — критично для R6
+        pcall(function()
+            game:GetService("ContentProvider"):PreloadAsync({anim})
+        end)
+
+        local track
+
+        -- R6: humanoid:LoadAnimation() — deprecated но единственный надёжный путь на R6
+        -- R15: пробуем Animator, фолбэк на humanoid
+        local rigType = getCharacterRigType()
+        if rigType == "R6" then
+            -- На R6 humanoid:LoadAnimation работает напрямую
+            track = humanoid:LoadAnimation(anim)
+        else
+            local animator = humanoid:FindFirstChildOfClass("Animator")
+            if animator then
+                track = animator:LoadAnimation(anim)
+            else
+                track = humanoid:LoadAnimation(anim)
+            end
+        end
+
+        if not track then return end
+
+        track.Priority = Enum.AnimationPriority.Action4
         track:Play()
         _activeEmoteTrack = track
+        success = true
+
         if duration then
             _activeEmoteThread = task.delay(duration, function()
                 pcall(function() track:Stop() end)
@@ -1275,7 +1301,7 @@ local function playAnimDirect(animId, duration)
             end)
         end
     end)
-    return ok
+    return success
 end
 
 local function playEmote(emoteName, duration)
@@ -1974,6 +2000,22 @@ local MAX_HISTORY = 10
 
 
 
+-- v17.5: Детектор языка сообщения — возвращает "RU", "EN", или "OTHER"
+-- Используется чтобы вставить [LANG:XX] тег в user message
+local function detectLang(text)
+    if not text or text == "" then return "OTHER" end
+    local t = text:lower()
+    -- Считаем кириллические символы
+    local cyr = 0
+    for _ in t:gmatch("[\208-\209][\128-\191]") do cyr = cyr + 1 end
+    -- Считаем латинские слова
+    local lat = 0
+    for _ in t:gmatch("[a-z]+") do lat = lat + 1 end
+    if cyr > 1 then return "RU" end
+    if lat > 0 then return "EN" end
+    return "OTHER"
+end
+
 -- Безопасно добавить пару в историю и обрезать до лимита
 local function appendHistory(history, userMsg, assistantMsg)
     table.insert(history, { role = "user",      content = userMsg      })
@@ -2078,7 +2120,7 @@ local function handleQueuedChat(item)
         end
     end
 
-    table.insert(apiMessages, { role = "user", content = userContent })
+    table.insert(apiMessages, { role = "user", content = "[LANG:" .. detectLang(item.cleaned) .. "] " .. userContent })
 
     local model = getModel(settings)
     if model == "" then return end
@@ -8324,7 +8366,8 @@ local function ctDoSend()
         if settings.UsePlayerName then
             userContent = "[NAME:User] " .. msg
         end
-        table.insert(apiMsgs, { role = "user", content = userContent })
+        -- Инжектируем тег языка — так же как в игровом чате
+        table.insert(apiMsgs, { role = "user", content = "[LANG:" .. detectLang(msg) .. "] " .. userContent })
 
         local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 200, 1024)
         local payload = {
