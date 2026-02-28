@@ -82,11 +82,13 @@ local ClientSettings = {
     },
     Range = {
         Enabled = false,
-        Studs = 50, -- Default distance
+        Studs = 50,
+        Height = 0,             -- v17.5: 0 = без ограничения по высоте
         OriginPartName = "HumanoidRootPart",
         ShowVisualizer = true,
         SelectiveMode = false,
         WhitelistUserIds = {},
+        IgnoreWalls = false,
     },
     CooldownSecondsPerUser = 0,
     MaxMessagesPerSecond = 10,
@@ -1218,11 +1220,64 @@ local function stopCurrentEmote()
     end
 end
 
--- Воспроизвести эмоцию.
--- Логика:
---   1. Если встроенная (/e wave и т.д.) → PlayEmote(name), проверяем возврат
---   2. Если кастомная → прелоадим в HumanoidDescription → PlayEmote(name)
---   3. duration = nil → бесконечно (для sit)
+-- Определяем тип рига персонажа (R6 или R15)
+local function getCharacterRigType()
+    local char = Players.LocalPlayer.Character
+    if not char then return "R15" end
+    -- R6 не имеет UpperTorso, R15 имеет
+    if char:FindFirstChild("UpperTorso") then
+        return "R15"
+    elseif char:FindFirstChild("Torso") then
+        return "R6"
+    end
+    return "R15"
+end
+
+-- R6 анимации (те же встроенные ID но через прямой AnimationTrack)
+local R6_ANIM_IDS = {
+    wave   = "507770239",
+    laugh  = "507770818",
+    cheer  = "507770677",
+    point  = "507770453",
+    sit    = "507768133",
+    dance  = "507771019",
+    dance2 = "507776043",
+    dance3 = "507777268",
+    -- hello/shrug/salute/shy/robot/stadium/tilt — те же ID работают и на R6
+    hello   = "3576686446",
+    shrug   = "3576968026",
+    salute  = "3360689775",
+    tilt    = "3360692915",
+    stadium = "3360686498",
+    shy     = "3576717965",
+    robot   = "3576721660",
+}
+
+-- Воспроизвести анимацию напрямую через AnimationTrack (работает на R6 и R15)
+local function playAnimDirect(animId, duration)
+    local humanoid = getLocalHumanoid()
+    if not humanoid then return false end
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+    if not animator then return false end
+
+    local ok = pcall(function()
+        local anim = Instance.new("Animation")
+        anim.AnimationId = "rbxassetid://" .. tostring(animId)
+        local track = animator:LoadAnimation(anim)
+        track.Priority = Enum.AnimationPriority.Action
+        track:Play()
+        _activeEmoteTrack = track
+        if duration then
+            _activeEmoteThread = task.delay(duration, function()
+                pcall(function() track:Stop() end)
+                _activeEmoteTrack = nil
+                _activeEmoteThread = nil
+            end)
+        end
+    end)
+    return ok
+end
+
 local function playEmote(emoteName, duration)
     if not ClientSettings.ActionsEnabled then return end
     local humanoid = getLocalHumanoid()
@@ -1230,18 +1285,28 @@ local function playEmote(emoteName, duration)
 
     stopCurrentEmote()
 
+    local rigType = getCharacterRigType()
+
+    if rigType == "R6" then
+        -- R6: PlayEmote не работает — сразу идём через AnimationTrack
+        local animId = R6_ANIM_IDS[emoteName]
+        if animId then
+            playAnimDirect(animId, duration)
+        end
+        return
+    end
+
+    -- R15: сначала пробуем PlayEmote (быстрее, надёжнее)
     -- Убеждаемся что кастомные эмоции загружены
     if CUSTOM_EMOTE_IDS[emoteName] and not _customEmotesLoaded then
         preloadCustomEmotes(humanoid)
     end
 
-    -- PlayEmote возвращает true если успешно, false если эмоции нет
     local ok, played = pcall(function()
         return humanoid:PlayEmote(emoteName)
     end)
 
     if ok and played then
-        -- Успешно сыграло через PlayEmote
         if duration then
             _activeEmoteThread = task.delay(duration, function()
                 pcall(function() humanoid:StopAnimations() end)
@@ -1249,38 +1314,10 @@ local function playEmote(emoteName, duration)
             end)
         end
     else
-        -- PlayEmote не сработал — пробуем принудительно через AnimationTrack
-        -- (последний резерв: встроенные анимации по ID)
-        local FALLBACK_IDS = {
-            wave   = "507770239",
-            laugh  = "507770818",
-            cheer  = "507770677",
-            point  = "507770453",
-            sit    = "507768133",
-            dance  = "507771019",
-            dance2 = "507776043",
-            dance3 = "507777268",
-        }
-        local animId = FALLBACK_IDS[emoteName]
+        -- PlayEmote не сработал — пробуем через AnimationTrack (фоллбэк R15)
+        local animId = R6_ANIM_IDS[emoteName]
         if animId then
-            local animator = humanoid:FindFirstChildOfClass("Animator")
-            if animator then
-                pcall(function()
-                    local anim = Instance.new("Animation")
-                    anim.AnimationId = "rbxassetid://" .. animId
-                    local track = animator:LoadAnimation(anim)
-                    track.Priority = Enum.AnimationPriority.Action
-                    track:Play()
-                    _activeEmoteTrack = track
-                    if duration then
-                        _activeEmoteThread = task.delay(duration, function()
-                            pcall(function() track:Stop() end)
-                            _activeEmoteTrack = nil
-                            _activeEmoteThread = nil
-                        end)
-                    end
-                end)
-            end
+            playAnimDirect(animId, duration)
         end
     end
 end
@@ -2199,35 +2236,43 @@ local function processChatMessage(player, rawMessage)
     if settings.Range.Enabled then
         local myChar = LocalCharacter or Players.LocalPlayer.Character
         local theirChar = player.Character
-        
-        if not myChar or not theirChar then return end -- Can't check distance
-        
-        local myRoot = LocalRoot or myChar:FindFirstChild("HumanoidRootPart")
+
+        if not myChar or not theirChar then return end
+
+        -- ФИХ: всегда берём свежий root из character (после телепортации LocalRoot устаревает)
+        local myRoot = myChar:FindFirstChild("HumanoidRootPart")
         local theirRoot = theirChar:FindFirstChild("HumanoidRootPart")
-        
+            or theirChar:FindFirstChild("Torso") -- R6
+
         if not myRoot or not theirRoot then return end
-        LocalRoot = myRoot
-        
-        local dist = (myRoot.Position - theirRoot.Position).Magnitude
-        if dist > settings.Range.Studs then
-            -- Too far
-            return
-        end
-        
-        -- Wall Check (Line of Sight)
+        LocalRoot = myRoot  -- обновляем кеш
+
+        -- Проверяем дистанцию — с учётом высоты (настройка Height)
+        local heightRange = settings.Range.Height or 0  -- 0 = без ограничения по высоте
+        local dx = myRoot.Position.X - theirRoot.Position.X
+        local dz = myRoot.Position.Z - theirRoot.Position.Z
+        local dy = math.abs(myRoot.Position.Y - theirRoot.Position.Y)
+        local distXZ = math.sqrt(dx*dx + dz*dz)
+
+        -- Горизонтальная дистанция превышает радиус — игрок слишком далеко
+        if distXZ > settings.Range.Studs then return end
+        -- Если ограничение по высоте включено — проверяем вертикаль
+        if heightRange > 0 and dy > heightRange then return end
+
+        -- Wall Check (Line of Sight) — оптимизировано
         if not settings.Range.IgnoreWalls then
             local origin = myRoot.Position
             local target = theirRoot.Position
             local dir = target - origin
-            
-            RangeRaycastFilter[1] = myChar -- Ignore self
+
+            -- Исключаем ОБА персонажа из raycast (раньше исключался только свой)
+            RangeRaycastFilter[1] = myChar
+            RangeRaycastFilter[2] = theirChar
             RangeRaycastParams.FilterDescendantsInstances = RangeRaycastFilter
             local result = workspace:Raycast(origin, dir, RangeRaycastParams)
             if result and result.Instance then
-                if not result.Instance:IsDescendantOf(theirChar) then
-                    -- Hit something that isn't the target player
-                    return
-                end
+                -- Луч что-то задел — стена между нами
+                return
             end
         end
     end
@@ -4760,9 +4805,11 @@ local function updateRangeVisualizer()
         visualizerPart.TopSurface = Enum.SurfaceType.Smooth
         visualizerPart.BottomSurface = Enum.SurfaceType.Smooth
         
-        -- Set initial size
+        -- Set initial size — ширина = диаметр, высота = Height настройка (или thin flat)
         local diam = ClientSettings.Range.Studs * 2
-        visualizerPart.Size = Vector3.new(0.4, diam, diam)
+        local h = ClientSettings.Range.Height
+        local cylH = (h and h > 0) and (h * 2) or 0.4
+        visualizerPart.Size = Vector3.new(cylH, diam, diam)
         visualizerPart.Parent = workspace
         
         -- Weld to root part for zero-cost following (no loops!)
@@ -4774,7 +4821,9 @@ local function updateRangeVisualizer()
     else
         -- Just update size if part already exists
         local diam = ClientSettings.Range.Studs * 2
-        visualizerPart.Size = Vector3.new(0.4, diam, diam)
+        local h = ClientSettings.Range.Height
+        local cylH = (h and h > 0) and (h * 2) or 0.4
+        visualizerPart.Size = Vector3.new(cylH, diam, diam)
     end
 end
 
@@ -4847,7 +4896,7 @@ makeToggleRow(
 -- v17.5: Антиспам — игнорировать одинаковые сообщения подряд
 makeToggleRow(
     automation,
-    "[x] Антиспам",
+    "🔇 Антиспам",
     "Игнорировать если игрок отправляет одно и то же сообщение подряд.",
     ClientSettings.AntiSpam ~= false,
     function(state) ClientSettings.AntiSpam = state end
@@ -4856,7 +4905,7 @@ makeToggleRow(
 -- v17.5: Авто-реакция на упоминание ника бота
 makeToggleRow(
     automation,
-    "[!] Реакция на имя",
+    "📢 Реакция на имя",
     "Бот реагирует когда кто-то упоминает его ник в чате, даже без триггера.",
     ClientSettings.ReactToMention ~= false,
     function(state) ClientSettings.ReactToMention = state end
@@ -4865,7 +4914,7 @@ makeToggleRow(
 -- v16: Команды и эмоции
 makeToggleRow(
     automation,
-    "[+] Команды и эмоции",
+    "🎭 Команды и эмоции",
     "ИИ сам решает когда прыгнуть, подойти, потанцевать или помахать — по просьбе игрока.",
     ClientSettings.ActionsEnabled ~= false,
     function(state)
@@ -4880,7 +4929,7 @@ makeToggleRow(
 -- v16: Экономия токенов
 makeToggleRow(
     automation,
-    "[~] Экономия токенов",
+    "⚡ Экономия токенов",
     "Сокращает промпт для эмоций/команд. Меньше токенов, но ИИ может чуть хуже понимать контекст.",
     ClientSettings.TokenEconomy == true,
     function(state)
@@ -4891,7 +4940,7 @@ makeToggleRow(
 -- v16.5: Сознание места
 makeToggleRow(
     automation,
-    "[*] Сознание места",
+    "🌍 Сознание места",
     "ИИ знает что она в Roblox, знает название игры и может рассказать что тут делать.",
     ClientSettings.PlaceAwareness ~= false,
     function(state)
@@ -4903,7 +4952,7 @@ makeToggleRow(
 -- v17: Сознание игроков
 makeToggleRow(
     automation,
-    "[?] Сознание игроков",
+    "👁️ Сознание игроков",
     "ИИ видит кто стоит рядом (спереди/сзади/сбоку) и как ведёт себя. Реагирует на токсиков за спиной.",
     ClientSettings.PlayerAwareness ~= false,
     function(state)
@@ -5592,16 +5641,32 @@ makeToggleRow(percHeader, "Показать визуализатор", "Рисо
     updateRangeVisualizer()
 end)
 
-makeToggleRow(percHeader, "Игнорировать стены", "Отвечать игрокам даже за стенами.", ClientSettings.Range.IgnoreWalls or false, function(state)
+makeToggleRow(percHeader, "Игнорировать стены", "Отвечать через стены. Если выключено — нужна прямая видимость (raycast).", ClientSettings.Range.IgnoreWalls or false, function(state)
     ClientSettings.Range.IgnoreWalls = state
 end)
 
 -- Visualizer Card removed as per user request
--- Slider
+-- Slider дистанции
 makeSliderRow(perceptionScroll, "Дистанция (studs)", 1, 150, ClientSettings.Range.Studs or 50, function(val)
     ClientSettings.Range.Studs = val
     updateRangeVisualizer()
 end)
+
+-- v17.5: Слайдер высоты (0 = без ограничения по высоте)
+do
+    local initH = ClientSettings.Range.Height or 0
+    local _, ctrl = makeRightControlRow(perceptionScroll, "Высота ответа (studs)", "0 = без ограничения. Бот игнорирует игроков выше/ниже на это значение.", 70)
+    local hDisp = makeTextLabel(ctrl, initH == 0 and "OFF" or tostring(initH), 13, "bold")
+    hDisp.Size = UDim2.new(1, 0, 1, 0)
+    hDisp.TextXAlignment = Enum.TextXAlignment.Center
+    hDisp.TextColor3 = THEME.Accent
+
+    makeSliderRow(perceptionScroll, "Высота (studs)", 0, 50, initH, function(val)
+        ClientSettings.Range.Height = val
+        hDisp.Text = val == 0 and "OFF" or tostring(val)
+        updateRangeVisualizer()
+    end)
+end
 
 -- Selective Perception UI
 local selectiveSection = makeSectionCard(perceptionScroll, "Режим выбора")
@@ -8096,8 +8161,8 @@ local function ctAddMessage(text, isBot, isError)
 
     -- Имя отправителя (маленькое, сверху)
     local senderName = isBot
-        and ("Bot: " .. (ClientSettings.PersonalityId or "Bot"))
-        or "You"
+        and ("🤖 " .. (ClientSettings.PersonalityId or "Бот"))
+        or "👤 Ты"
     local nameLbl = makeTextLabel(bubble, senderName, 10, "bold")
     nameLbl.Size = UDim2.new(1, 0, 0, 13)
     nameLbl.TextColor3 = isBot
@@ -8234,7 +8299,7 @@ local function ctDoSend()
     typingBubble.Size = UDim2.new(1, 0, 0, 26)
     typingBubble.LayoutOrder = typingIdx
     typingBubble.Parent = ctLog
-    local typingLbl = makeTextLabel(typingBubble, "... bot typing", 12, "medium")
+    local typingLbl = makeTextLabel(typingBubble, "⌨️ бот печатает...", 12, "medium")
     typingLbl.TextColor3 = THEME.TextDim
     typingLbl.Size = UDim2.new(1, 0, 1, 0)
 
