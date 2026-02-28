@@ -3839,7 +3839,7 @@ titleDivider.Parent = sidebar
 local tabContainer = Instance.new("Frame")
 tabContainer.BackgroundTransparency = 1
 tabContainer.Position = UDim2.new(0, 6, 0, 70)
-tabContainer.Size = UDim2.new(1, -12, 1, -148)  -- место для статус-блока снизу
+tabContainer.Size = UDim2.new(1, -12, 0, 248)  -- фиксированная высота: 6кнопок×38 + 5gap×4 = 248px
 tabContainer.Parent = sidebar
 
 local tabLayout = Instance.new("UIListLayout")
@@ -3854,7 +3854,7 @@ sidebarStatus.BackgroundTransparency = THEME.CardTransparency or 0.55
 sidebarStatus.BorderSizePixel = 0
 sidebarStatus.AnchorPoint = Vector2.new(0, 1)
 sidebarStatus.Position = UDim2.new(0, 6, 1, -10)
-sidebarStatus.Size = UDim2.new(1, -12, 0, 130)
+sidebarStatus.Size = UDim2.new(1, -12, 0, 110)
 sidebarStatus.Parent = sidebar
 makeCorner(sidebarStatus, 12)
 makeStroke(sidebarStatus, 1, Color3.fromRGB(255,255,255), 0.82)
@@ -4179,7 +4179,7 @@ end
 local function makeTabButton(name, iconId)
     local btn = Instance.new("TextButton")
     btn.Text = ""
-    btn.Size = UDim2.new(1, 0, 0, 44)
+    btn.Size = UDim2.new(1, 0, 0, 38)
     btn.BackgroundTransparency = 1
     btn.BackgroundColor3 = THEME.SidebarSelected
     btn.ClipsDescendants = true
@@ -4298,8 +4298,8 @@ pcall(function() generalScroll.ScrollBarInset = Enum.ScrollBarInset.ScrollBar en
 generalScroll.Parent = generalFrame
 
 local generalScrollPad = Instance.new("UIPadding")
-generalScrollPad.PaddingLeft  = UDim.new(0, 2)
-generalScrollPad.PaddingRight = UDim.new(0, 2)
+generalScrollPad.PaddingLeft  = UDim.new(0, 0)
+generalScrollPad.PaddingRight = UDim.new(0, 0)
 generalScrollPad.Parent = generalScroll
 
 local generalLayout = Instance.new("UIListLayout")
@@ -4340,8 +4340,8 @@ pcall(function() behaviorScroll.ScrollBarInset = Enum.ScrollBarInset.ScrollBar e
 behaviorScroll.Parent = behaviorFrame
 
 local behaviorScrollPad = Instance.new("UIPadding")
-behaviorScrollPad.PaddingLeft  = UDim.new(0, 2)
-behaviorScrollPad.PaddingRight = UDim.new(0, 2)
+behaviorScrollPad.PaddingLeft  = UDim.new(0, 0)
+behaviorScrollPad.PaddingRight = UDim.new(0, 0)
 behaviorScrollPad.Parent = behaviorScroll
 
 local behaviorLayout = Instance.new("UIListLayout")
@@ -4369,7 +4369,8 @@ local function makeSectionCard(parent, titleText, subtitleText)
     card.BackgroundColor3 = THEME.Card
     card.BackgroundTransparency = THEME.CardTransparency or 0.55
     card.BorderSizePixel = 0
-    card.Size = UDim2.new(1, 0, 0, 0)
+    card.Size = UDim2.new(1, -24, 0, 0)
+    card.Position = UDim2.new(0, 12, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
     card.Parent = parent
     makeCorner(card, 12)
@@ -4427,6 +4428,7 @@ local function makeSectionCard(parent, titleText, subtitleText)
     content.BackgroundTransparency = 1
     content.Size = UDim2.new(1, 0, 0, 0)
     content.AutomaticSize = Enum.AutomaticSize.Y
+    content.ClipsDescendants = false
     content.LayoutOrder = 1
     content.Parent = card
 
@@ -5403,8 +5405,8 @@ advancedScroll.ScrollBarThickness = 0 -- Hidden per user request
 advancedScroll.Parent = advancedFrame
 
 local advancedScrollPad = Instance.new("UIPadding")
-advancedScrollPad.PaddingLeft  = UDim.new(0, 2)
-advancedScrollPad.PaddingRight = UDim.new(0, 2)
+advancedScrollPad.PaddingLeft  = UDim.new(0, 0)
+advancedScrollPad.PaddingRight = UDim.new(0, 0)
 advancedScrollPad.Parent = advancedScroll
 
 local advancedLayout = Instance.new("UIListLayout")
@@ -5788,8 +5790,8 @@ perceptionScroll.ScrollBarThickness = 0 -- Hidden per user request
 perceptionScroll.Parent = perceptionFrame
 
 local perceptionScrollPad = Instance.new("UIPadding")
-perceptionScrollPad.PaddingLeft  = UDim.new(0, 2)
-perceptionScrollPad.PaddingRight = UDim.new(0, 2)
+perceptionScrollPad.PaddingLeft  = UDim.new(0, 0)
+perceptionScrollPad.PaddingRight = UDim.new(0, 0)
 perceptionScrollPad.Parent = perceptionScroll
 
 local perceptionLayout = Instance.new("UIListLayout")
