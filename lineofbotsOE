@@ -2000,19 +2000,32 @@ local MAX_HISTORY = 10
 
 
 
--- v17.5: Детектор языка сообщения — возвращает "RU", "EN", или "OTHER"
--- Используется чтобы вставить [LANG:XX] тег в user message
+-- v17.5: Детектор языка + кеш последнего языка каждого игрока
+-- Проблема: эмодзи/одна буква → detectLang возвращает nil → фолбэк на кеш
+local _userLangCache = {}  -- userId → "RU"|"EN"
+
 local function detectLang(text)
-    if not text or text == "" then return "OTHER" end
+    if not text or text == "" then return nil end
     local t = text:lower()
-    -- Считаем кириллические символы
     local cyr = 0
     for _ in t:gmatch("[\208-\209][\128-\191]") do cyr = cyr + 1 end
-    -- Считаем латинские слова
     local lat = 0
     for _ in t:gmatch("[a-z]+") do lat = lat + 1 end
     if cyr > 1 then return "RU" end
     if lat > 0 then return "EN" end
+    return nil  -- не определили (эмодзи, цифры, одна буква)
+end
+
+-- Получить язык: определяем → кешируем → при неопределённом берём кеш
+local function getLangForUser(text, userId)
+    local lang = detectLang(text)
+    if lang then
+        if userId then _userLangCache[userId] = lang end
+        return lang
+    end
+    if userId and _userLangCache[userId] then
+        return _userLangCache[userId]
+    end
     return "OTHER"
 end
 
@@ -2120,7 +2133,7 @@ local function handleQueuedChat(item)
         end
     end
 
-    table.insert(apiMessages, { role = "user", content = "[LANG:" .. detectLang(item.cleaned) .. "] " .. userContent })
+    table.insert(apiMessages, { role = "user", content = "[LANG:" .. getLangForUser(item.cleaned, item.userId) .. "] " .. userContent })
 
     local model = getModel(settings)
     if model == "" then return end
@@ -3967,6 +3980,9 @@ local function switchTab(name)
         mod3_needsRebuild = false
         mod3_rebuild()
     end
+    if name == "Чат с ИИ" and updateCtStatus then
+        task.defer(updateCtStatus)
+    end
 
     -- Close any open dropdowns when switching tabs
     for _, c in ipairs(gui:GetChildren()) do
@@ -4336,16 +4352,16 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     makeCorner(row, 12)
     local st = makeStroke(row, 1, Color3.fromRGB(255,255,255), 0.78)
 
-    -- Тонкая акцентная полоска слева — видна только когда включено
-    local sideBar = Instance.new("Frame")
-    sideBar.Size = UDim2.new(0, 3, 0.55, 0)
-    sideBar.AnchorPoint = Vector2.new(0, 0.5)
-    sideBar.Position = UDim2.new(0, 0, 0.5, 0)
-    sideBar.BackgroundColor3 = THEME.Accent
-    sideBar.BackgroundTransparency = initialState and 0 or 1
-    sideBar.BorderSizePixel = 0
-    sideBar.Parent = row
-    makeCorner(sideBar, 2)
+    -- Точка-индикатор вместо полоски (зелёная когда включено)
+    local dot = Instance.new("Frame")
+    dot.Size = UDim2.new(0, 7, 0, 7)
+    dot.AnchorPoint = Vector2.new(0, 0.5)
+    dot.Position = UDim2.new(0, 5, 0.5, 0)
+    dot.BackgroundColor3 = initialState and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(120, 120, 140)
+    dot.BackgroundTransparency = initialState and 0 or 0.5
+    dot.BorderSizePixel = 0
+    dot.Parent = row
+    makeCorner(dot, 999)
 
     local pad = Instance.new("UIPadding")
     pad.PaddingLeft  = UDim.new(0, 14)
@@ -4426,12 +4442,12 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
         if state then
             startAurora()
             tween(knob, TWEEN_MED, { Position = UDim2.new(0, 23, 0.5, 0) })
-            tween(sideBar, TWEEN_MED, { BackgroundTransparency = 0 })
+            tween(dot, TWEEN_MED, { BackgroundColor3 = Color3.fromRGB(80, 220, 120), BackgroundTransparency = 0 })
             TweenService:Create(switchStroke, TWEEN_MED, { Transparency = 0.7 }):Play()
         else
             stopAurora()
             tween(knob, TWEEN_MED, { Position = UDim2.new(0, 3, 0.5, 0) })
-            tween(sideBar, TWEEN_MED, { BackgroundTransparency = 1 })
+            tween(dot, TWEEN_MED, { BackgroundColor3 = Color3.fromRGB(120, 120, 140), BackgroundTransparency = 0.5 })
             TweenService:Create(switchStroke, TWEEN_MED, { Transparency = 0.92 }):Play()
         end
         if onChanged then onChanged(state) end
@@ -4443,7 +4459,8 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
             state = not not v
             if state then startAurora() else stopAurora() end
             knob.Position = state and UDim2.new(0, 23, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
-            sideBar.BackgroundTransparency = state and 0 or 1
+            dot.BackgroundColor3 = state and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(120, 120, 140)
+            dot.BackgroundTransparency = state and 0 or 0.5
             switchStroke.Transparency = state and 0.7 or 0.92
         end,
     }
@@ -8114,14 +8131,14 @@ ctCountLbl.Position = UDim2.new(0.6, 0, 0, 0)
 ctCountLbl.TextXAlignment = Enum.TextXAlignment.Right
 ctCountLbl.TextColor3 = THEME.TextDim
 
--- Область чата (лог сообщений)
+-- Область чата (лог сообщений) — уменьшен на 36px для статус-бара
 local ctLog = Instance.new("ScrollingFrame")
 ctLog.Name = "ChatLog"
 ctLog.BackgroundColor3 = THEME.InputBg
 ctLog.BackgroundTransparency = 0.3
 ctLog.BorderSizePixel = 0
 ctLog.Position = UDim2.new(0, 0, 0, 46)
-ctLog.Size = UDim2.new(1, 0, 1, -104)
+ctLog.Size = UDim2.new(1, 0, 1, -140)  -- было -104, добавили 36 для статус-бара
 ctLog.CanvasSize = UDim2.new(0, 0, 0, 0)
 ctLog.ScrollBarThickness = 3
 ctLog.ScrollBarImageTransparency = 0.7
@@ -8275,9 +8292,9 @@ ctClearBtn.Size = UDim2.new(0, 40, 0, 40)
 ctClearBtn.Position = UDim2.new(1, -44, 0.5, -20)
 ctClearBtn.BackgroundColor3 = THEME.Button
 ctClearBtn.BackgroundTransparency = THEME.ButtonTransparency or 0.6
-ctClearBtn.Text = "CLR"
+ctClearBtn.Text = "🗑️"
 ctClearBtn.Font = Enum.Font.GothamBold
-ctClearBtn.TextSize = 10
+ctClearBtn.TextSize = 16
 ctClearBtn.TextColor3 = THEME.TextDim
 ctClearBtn.AutoButtonColor = false
 ctClearBtn.Parent = ctInputArea
@@ -8367,7 +8384,7 @@ local function ctDoSend()
             userContent = "[NAME:User] " .. msg
         end
         -- Инжектируем тег языка — так же как в игровом чате
-        table.insert(apiMsgs, { role = "user", content = "[LANG:" .. detectLang(msg) .. "] " .. userContent })
+        table.insert(apiMsgs, { role = "user", content = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent })
 
         local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 200, 1024)
         local payload = {
@@ -8431,6 +8448,112 @@ end
 ctSendBtn.MouseButton1Click:Connect(ctDoSend)
 ctInputBox.FocusLost:Connect(function(enter) if enter then ctDoSend() end end)
 
+-- ── Строка состояния ─────────────────────────────────────────────
+local ctStatusBar = Instance.new("Frame")
+ctStatusBar.BackgroundColor3 = THEME.Card
+ctStatusBar.BackgroundTransparency = THEME.CardTransparency or 0.55
+ctStatusBar.BorderSizePixel = 0
+ctStatusBar.Position = UDim2.new(0, 0, 1, -32)
+ctStatusBar.Size = UDim2.new(1, 0, 0, 28)
+ctStatusBar.Parent = chatTestFrame
+makeCorner(ctStatusBar, 10)
+makeStroke(ctStatusBar, 1, THEME.Stroke, 0.7)
+
+local ctStatusLayout = Instance.new("UIListLayout")
+ctStatusLayout.FillDirection = Enum.FillDirection.Horizontal
+ctStatusLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+ctStatusLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+ctStatusLayout.Padding = UDim.new(0, 0)
+ctStatusLayout.Parent = ctStatusBar
+
+local ctStatusPad = Instance.new("UIPadding")
+ctStatusPad.PaddingLeft = UDim.new(0, 10)
+ctStatusPad.PaddingRight = UDim.new(0, 10)
+ctStatusPad.Parent = ctStatusBar
+
+-- Вспомогательная функция: один индикатор (точка + текст)
+local function makeStatusPill(parent, dotColor, labelText)
+    local wrap = Instance.new("Frame")
+    wrap.BackgroundTransparency = 1
+    wrap.Size = UDim2.new(0, 0, 1, 0)
+    wrap.AutomaticSize = Enum.AutomaticSize.X
+    wrap.Parent = parent
+
+    local wLayout = Instance.new("UIListLayout")
+    wLayout.FillDirection = Enum.FillDirection.Horizontal
+    wLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    wLayout.Padding = UDim.new(0, 4)
+    wLayout.Parent = wrap
+
+    local wPad = Instance.new("UIPadding")
+    wPad.PaddingRight = UDim.new(0, 12)
+    wPad.Parent = wrap
+
+    local d = Instance.new("Frame")
+    d.Size = UDim2.new(0, 6, 0, 6)
+    d.BackgroundColor3 = dotColor
+    d.BorderSizePixel = 0
+    d.Parent = wrap
+    makeCorner(d, 999)
+
+    local lbl = makeTextLabel(wrap, labelText, 10, "semibold")
+    lbl.Size = UDim2.new(0, 0, 1, 0)
+    lbl.AutomaticSize = Enum.AutomaticSize.X
+    lbl.TextColor3 = THEME.TextDim
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    return wrap, d, lbl
+end
+
+-- Индикатор 1: API ключ
+local _, dotApi, lblApi = makeStatusPill(ctStatusBar,
+    Color3.fromRGB(100, 100, 120), "API: ?")
+
+-- Индикатор 2: Бот активен
+local _, dotBot, lblBot = makeStatusPill(ctStatusBar,
+    Color3.fromRGB(100, 100, 120), "Бот: ?")
+
+-- Индикатор 3: Личность
+local _, dotPers, lblPers = makeStatusPill(ctStatusBar,
+    Color3.fromRGB(100, 100, 120), "?")
+
+-- Индикатор 4: Память
+local _, dotMem, lblMem = makeStatusPill(ctStatusBar,
+    Color3.fromRGB(100, 100, 120), "?")
+
+-- Функция обновления статуса — вызывается при открытии вкладки и при изменениях
+local function updateCtStatus()
+    local s = ClientSettings
+    local key = getGroqApiKey and getGroqApiKey() or ""
+    local hasKey = type(key) == "string" and #key > 8
+
+    -- API
+    if hasKey then
+        dotApi.BackgroundColor3 = Color3.fromRGB(80, 220, 120)
+        lblApi.Text = "API: OK"
+    else
+        dotApi.BackgroundColor3 = Color3.fromRGB(220, 80, 80)
+        lblApi.Text = "API: нет ключа"
+    end
+
+    -- Бот активен
+    local botOn = s.Enabled and s.AutoReply
+    dotBot.BackgroundColor3 = botOn and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(220, 80, 80)
+    lblBot.Text = "Бот: " .. (botOn and "активен" or "выкл")
+
+    -- Личность
+    local persName = tostring(s.PersonalityId or "—")
+    dotPers.BackgroundColor3 = THEME.Accent
+    lblPers.Text = persName
+
+    -- Память
+    local memOn = s.MemoryEnabled
+    dotMem.BackgroundColor3 = memOn and Color3.fromRGB(100, 160, 255) or Color3.fromRGB(100, 100, 120)
+    lblMem.Text = memOn and "Память: вкл" or "Память: выкл"
+end
+
+updateCtStatus()
+
 -- ═══════════════════════════════════════════════════════════
 -- СИСТЕМА СВОРАЧИВАНИЯ ОКНА В КРУГ
 -- ═══════════════════════════════════════════════════════════
@@ -8485,26 +8608,27 @@ task.spawn(function()
     end
 end)
 
--- Кнопка свернуть на шапке окна
+-- Кнопка свернуть на шапке окна — квадратная, красивее
 local minimizeBtn = Instance.new("TextButton")
-minimizeBtn.Size = UDim2.new(0, 28, 0, 20)
-minimizeBtn.Position = UDim2.new(1, -38, 0, 10)
+minimizeBtn.Size = UDim2.new(0, 36, 0, 26)
+minimizeBtn.Position = UDim2.new(1, -44, 0, 7)
 minimizeBtn.BackgroundColor3 = THEME.Button
-minimizeBtn.BackgroundTransparency = 0.4
+minimizeBtn.BackgroundTransparency = 0.3
 minimizeBtn.Text = "─"
 minimizeBtn.Font = Enum.Font.GothamBold
-minimizeBtn.TextSize = 13
+minimizeBtn.TextSize = 16
 minimizeBtn.TextColor3 = THEME.TextDim
 minimizeBtn.AutoButtonColor = false
 minimizeBtn.ZIndex = 5
 minimizeBtn.Parent = window
-makeCorner(minimizeBtn, 6)
+makeCorner(minimizeBtn, 8)
+makeStroke(minimizeBtn, 1, THEME.Stroke, 0.6)
 
 minimizeBtn.MouseEnter:Connect(function()
-    tween(minimizeBtn, TWEEN_FAST, { BackgroundTransparency = 0.1, TextColor3 = THEME.Text })
+    tween(minimizeBtn, TWEEN_FAST, { BackgroundTransparency = 0.0, BackgroundColor3 = THEME.Accent, TextColor3 = Color3.fromRGB(255,255,255) })
 end)
 minimizeBtn.MouseLeave:Connect(function()
-    tween(minimizeBtn, TWEEN_FAST, { BackgroundTransparency = 0.4, TextColor3 = THEME.TextDim })
+    tween(minimizeBtn, TWEEN_FAST, { BackgroundTransparency = 0.3, BackgroundColor3 = THEME.Button, TextColor3 = THEME.TextDim })
 end)
 
 local _savedWinSize = UDim2.new(0, winW, 0, winH)
