@@ -3839,13 +3839,110 @@ titleDivider.Parent = sidebar
 local tabContainer = Instance.new("Frame")
 tabContainer.BackgroundTransparency = 1
 tabContainer.Position = UDim2.new(0, 6, 0, 70)
-tabContainer.Size = UDim2.new(1, -12, 1, -70)
+tabContainer.Size = UDim2.new(1, -12, 1, -148)  -- место для статус-блока снизу
 tabContainer.Parent = sidebar
 
 local tabLayout = Instance.new("UIListLayout")
-tabLayout.Padding = UDim.new(0, 4) -- Tighter spacing
-tabLayout.SortOrder = Enum.SortOrder.LayoutOrder -- Enable explicit ordering
+tabLayout.Padding = UDim.new(0, 4)
+tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 tabLayout.Parent = tabContainer
+
+-- ── Статус-блок снизу сайдбара (всегда виден на всех вкладках) ──
+local sidebarStatus = Instance.new("Frame")
+sidebarStatus.BackgroundColor3 = THEME.Card
+sidebarStatus.BackgroundTransparency = THEME.CardTransparency or 0.55
+sidebarStatus.BorderSizePixel = 0
+sidebarStatus.AnchorPoint = Vector2.new(0, 1)
+sidebarStatus.Position = UDim2.new(0, 6, 1, -10)
+sidebarStatus.Size = UDim2.new(1, -12, 0, 130)
+sidebarStatus.Parent = sidebar
+makeCorner(sidebarStatus, 12)
+makeStroke(sidebarStatus, 1, Color3.fromRGB(255,255,255), 0.82)
+
+local ssPad = Instance.new("UIPadding")
+ssPad.PaddingTop    = UDim.new(0, 7)
+ssPad.PaddingBottom = UDim.new(0, 7)
+ssPad.PaddingLeft   = UDim.new(0, 10)
+ssPad.PaddingRight  = UDim.new(0, 6)
+ssPad.Parent = sidebarStatus
+
+local ssListLayout = Instance.new("UIListLayout")
+ssListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ssListLayout.Padding = UDim.new(0, 2)
+ssListLayout.Parent = sidebarStatus
+
+local ssTitle = makeTextLabel(sidebarStatus, "СОСТОЯНИЕ", 8, "bold")
+ssTitle.Size = UDim2.new(1, 0, 0, 12)
+ssTitle.TextColor3 = THEME.TextDim
+ssTitle.TextTransparency = 0.4
+ssTitle.LayoutOrder = 0
+
+local function makeSsRow(lo)
+    local row = Instance.new("Frame")
+    row.BackgroundTransparency = 1
+    row.Size = UDim2.new(1, 0, 0, 20)
+    row.LayoutOrder = lo
+    row.Parent = sidebarStatus
+
+    local rl = Instance.new("UIListLayout")
+    rl.FillDirection = Enum.FillDirection.Horizontal
+    rl.VerticalAlignment = Enum.VerticalAlignment.Center
+    rl.Padding = UDim.new(0, 5)
+    rl.Parent = row
+
+    local dot = Instance.new("Frame")
+    dot.Size = UDim2.new(0, 6, 0, 6)
+    dot.BackgroundColor3 = Color3.fromRGB(100,100,120)
+    dot.BorderSizePixel = 0
+    dot.Parent = row
+    makeCorner(dot, 999)
+
+    local lbl = makeTextLabel(row, "...", 10, "semibold")
+    lbl.Size = UDim2.new(1, -12, 1, 0)
+    lbl.TextColor3 = THEME.TextDim
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextTruncate = Enum.TextTruncate.AtEnd
+    return dot, lbl
+end
+
+local dotApi,   lblApi   = makeSsRow(1)
+local dotBot,   lblBot   = makeSsRow(2)
+local dotPers,  lblPers  = makeSsRow(3)
+local dotMem,   lblMem   = makeSsRow(4)
+local dotModel, lblModel = makeSsRow(5)
+
+local function updateCtStatus()
+    local s = ClientSettings
+    local key = getGroqApiKey and getGroqApiKey() or ""
+    local hasKey = type(key)=="string" and #key > 8
+
+    dotApi.BackgroundColor3  = hasKey and Color3.fromRGB(80,220,120) or Color3.fromRGB(220,80,80)
+    lblApi.Text  = hasKey and "API: OK" or "API: нет ключа"
+
+    local on = s.Enabled and s.AutoReply
+    dotBot.BackgroundColor3  = on and Color3.fromRGB(80,220,120) or Color3.fromRGB(220,80,80)
+    lblBot.Text  = on and "Бот: активен" or "Бот: выключен"
+
+    dotPers.BackgroundColor3 = THEME.Accent
+    lblPers.Text = tostring(s.PersonalityId or "—")
+
+    local mem = s.MemoryEnabled
+    dotMem.BackgroundColor3  = mem and Color3.fromRGB(100,160,255) or Color3.fromRGB(100,100,120)
+    lblMem.Text  = mem and "Память: вкл" or "Память: выкл"
+
+    local mdl = getModel and getModel(s) or "?"
+    local short = (mdl:match("[^/]+$") or mdl):sub(1,17)
+    dotModel.BackgroundColor3 = Color3.fromRGB(160,100,255)
+    lblModel.Text = short
+end
+
+-- Автообновление статуса каждые 3 секунды
+task.spawn(function()
+    while true do
+        pcall(updateCtStatus)
+        task.wait(3)
+    end
+end)
 
 -- Tab Indicator (Side Bar) - Hidden as per user request
  local currentTab = "Основное"
@@ -3979,9 +4076,6 @@ local function switchTab(name)
     if name == "Модерация" and mod3_rebuild then
         mod3_needsRebuild = false
         mod3_rebuild()
-    end
-    if name == "Чат с ИИ" and updateCtStatus then
-        task.defer(updateCtStatus)
     end
 
     -- Close any open dropdowns when switching tabs
@@ -4203,6 +4297,11 @@ generalScroll.ScrollBarImageTransparency = 0.75
 pcall(function() generalScroll.ScrollBarInset = Enum.ScrollBarInset.ScrollBar end)
 generalScroll.Parent = generalFrame
 
+local generalScrollPad = Instance.new("UIPadding")
+generalScrollPad.PaddingLeft  = UDim.new(0, 2)
+generalScrollPad.PaddingRight = UDim.new(0, 2)
+generalScrollPad.Parent = generalScroll
+
 local generalLayout = Instance.new("UIListLayout")
 generalLayout.Padding = UDim.new(0, 8)
 generalLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -4239,6 +4338,11 @@ behaviorScroll.ScrollBarThickness = 4
 behaviorScroll.ScrollBarImageTransparency = 0.75
 pcall(function() behaviorScroll.ScrollBarInset = Enum.ScrollBarInset.ScrollBar end)
 behaviorScroll.Parent = behaviorFrame
+
+local behaviorScrollPad = Instance.new("UIPadding")
+behaviorScrollPad.PaddingLeft  = UDim.new(0, 2)
+behaviorScrollPad.PaddingRight = UDim.new(0, 2)
+behaviorScrollPad.Parent = behaviorScroll
 
 local behaviorLayout = Instance.new("UIListLayout")
 behaviorLayout.Padding = UDim.new(0, 8)
@@ -5298,6 +5402,11 @@ advancedScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 advancedScroll.ScrollBarThickness = 0 -- Hidden per user request
 advancedScroll.Parent = advancedFrame
 
+local advancedScrollPad = Instance.new("UIPadding")
+advancedScrollPad.PaddingLeft  = UDim.new(0, 2)
+advancedScrollPad.PaddingRight = UDim.new(0, 2)
+advancedScrollPad.Parent = advancedScroll
+
 local advancedLayout = Instance.new("UIListLayout")
 advancedLayout.Padding = UDim.new(0, 4)
 advancedLayout.SortOrder = Enum.SortOrder.LayoutOrder 
@@ -5677,6 +5786,11 @@ perceptionScroll.Size = UDim2.new(1, 0, 1, -55)
 perceptionScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 perceptionScroll.ScrollBarThickness = 0 -- Hidden per user request
 perceptionScroll.Parent = perceptionFrame
+
+local perceptionScrollPad = Instance.new("UIPadding")
+perceptionScrollPad.PaddingLeft  = UDim.new(0, 2)
+perceptionScrollPad.PaddingRight = UDim.new(0, 2)
+perceptionScrollPad.Parent = perceptionScroll
 
 local perceptionLayout = Instance.new("UIListLayout")
 perceptionLayout.Padding = UDim.new(0, 8)
@@ -8131,14 +8245,14 @@ ctCountLbl.Position = UDim2.new(0.6, 0, 0, 0)
 ctCountLbl.TextXAlignment = Enum.TextXAlignment.Right
 ctCountLbl.TextColor3 = THEME.TextDim
 
--- Область чата (лог сообщений) — уменьшен на 36px для статус-бара
+-- Область чата (лог сообщений)
 local ctLog = Instance.new("ScrollingFrame")
 ctLog.Name = "ChatLog"
 ctLog.BackgroundColor3 = THEME.InputBg
 ctLog.BackgroundTransparency = 0.3
 ctLog.BorderSizePixel = 0
 ctLog.Position = UDim2.new(0, 0, 0, 46)
-ctLog.Size = UDim2.new(1, 0, 1, -140)  -- было -104, добавили 36 для статус-бара
+ctLog.Size = UDim2.new(1, 0, 1, -104)
 ctLog.CanvasSize = UDim2.new(0, 0, 0, 0)
 ctLog.ScrollBarThickness = 3
 ctLog.ScrollBarImageTransparency = 0.7
@@ -8448,111 +8562,8 @@ end
 ctSendBtn.MouseButton1Click:Connect(ctDoSend)
 ctInputBox.FocusLost:Connect(function(enter) if enter then ctDoSend() end end)
 
--- ── Строка состояния ─────────────────────────────────────────────
-local ctStatusBar = Instance.new("Frame")
-ctStatusBar.BackgroundColor3 = THEME.Card
-ctStatusBar.BackgroundTransparency = THEME.CardTransparency or 0.55
-ctStatusBar.BorderSizePixel = 0
-ctStatusBar.Position = UDim2.new(0, 0, 1, -32)
-ctStatusBar.Size = UDim2.new(1, 0, 0, 28)
-ctStatusBar.Parent = chatTestFrame
-makeCorner(ctStatusBar, 10)
-makeStroke(ctStatusBar, 1, THEME.Stroke, 0.7)
+-- ── Строка состояния перенесена в сайдбар (всегда видима)
 
-local ctStatusLayout = Instance.new("UIListLayout")
-ctStatusLayout.FillDirection = Enum.FillDirection.Horizontal
-ctStatusLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-ctStatusLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-ctStatusLayout.Padding = UDim.new(0, 0)
-ctStatusLayout.Parent = ctStatusBar
-
-local ctStatusPad = Instance.new("UIPadding")
-ctStatusPad.PaddingLeft = UDim.new(0, 10)
-ctStatusPad.PaddingRight = UDim.new(0, 10)
-ctStatusPad.Parent = ctStatusBar
-
--- Вспомогательная функция: один индикатор (точка + текст)
-local function makeStatusPill(parent, dotColor, labelText)
-    local wrap = Instance.new("Frame")
-    wrap.BackgroundTransparency = 1
-    wrap.Size = UDim2.new(0, 0, 1, 0)
-    wrap.AutomaticSize = Enum.AutomaticSize.X
-    wrap.Parent = parent
-
-    local wLayout = Instance.new("UIListLayout")
-    wLayout.FillDirection = Enum.FillDirection.Horizontal
-    wLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-    wLayout.Padding = UDim.new(0, 4)
-    wLayout.Parent = wrap
-
-    local wPad = Instance.new("UIPadding")
-    wPad.PaddingRight = UDim.new(0, 12)
-    wPad.Parent = wrap
-
-    local d = Instance.new("Frame")
-    d.Size = UDim2.new(0, 6, 0, 6)
-    d.BackgroundColor3 = dotColor
-    d.BorderSizePixel = 0
-    d.Parent = wrap
-    makeCorner(d, 999)
-
-    local lbl = makeTextLabel(wrap, labelText, 10, "semibold")
-    lbl.Size = UDim2.new(0, 0, 1, 0)
-    lbl.AutomaticSize = Enum.AutomaticSize.X
-    lbl.TextColor3 = THEME.TextDim
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-
-    return wrap, d, lbl
-end
-
--- Индикатор 1: API ключ
-local _, dotApi, lblApi = makeStatusPill(ctStatusBar,
-    Color3.fromRGB(100, 100, 120), "API: ?")
-
--- Индикатор 2: Бот активен
-local _, dotBot, lblBot = makeStatusPill(ctStatusBar,
-    Color3.fromRGB(100, 100, 120), "Бот: ?")
-
--- Индикатор 3: Личность
-local _, dotPers, lblPers = makeStatusPill(ctStatusBar,
-    Color3.fromRGB(100, 100, 120), "?")
-
--- Индикатор 4: Память
-local _, dotMem, lblMem = makeStatusPill(ctStatusBar,
-    Color3.fromRGB(100, 100, 120), "?")
-
--- Функция обновления статуса — вызывается при открытии вкладки и при изменениях
-local function updateCtStatus()
-    local s = ClientSettings
-    local key = getGroqApiKey and getGroqApiKey() or ""
-    local hasKey = type(key) == "string" and #key > 8
-
-    -- API
-    if hasKey then
-        dotApi.BackgroundColor3 = Color3.fromRGB(80, 220, 120)
-        lblApi.Text = "API: OK"
-    else
-        dotApi.BackgroundColor3 = Color3.fromRGB(220, 80, 80)
-        lblApi.Text = "API: нет ключа"
-    end
-
-    -- Бот активен
-    local botOn = s.Enabled and s.AutoReply
-    dotBot.BackgroundColor3 = botOn and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(220, 80, 80)
-    lblBot.Text = "Бот: " .. (botOn and "активен" or "выкл")
-
-    -- Личность
-    local persName = tostring(s.PersonalityId or "—")
-    dotPers.BackgroundColor3 = THEME.Accent
-    lblPers.Text = persName
-
-    -- Память
-    local memOn = s.MemoryEnabled
-    dotMem.BackgroundColor3 = memOn and Color3.fromRGB(100, 160, 255) or Color3.fromRGB(100, 100, 120)
-    lblMem.Text = memOn and "Память: вкл" or "Память: выкл"
-end
-
-updateCtStatus()
 
 -- ═══════════════════════════════════════════════════════════
 -- СИСТЕМА СВОРАЧИВАНИЯ ОКНА В КРУГ
