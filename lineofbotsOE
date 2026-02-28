@@ -4268,7 +4268,7 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     local hasDesc = descText and descText ~= ""
     local label = makeTextLabel(row, labelText, 13, "semibold")
     label.Name = "Label"
-    label.Size = UDim2.new(1, -62, 0, 18)
+    label.Size = UDim2.new(1, -72, 0, 18)
     label.Position = hasDesc and UDim2.new(0, 0, 0, 8) or UDim2.new(0, 0, 0.5, -9)
 
     if hasDesc then
@@ -4276,8 +4276,9 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
         desc.Name = "Description"
         desc.TextColor3 = THEME.TextDim
         desc.Position = UDim2.new(0, 0, 0, 27)
-        desc.Size = UDim2.new(1, -62, 0, 14)
+        desc.Size = UDim2.new(1, -62, 0, 16)
         desc.TextTruncate = Enum.TextTruncate.AtEnd
+        desc.ClipsDescendants = false
     end
 
     -- v17.5: Крупный красивый переключатель
@@ -4846,7 +4847,7 @@ makeToggleRow(
 -- v17.5: Антиспам — игнорировать одинаковые сообщения подряд
 makeToggleRow(
     automation,
-    "🔇 Антиспам",
+    "[x] Антиспам",
     "Игнорировать если игрок отправляет одно и то же сообщение подряд.",
     ClientSettings.AntiSpam ~= false,
     function(state) ClientSettings.AntiSpam = state end
@@ -4855,7 +4856,7 @@ makeToggleRow(
 -- v17.5: Авто-реакция на упоминание ника бота
 makeToggleRow(
     automation,
-    "📢 Реакция на имя",
+    "[!] Реакция на имя",
     "Бот реагирует когда кто-то упоминает его ник в чате, даже без триггера.",
     ClientSettings.ReactToMention ~= false,
     function(state) ClientSettings.ReactToMention = state end
@@ -4864,7 +4865,7 @@ makeToggleRow(
 -- v16: Команды и эмоции
 makeToggleRow(
     automation,
-    "🎭 Команды и эмоции",
+    "[+] Команды и эмоции",
     "ИИ сам решает когда прыгнуть, подойти, потанцевать или помахать — по просьбе игрока.",
     ClientSettings.ActionsEnabled ~= false,
     function(state)
@@ -4879,7 +4880,7 @@ makeToggleRow(
 -- v16: Экономия токенов
 makeToggleRow(
     automation,
-    "⚡ Экономия токенов",
+    "[~] Экономия токенов",
     "Сокращает промпт для эмоций/команд. Меньше токенов, но ИИ может чуть хуже понимать контекст.",
     ClientSettings.TokenEconomy == true,
     function(state)
@@ -4890,7 +4891,7 @@ makeToggleRow(
 -- v16.5: Сознание места
 makeToggleRow(
     automation,
-    "🌍 Сознание места",
+    "[*] Сознание места",
     "ИИ знает что она в Roblox, знает название игры и может рассказать что тут делать.",
     ClientSettings.PlaceAwareness ~= false,
     function(state)
@@ -4902,7 +4903,7 @@ makeToggleRow(
 -- v17: Сознание игроков
 makeToggleRow(
     automation,
-    "👁️ Сознание игроков",
+    "[?] Сознание игроков",
     "ИИ видит кто стоит рядом (спереди/сзади/сбоку) и как ведёт себя. Реагирует на токсиков за спиной.",
     ClientSettings.PlayerAwareness ~= false,
     function(state)
@@ -8058,10 +8059,11 @@ local function ctAddMessage(text, isBot, isError)
     row.LayoutOrder = ctMsgCounter
     row.Parent = ctLog
 
-    -- Пузырь
+    -- Пузырь — фиксированная ширина (75% от контейнера), высота авто
     local bubble = Instance.new("Frame")
     bubble.BorderSizePixel = 0
-    bubble.AutomaticSize = Enum.AutomaticSize.XY
+    bubble.Size = UDim2.new(0, 300, 0, 0)
+    bubble.AutomaticSize = Enum.AutomaticSize.Y
     bubble.BackgroundTransparency = 0
     bubble.Parent = row
     makeCorner(bubble, 14)
@@ -8094,19 +8096,18 @@ local function ctAddMessage(text, isBot, isError)
 
     -- Имя отправителя (маленькое, сверху)
     local senderName = isBot
-        and ("🤖 " .. (ClientSettings.PersonalityId or "Бот"))
-        or "Ты"
+        and ("Bot: " .. (ClientSettings.PersonalityId or "Bot"))
+        or "You"
     local nameLbl = makeTextLabel(bubble, senderName, 10, "bold")
-    nameLbl.Size = UDim2.new(0, 240, 0, 13)
+    nameLbl.Size = UDim2.new(1, 0, 0, 13)
     nameLbl.TextColor3 = isBot
         and (isError and Color3.fromRGB(255, 120, 120) or THEME.Accent)
         or Color3.fromRGB(255, 255, 255)
     nameLbl.TextTransparency = 0.2
 
     -- Текст сообщения
-    local maxW = isBot and 280 or 240
     local msgLbl = makeTextLabel(bubble, text, 13, "medium")
-    msgLbl.Size = UDim2.new(0, maxW, 0, 0)
+    msgLbl.Size = UDim2.new(1, 0, 0, 0)
     msgLbl.AutomaticSize = Enum.AutomaticSize.Y
     msgLbl.Position = UDim2.new(0, 0, 0, 16)
     msgLbl.TextWrapped = true
@@ -8151,9 +8152,9 @@ local ctSendBtn = Instance.new("TextButton")
 ctSendBtn.Size = UDim2.new(0, 40, 0, 40)
 ctSendBtn.Position = UDim2.new(1, -88, 0.5, -20)
 ctSendBtn.BackgroundColor3 = THEME.Accent
-ctSendBtn.Text = "➤"
+ctSendBtn.Text = ">>"
 ctSendBtn.Font = Enum.Font.GothamBold
-ctSendBtn.TextSize = 16
+ctSendBtn.TextSize = 13
 ctSendBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ctSendBtn.AutoButtonColor = false
 ctSendBtn.Parent = ctInputArea
@@ -8161,15 +8162,15 @@ makeCorner(ctSendBtn, 999)
 ctSendBtn.MouseEnter:Connect(function() tween(ctSendBtn, TWEEN_FAST, { BackgroundTransparency = 0.2 }) end)
 ctSendBtn.MouseLeave:Connect(function() tween(ctSendBtn, TWEEN_FAST, { BackgroundTransparency = 0 }) end)
 
--- Кнопка очистить (круглая, маленькая — как в ChatGPT/Gemini)
+-- Кнопка очистить (круглая)
 local ctClearBtn = Instance.new("TextButton")
 ctClearBtn.Size = UDim2.new(0, 40, 0, 40)
 ctClearBtn.Position = UDim2.new(1, -44, 0.5, -20)
 ctClearBtn.BackgroundColor3 = THEME.Button
 ctClearBtn.BackgroundTransparency = THEME.ButtonTransparency or 0.6
-ctClearBtn.Text = "🗑"
+ctClearBtn.Text = "CLR"
 ctClearBtn.Font = Enum.Font.GothamBold
-ctClearBtn.TextSize = 16
+ctClearBtn.TextSize = 10
 ctClearBtn.TextColor3 = THEME.TextDim
 ctClearBtn.AutoButtonColor = false
 ctClearBtn.Parent = ctInputArea
@@ -8216,7 +8217,7 @@ local function ctDoSend()
         ctSending = false
         pcall(function()
             ctSendBtn.BackgroundTransparency = 0.4
-            ctSendBtn.Text = "➤"
+            ctSendBtn.Text = ">>"
         end)
     end
 
@@ -8233,7 +8234,7 @@ local function ctDoSend()
     typingBubble.Size = UDim2.new(1, 0, 0, 26)
     typingBubble.LayoutOrder = typingIdx
     typingBubble.Parent = ctLog
-    local typingLbl = makeTextLabel(typingBubble, "⌨️ бот печатает...", 12, "medium")
+    local typingLbl = makeTextLabel(typingBubble, "... bot typing", 12, "medium")
     typingLbl.TextColor3 = THEME.TextDim
     typingLbl.Size = UDim2.new(1, 0, 1, 0)
 
