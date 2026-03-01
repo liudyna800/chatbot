@@ -1219,16 +1219,8 @@ local function stopCurrentEmote()
         _activeEmoteThread = nil
     end
     if _activeEmoteTrack then
-        pcall(function() _activeEmoteTrack:Stop(0.1) end)
+        pcall(function() _activeEmoteTrack:Stop(0.3) end)
         _activeEmoteTrack = nil
-    end
-    -- Восстанавливаем системный Animate скрипт
-    local char = Players.LocalPlayer.Character
-    if char then
-        local animateScript = char:FindFirstChild("Animate")
-        if animateScript then
-            animateScript.Disabled = false
-        end
     end
 end
 
@@ -1287,25 +1279,11 @@ local function playAnimDirect(animId, duration)
     local char = Players.LocalPlayer.Character
     if not char then return false end
 
-    -- Отключаем системный Animate скрипт — иначе он перекрывает нашу анимацию
-    -- на R6 особенно это критично: Animate постоянно переключает треки
-    local animateScript = char:FindFirstChild("Animate")
-    if animateScript then
-        animateScript.Disabled = true
-    end
-
     local animator = humanoid:FindFirstChildOfClass("Animator")
     if not animator then
         animator = Instance.new("Animator")
         animator.Parent = humanoid
     end
-
-    -- Останавливаем все текущие треки через Animator
-    pcall(function()
-        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-            track:Stop(0)
-        end
-    end)
 
     local anim = Instance.new("Animation")
     anim.AnimationId = "rbxassetid://" .. tostring(animId)
@@ -1318,38 +1296,32 @@ local function playAnimDirect(animId, duration)
     pcall(function() anim.Parent = nil end)
 
     if not ok or not track then
-        -- Фоллбэк: старый API
-        pcall(function() track = humanoid:LoadAnimation(anim) end)
-    end
-
-    if not track then
-        -- Анимация не загрузилась — восстанавливаем Animate
-        if animateScript then animateScript.Disabled = false end
         return false
     end
 
-    pcall(function() track.Priority = Enum.AnimationPriority.Action4 end)
+    -- Останавливаем только треки с Action приоритетом (эмоции из Animate).
+    -- Walk/Idle/Run имеют Core/Idle приоритет — их не трогаем.
     pcall(function()
-        if track.Priority ~= Enum.AnimationPriority.Action4 then
-            track.Priority = Enum.AnimationPriority.Action
+        for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
+            if t.Priority == Enum.AnimationPriority.Action
+            or t.Priority == Enum.AnimationPriority.Action2
+            or t.Priority == Enum.AnimationPriority.Action3
+            or t.Priority == Enum.AnimationPriority.Action4 then
+                t:Stop(0)
+            end
         end
     end)
 
+    pcall(function() track.Priority = Enum.AnimationPriority.Action end)
     track:Play()
     _activeEmoteTrack = track
 
-    local stopFn = function()
-        pcall(function() track:Stop(0.1) end)
-        _activeEmoteTrack = nil
-        _activeEmoteThread = nil
-        -- Восстанавливаем Animate
-        if animateScript and animateScript.Parent then
-            animateScript.Disabled = false
-        end
-    end
-
     if duration then
-        _activeEmoteThread = task.delay(duration, stopFn)
+        _activeEmoteThread = task.delay(duration, function()
+            pcall(function() track:Stop(0.3) end)
+            _activeEmoteTrack = nil
+            _activeEmoteThread = nil
+        end)
     end
 
     return true
