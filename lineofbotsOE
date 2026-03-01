@@ -1274,10 +1274,10 @@ local R6_ANIM_IDS = {
 -- Воспроизвести анимацию напрямую через AnimationTrack (R6 и R15)
 local function playAnimDirect(animId, duration)
     local humanoid = getLocalHumanoid()
-    if not humanoid then return false end
+    if not humanoid then warn("[ANIM] no humanoid") return false end
 
     local char = Players.LocalPlayer.Character
-    if not char then return false end
+    if not char then warn("[ANIM] no char") return false end
 
     local animator = humanoid:FindFirstChildOfClass("Animator")
     if not animator then
@@ -1294,26 +1294,32 @@ local function playAnimDirect(animId, duration)
         track = animator:LoadAnimation(anim)
     end)
     pcall(function() anim.Parent = nil end)
+    warn("[ANIM] LoadAnimation ok="..tostring(ok).." err="..tostring(err).." track="..tostring(track))
 
-    if not ok or not track then
-        return false
+    if not ok or not track then warn("[ANIM] no track") return false end
+
+    warn("[ANIM] track.Length before wait="..tostring(track.Length))
+    local waited = 0
+    while track.Length == 0 and waited < 3 do
+        task.wait(0.1)
+        waited = waited + 0.1
+    end
+    warn("[ANIM] track.Length after wait="..tostring(track.Length).." waited="..tostring(waited))
+
+    if track.Length == 0 then warn("[ANIM] EMPTY TRACK - animation never loaded") return false end
+
+    -- Список всех играющих треков ДО нашего
+    local playing = animator:GetPlayingAnimationTracks()
+    warn("[ANIM] playing tracks before play: "..tostring(#playing))
+    for i, t in ipairs(playing) do
+        warn("[ANIM]   ["..i.."] id="..tostring(t.Animation and t.Animation.AnimationId).." priority="..tostring(t.Priority).." weight="..tostring(t.WeightCurrent))
     end
 
-    -- Останавливаем только треки с Action приоритетом (эмоции из Animate).
-    -- Walk/Idle/Run имеют Core/Idle приоритет — их не трогаем.
-    pcall(function()
-        for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
-            if t.Priority == Enum.AnimationPriority.Action
-            or t.Priority == Enum.AnimationPriority.Action2
-            or t.Priority == Enum.AnimationPriority.Action3
-            or t.Priority == Enum.AnimationPriority.Action4 then
-                t:Stop(0)
-            end
-        end
-    end)
-
     pcall(function() track.Priority = Enum.AnimationPriority.Action end)
+    warn("[ANIM] priority set to="..tostring(track.Priority))
     track:Play()
+    warn("[ANIM] Play() called. IsPlaying="..tostring(track.IsPlaying).." WeightCurrent="..tostring(track.WeightCurrent))
+
     _activeEmoteTrack = track
 
     if duration then
