@@ -1263,58 +1263,99 @@ local R6_ANIM_IDS = {
 }
 
 -- Воспроизвести анимацию напрямую через AnimationTrack (R6 и R15)
--- ГЛАВНОЕ ПРАВИЛО: humanoid:LoadAnimation() — deprecated и падает на новых играх.
--- Правильный путь: Animator:LoadAnimation() — работает на R6 и R15 одинаково.
--- Animator всегда есть внутри Humanoid (Roblox создаёт его автоматически).
 local function playAnimDirect(animId, duration)
-    local humanoid = getLocalHumanoid()
-    if not humanoid then return false end
+    warn("[LOB-ANIM] playAnimDirect called, animId=" .. tostring(animId) .. " duration=" .. tostring(duration))
 
-    local success = false
-    pcall(function()
-        -- Animator — правильный способ загружать анимации в современном Roblox
-        -- Работает и на R6, и на R15. humanoid:LoadAnimation() — deprecated, не используем.
-        local animator = humanoid:FindFirstChildOfClass("Animator")
-        if not animator then
-            -- Animator отсутствует — редкий случай, создаём сами
+    local humanoid = getLocalHumanoid()
+    if not humanoid then
+        warn("[LOB-ANIM] FAIL: no humanoid")
+        return false
+    end
+    warn("[LOB-ANIM] humanoid found: " .. humanoid:GetFullName())
+
+    local char = Players.LocalPlayer.Character
+    warn("[LOB-ANIM] character: " .. tostring(char and char.Name))
+
+    -- Ищем Animator
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+    warn("[LOB-ANIM] animator found: " .. tostring(animator ~= nil))
+
+    if not animator then
+        warn("[LOB-ANIM] creating Animator manually")
+        local ok2, err2 = pcall(function()
             animator = Instance.new("Animator")
             animator.Parent = humanoid
-        end
-
-        local anim = Instance.new("Animation")
-        anim.AnimationId = "rbxassetid://" .. tostring(animId)
-        -- Parent нужен для LoadAnimation — ставим в humanoid временно
-        anim.Parent = humanoid
-
-        local track = animator:LoadAnimation(anim)
-        anim.Parent = nil  -- убираем после загрузки, track уже держит ссылку
-
-        if not track then return end
-
-        -- Приоритет Action перекрывает walk/idle.
-        -- Action4 не всегда доступен — пробуем, фоллбэк на Action.
-        local prioOk = pcall(function()
-            track.Priority = Enum.AnimationPriority.Action4
         end)
-        if not prioOk then
-            pcall(function()
-                track.Priority = Enum.AnimationPriority.Action
-            end)
-        end
+        warn("[LOB-ANIM] Animator create ok=" .. tostring(ok2) .. " err=" .. tostring(err2))
+    end
 
-        track:Play()
-        _activeEmoteTrack = track
-        success = true
+    if not animator then
+        warn("[LOB-ANIM] FAIL: still no animator after create attempt")
+        return false
+    end
 
-        if duration then
-            _activeEmoteThread = task.delay(duration, function()
-                pcall(function() track:Stop() end)
-                _activeEmoteTrack = nil
-                _activeEmoteThread = nil
-            end)
-        end
+    -- Создаём Animation объект
+    local anim
+    local ok3, err3 = pcall(function()
+        anim = Instance.new("Animation")
+        anim.AnimationId = "rbxassetid://" .. tostring(animId)
+        anim.Parent = humanoid
     end)
-    return success
+    warn("[LOB-ANIM] Animation create ok=" .. tostring(ok3) .. " err=" .. tostring(err3) .. " id=" .. tostring(anim and anim.AnimationId))
+
+    if not ok3 or not anim then
+        warn("[LOB-ANIM] FAIL: could not create Animation instance")
+        return false
+    end
+
+    -- LoadAnimation
+    local track
+    local ok4, err4 = pcall(function()
+        track = animator:LoadAnimation(anim)
+    end)
+    warn("[LOB-ANIM] LoadAnimation ok=" .. tostring(ok4) .. " err=" .. tostring(err4) .. " track=" .. tostring(track))
+    pcall(function() anim.Parent = nil end)
+
+    if not ok4 or not track then
+        warn("[LOB-ANIM] FAIL: LoadAnimation failed. Trying humanoid:LoadAnimation fallback")
+        local ok5, err5 = pcall(function()
+            track = humanoid:LoadAnimation(anim)
+        end)
+        warn("[LOB-ANIM] humanoid:LoadAnimation fallback ok=" .. tostring(ok5) .. " err=" .. tostring(err5) .. " track=" .. tostring(track))
+    end
+
+    if not track then
+        warn("[LOB-ANIM] FAIL: track is nil after all attempts")
+        return false
+    end
+
+    -- Приоритет
+    local prioOk = pcall(function() track.Priority = Enum.AnimationPriority.Action4 end)
+    if not prioOk then
+        pcall(function() track.Priority = Enum.AnimationPriority.Action end)
+    end
+    warn("[LOB-ANIM] priority set, Action4=" .. tostring(prioOk))
+
+    -- Play
+    local ok6, err6 = pcall(function() track:Play() end)
+    warn("[LOB-ANIM] Play ok=" .. tostring(ok6) .. " err=" .. tostring(err6))
+
+    if not ok6 then
+        warn("[LOB-ANIM] FAIL: track:Play() threw error")
+        return false
+    end
+
+    _activeEmoteTrack = track
+    warn("[LOB-ANIM] SUCCESS: animation playing")
+
+    if duration then
+        _activeEmoteThread = task.delay(duration, function()
+            pcall(function() track:Stop() end)
+            _activeEmoteTrack = nil
+            _activeEmoteThread = nil
+        end)
+    end
+    return true
 end
 
 local function playEmote(emoteName, duration)
