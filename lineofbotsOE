@@ -1097,6 +1097,9 @@ local function splitTextIntoParts(text, maxLen)
 end
 
 local function sendBotMessage(text)
+    -- Убираем служебные теги которые ИИ иногда копирует в ответ
+    text = text:gsub("%[LANG:[^%]]*%]%s*", "")
+    text = text:gsub("%[NAME:[^%]]*%]%s*", "")
     text = normalizeOneLine(text)
     if text == "" then return end
 
@@ -1216,8 +1219,16 @@ local function stopCurrentEmote()
         _activeEmoteThread = nil
     end
     if _activeEmoteTrack then
-        pcall(function() _activeEmoteTrack:Stop() end)
+        pcall(function() _activeEmoteTrack:Stop(0.1) end)
         _activeEmoteTrack = nil
+    end
+    -- Восстанавливаем системный Animate скрипт
+    local char = Players.LocalPlayer.Character
+    if char then
+        local animateScript = char:FindFirstChild("Animate")
+        if animateScript then
+            animateScript.Disabled = false
+        end
     end
 end
 
@@ -1264,97 +1275,77 @@ local R6_ANIM_IDS = {
 
 -- Воспроизвести анимацию напрямую через AnimationTrack (R6 и R15)
 local function playAnimDirect(animId, duration)
-    warn("[LOB-ANIM] playAnimDirect called, animId=" .. tostring(animId) .. " duration=" .. tostring(duration))
-
     local humanoid = getLocalHumanoid()
-    if not humanoid then
-        warn("[LOB-ANIM] FAIL: no humanoid")
-        return false
-    end
-    warn("[LOB-ANIM] humanoid found: " .. humanoid:GetFullName())
+    if not humanoid then return false end
 
     local char = Players.LocalPlayer.Character
-    warn("[LOB-ANIM] character: " .. tostring(char and char.Name))
+    if not char then return false end
 
-    -- Ищем Animator
+    -- Отключаем системный Animate скрипт — иначе он перекрывает нашу анимацию
+    -- на R6 особенно это критично: Animate постоянно переключает треки
+    local animateScript = char:FindFirstChild("Animate")
+    if animateScript then
+        animateScript.Disabled = true
+    end
+
     local animator = humanoid:FindFirstChildOfClass("Animator")
-    warn("[LOB-ANIM] animator found: " .. tostring(animator ~= nil))
-
     if not animator then
-        warn("[LOB-ANIM] creating Animator manually")
-        local ok2, err2 = pcall(function()
-            animator = Instance.new("Animator")
-            animator.Parent = humanoid
-        end)
-        warn("[LOB-ANIM] Animator create ok=" .. tostring(ok2) .. " err=" .. tostring(err2))
+        animator = Instance.new("Animator")
+        animator.Parent = humanoid
     end
 
-    if not animator then
-        warn("[LOB-ANIM] FAIL: still no animator after create attempt")
-        return false
-    end
-
-    -- Создаём Animation объект
-    local anim
-    local ok3, err3 = pcall(function()
-        anim = Instance.new("Animation")
-        anim.AnimationId = "rbxassetid://" .. tostring(animId)
-        anim.Parent = humanoid
+    -- Останавливаем все текущие треки через Animator
+    pcall(function()
+        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+            track:Stop(0)
+        end
     end)
-    warn("[LOB-ANIM] Animation create ok=" .. tostring(ok3) .. " err=" .. tostring(err3) .. " id=" .. tostring(anim and anim.AnimationId))
 
-    if not ok3 or not anim then
-        warn("[LOB-ANIM] FAIL: could not create Animation instance")
-        return false
-    end
+    local anim = Instance.new("Animation")
+    anim.AnimationId = "rbxassetid://" .. tostring(animId)
+    anim.Parent = humanoid
 
-    -- LoadAnimation
     local track
-    local ok4, err4 = pcall(function()
+    local ok, err = pcall(function()
         track = animator:LoadAnimation(anim)
     end)
-    warn("[LOB-ANIM] LoadAnimation ok=" .. tostring(ok4) .. " err=" .. tostring(err4) .. " track=" .. tostring(track))
     pcall(function() anim.Parent = nil end)
 
-    if not ok4 or not track then
-        warn("[LOB-ANIM] FAIL: LoadAnimation failed. Trying humanoid:LoadAnimation fallback")
-        local ok5, err5 = pcall(function()
-            track = humanoid:LoadAnimation(anim)
-        end)
-        warn("[LOB-ANIM] humanoid:LoadAnimation fallback ok=" .. tostring(ok5) .. " err=" .. tostring(err5) .. " track=" .. tostring(track))
+    if not ok or not track then
+        -- Фоллбэк: старый API
+        pcall(function() track = humanoid:LoadAnimation(anim) end)
     end
 
     if not track then
-        warn("[LOB-ANIM] FAIL: track is nil after all attempts")
+        -- Анимация не загрузилась — восстанавливаем Animate
+        if animateScript then animateScript.Disabled = false end
         return false
     end
 
-    -- Приоритет
-    local prioOk = pcall(function() track.Priority = Enum.AnimationPriority.Action4 end)
-    if not prioOk then
-        pcall(function() track.Priority = Enum.AnimationPriority.Action end)
-    end
-    warn("[LOB-ANIM] priority set, Action4=" .. tostring(prioOk))
+    pcall(function() track.Priority = Enum.AnimationPriority.Action4 end)
+    pcall(function()
+        if track.Priority ~= Enum.AnimationPriority.Action4 then
+            track.Priority = Enum.AnimationPriority.Action
+        end
+    end)
 
-    -- Play
-    local ok6, err6 = pcall(function() track:Play() end)
-    warn("[LOB-ANIM] Play ok=" .. tostring(ok6) .. " err=" .. tostring(err6))
-
-    if not ok6 then
-        warn("[LOB-ANIM] FAIL: track:Play() threw error")
-        return false
-    end
-
+    track:Play()
     _activeEmoteTrack = track
-    warn("[LOB-ANIM] SUCCESS: animation playing")
+
+    local stopFn = function()
+        pcall(function() track:Stop(0.1) end)
+        _activeEmoteTrack = nil
+        _activeEmoteThread = nil
+        -- Восстанавливаем Animate
+        if animateScript and animateScript.Parent then
+            animateScript.Disabled = false
+        end
+    end
 
     if duration then
-        _activeEmoteThread = task.delay(duration, function()
-            pcall(function() track:Stop() end)
-            _activeEmoteTrack = nil
-            _activeEmoteThread = nil
-        end)
+        _activeEmoteThread = task.delay(duration, stopFn)
     end
+
     return true
 end
 
