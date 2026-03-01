@@ -1244,7 +1244,9 @@ local R6_ANIM_IDS = {
     dance  = "507771019",
     dance2 = "507776043",
     dance3 = "507777268",
-    -- hello/shrug/salute/shy/robot/stadium/tilt — те же ID работают и на R6
+    -- ФИКС: кастомные эмоции — прямые ID анимаций.
+    -- PlayEmote требует ApplyDescription (сервер может заблокировать),
+    -- поэтому все кастомные ID дублируются сюда как надёжный фоллбэк.
     hello   = "3576686446",
     shrug   = "3576968026",
     salute  = "3360689775",
@@ -1252,6 +1254,12 @@ local R6_ANIM_IDS = {
     stadium = "3360686498",
     shy     = "3576717965",
     robot   = "3576721660",
+    -- agree/disagree/eyeroll не имеют своих анимаций — используем ближайшие
+    agree   = "507770677",  -- cheer (кивок энтузиазма)
+    disagree= "3576968026", -- shrug (пожать плечами)
+    eyeroll = "3576968026", -- shrug
+    confused= "3360692915", -- tilt
+    dizzy   = "3360692915", -- tilt
 }
 
 -- Воспроизвести анимацию напрямую через AnimationTrack (работает на R6 и R15)
@@ -1347,7 +1355,8 @@ local function playEmote(emoteName, duration)
             end)
         end
     else
-        -- PlayEmote не сработал — пробуем через AnimationTrack (фоллбэк R15)
+        -- PlayEmote не сработал — пробуем через AnimationTrack (фоллбэк R15 + все кастомные)
+        -- R6_ANIM_IDS содержит ID для всех эмоций включая agree/disagree/eyeroll
         local animId = R6_ANIM_IDS[emoteName]
         if animId then
             playAnimDirect(animId, duration)
@@ -2082,14 +2091,19 @@ local function handleQueuedChat(item)
     -- В обычном режиме — все MAX_HISTORY пар
     if history then
         if settings.TokenEconomy then
-            -- Берём хвост: последние 4 элемента = 2 пары user+assistant
-            local startIdx = math.max(1, #history - 3)
+            -- ФИКС: в режиме экономии берём последние 2 пары (4 элемента) — но не больше чем MAX_HISTORY позволяет
+            local econPairs = math.min(2, MAX_HISTORY)  -- экономия = 2 пары макс
+            local startIdx = math.max(1, #history - (econPairs * 2 - 1))
             for i = startIdx, #history do
                 table.insert(apiMessages, history[i])
             end
         else
-            for _, msg in ipairs(history) do
-                table.insert(apiMessages, msg)
+            -- ФИКС: отправляем историю, но не больше MAX_HISTORY пар
+            -- appendHistory уже обрезает при записи, но MAX_HISTORY мог измениться после
+            local maxItems = MAX_HISTORY * 2
+            local startIdx = math.max(1, #history - maxItems + 1)
+            for i = startIdx, #history do
+                table.insert(apiMessages, history[i])
             end
         end
     end
