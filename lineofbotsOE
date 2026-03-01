@@ -1294,16 +1294,15 @@ local function playAnimDirect(animId, duration)
         track = animator:LoadAnimation(anim)
     end)
     pcall(function() anim.Parent = nil end)
-    warn("[ANIM] LoadAnimation ok="..tostring(ok).." err="..tostring(err).." track="..tostring(track))
 
-    if not ok or not track then warn("[ANIM] no track") return false end
+    if not ok or not track then
+        warn("[ANIM] LoadAnimation failed: "..tostring(err))
+        return false
+    end
 
-    warn("[ANIM] track.Length="..tostring(track.Length))
+    warn("[ANIM] Length="..tostring(track.Length))
 
-    -- БАГ БЫЛ ЗДЕСЬ: Core приоритет (idle/walk) выше Action.
-    -- Action4 — самый высокий, гарантированно перекрывает всё.
-    -- Если Action4 недоступен — пробуем Action3, Action2, Action.
-    local prioritySet = false
+    -- Устанавливаем максимально возможный приоритет
     for _, prio in ipairs({
         Enum.AnimationPriority.Action4,
         Enum.AnimationPriority.Action3,
@@ -1312,17 +1311,34 @@ local function playAnimDirect(animId, duration)
     }) do
         local pOk = pcall(function() track.Priority = prio end)
         if pOk then
-            warn("[ANIM] priority set to "..tostring(prio))
-            prioritySet = true
+            warn("[ANIM] priority="..tostring(prio))
             break
         end
     end
 
-    -- Play(fadeTime, weight, speed)
-    -- fadeTime=0 — вес сразу 1, не нарастает плавно с 0
-    -- weight=1 — полный вес немедленно
+    -- На R6 WeightCurrent=0 сразу после Play — это нормально.
+    -- Но вес НЕ нарастает если Core-трек держит все кости.
+    -- Решение: сначала остановить idle/walk через ChangeState,
+    -- затем сыграть нашу анимацию, потом вернуть состояние.
+    local rigType = getCharacterRigType()
+    if rigType == "R6" then
+        -- Сбрасываем состояние Humanoid — это заставляет Animate отпустить треки на кадр
+        pcall(function()
+            humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+        end)
+    end
+
     track:Play(0, 1, 1)
-    warn("[ANIM] Play(0,1,1) called. IsPlaying="..tostring(track.IsPlaying).." WeightCurrent="..tostring(track.WeightCurrent))
+    -- Ждём один кадр чтобы вес применился
+    task.wait()
+
+    if rigType == "R6" then
+        pcall(function()
+            humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+        end)
+    end
+
+    warn("[ANIM] WeightAfterFrame="..tostring(track.WeightCurrent).." IsPlaying="..tostring(track.IsPlaying))
 
     _activeEmoteTrack = track
 
