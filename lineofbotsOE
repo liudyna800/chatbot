@@ -1262,39 +1262,37 @@ local R6_ANIM_IDS = {
     dizzy   = "3360692915", -- tilt
 }
 
--- Воспроизвести анимацию напрямую через AnimationTrack (работает на R6 и R15)
+-- Воспроизвести анимацию напрямую через AnimationTrack (R6 и R15)
+-- ГЛАВНОЕ ПРАВИЛО: humanoid:LoadAnimation() — deprecated и падает на новых играх.
+-- Правильный путь: Animator:LoadAnimation() — работает на R6 и R15 одинаково.
+-- Animator всегда есть внутри Humanoid (Roblox создаёт его автоматически).
 local function playAnimDirect(animId, duration)
     local humanoid = getLocalHumanoid()
     if not humanoid then return false end
 
     local success = false
     pcall(function()
-        local anim = Instance.new("Animation")
-        anim.AnimationId = "rbxassetid://" .. tostring(animId)
-        -- ВАЖНО: анимация должна быть в workspace, иначе humanoid:LoadAnimation падает тихо
-        anim.Parent = workspace
-
-        -- Предзагружаем анимацию — критично для R6
-        pcall(function()
-            game:GetService("ContentProvider"):PreloadAsync({anim})
-        end)
-
-        local track
-        local rigType = getCharacterRigType()
-        if rigType == "R6" then
-            -- На R6 только humanoid:LoadAnimation работает
-            track = humanoid:LoadAnimation(anim)
-        else
-            local animator = humanoid:FindFirstChildOfClass("Animator")
-            track = animator and animator:LoadAnimation(anim) or humanoid:LoadAnimation(anim)
+        -- Animator — правильный способ загружать анимации в современном Roblox
+        -- Работает и на R6, и на R15. humanoid:LoadAnimation() — deprecated, не используем.
+        local animator = humanoid:FindFirstChildOfClass("Animator")
+        if not animator then
+            -- Animator отсутствует — редкий случай, создаём сами
+            animator = Instance.new("Animator")
+            animator.Parent = humanoid
         end
 
-        -- Убираем анимацию из workspace — она уже загружена в track
-        pcall(function() anim.Parent = nil end)
+        local anim = Instance.new("Animation")
+        anim.AnimationId = "rbxassetid://" .. tostring(animId)
+        -- Parent нужен для LoadAnimation — ставим в humanoid временно
+        anim.Parent = humanoid
+
+        local track = animator:LoadAnimation(anim)
+        anim.Parent = nil  -- убираем после загрузки, track уже держит ссылку
 
         if not track then return end
 
-        -- Action4 существует только в новых версиях — используем pcall
+        -- Приоритет Action перекрывает walk/idle.
+        -- Action4 не всегда доступен — пробуем, фоллбэк на Action.
         local prioOk = pcall(function()
             track.Priority = Enum.AnimationPriority.Action4
         end)
@@ -2087,24 +2085,15 @@ local function handleQueuedChat(item)
     local apiMessages = {}
     table.insert(apiMessages, { role = "system", content = makeSystemPrompt(settings) })
 
-    -- Добавляем историю — в экономном режиме берём только последние 2 пары (4 сообщения)
-    -- В обычном режиме — все MAX_HISTORY пар
+    -- Добавляем историю — полностью, по настройке MAX_HISTORY
+    -- TokenEconomy НЕ обрезает историю (память святая), только укорачивает промпт и max_tokens
     if history then
-        if settings.TokenEconomy then
-            -- ФИКС: в режиме экономии берём последние 2 пары (4 элемента) — но не больше чем MAX_HISTORY позволяет
-            local econPairs = math.min(2, MAX_HISTORY)  -- экономия = 2 пары макс
-            local startIdx = math.max(1, #history - (econPairs * 2 - 1))
-            for i = startIdx, #history do
-                table.insert(apiMessages, history[i])
-            end
-        else
-            -- ФИКС: отправляем историю, но не больше MAX_HISTORY пар
-            -- appendHistory уже обрезает при записи, но MAX_HISTORY мог измениться после
-            local maxItems = MAX_HISTORY * 2
-            local startIdx = math.max(1, #history - maxItems + 1)
-            for i = startIdx, #history do
-                table.insert(apiMessages, history[i])
-            end
+        -- appendHistory уже хранит не более MAX_HISTORY пар,
+        -- но MAX_HISTORY мог увеличиться — поэтому берём ровно MAX_HISTORY последних пар
+        local maxItems = MAX_HISTORY * 2
+        local startIdx = math.max(1, #history - maxItems + 1)
+        for i = startIdx, #history do
+            table.insert(apiMessages, history[i])
         end
     end
 
@@ -2199,9 +2188,17 @@ local function handleQueuedChat(item)
     cleanText = executeAction(actionName, item.player, cleanText, item.cleaned)
 
     -- Сохраняем в историю только если память включена
-    -- ВАЖНО: храним item.cleaned (без [NAME:xxx] тега) — иначе ИИ видит тег в истории и копирует его
+    -- ВАЖНО: сохраняем userContent (с [NAME:X] если UsePlayerName включён) — 
+    -- так ИИ в глобальной памяти помнит кто что говорил.
+    -- [LANG:X] тег НЕ сохраняем (он нужен только для текущего запроса).
     if history then
-        appendHistory(history, item.cleaned, cleanText)
+        -- Убираем [LANG:...] тег из финального сохранения в историю
+        local historyUserMsg = item.cleaned
+        if settings.UsePlayerName and userContent ~= item.cleaned then
+            -- Берём userContent но без [LANG:...] тега если он туда попал
+            historyUserMsg = userContent:gsub("%[LANG:[^%]]*%]%s*", "")
+        end
+        appendHistory(history, historyUserMsg, cleanText)
     end
 
     sendBotMessage(cleanText)
