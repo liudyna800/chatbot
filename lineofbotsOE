@@ -1298,27 +1298,31 @@ local function playAnimDirect(animId, duration)
 
     if not ok or not track then warn("[ANIM] no track") return false end
 
-    warn("[ANIM] track.Length before wait="..tostring(track.Length))
-    local waited = 0
-    while track.Length == 0 and waited < 3 do
-        task.wait(0.1)
-        waited = waited + 0.1
+    warn("[ANIM] track.Length="..tostring(track.Length))
+
+    -- БАГ БЫЛ ЗДЕСЬ: Core приоритет (idle/walk) выше Action.
+    -- Action4 — самый высокий, гарантированно перекрывает всё.
+    -- Если Action4 недоступен — пробуем Action3, Action2, Action.
+    local prioritySet = false
+    for _, prio in ipairs({
+        Enum.AnimationPriority.Action4,
+        Enum.AnimationPriority.Action3,
+        Enum.AnimationPriority.Action2,
+        Enum.AnimationPriority.Action,
+    }) do
+        local pOk = pcall(function() track.Priority = prio end)
+        if pOk then
+            warn("[ANIM] priority set to "..tostring(prio))
+            prioritySet = true
+            break
+        end
     end
-    warn("[ANIM] track.Length after wait="..tostring(track.Length).." waited="..tostring(waited))
 
-    if track.Length == 0 then warn("[ANIM] EMPTY TRACK - animation never loaded") return false end
-
-    -- Список всех играющих треков ДО нашего
-    local playing = animator:GetPlayingAnimationTracks()
-    warn("[ANIM] playing tracks before play: "..tostring(#playing))
-    for i, t in ipairs(playing) do
-        warn("[ANIM]   ["..i.."] id="..tostring(t.Animation and t.Animation.AnimationId).." priority="..tostring(t.Priority).." weight="..tostring(t.WeightCurrent))
-    end
-
-    pcall(function() track.Priority = Enum.AnimationPriority.Action end)
-    warn("[ANIM] priority set to="..tostring(track.Priority))
-    track:Play()
-    warn("[ANIM] Play() called. IsPlaying="..tostring(track.IsPlaying).." WeightCurrent="..tostring(track.WeightCurrent))
+    -- Play(fadeTime, weight, speed)
+    -- fadeTime=0 — вес сразу 1, не нарастает плавно с 0
+    -- weight=1 — полный вес немедленно
+    track:Play(0, 1, 1)
+    warn("[ANIM] Play(0,1,1) called. IsPlaying="..tostring(track.IsPlaying).." WeightCurrent="..tostring(track.WeightCurrent))
 
     _activeEmoteTrack = track
 
