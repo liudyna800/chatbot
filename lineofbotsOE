@@ -1263,6 +1263,8 @@ local function playAnimDirect(animId, duration)
     pcall(function()
         local anim = Instance.new("Animation")
         anim.AnimationId = "rbxassetid://" .. tostring(animId)
+        -- ВАЖНО: анимация должна быть в workspace, иначе humanoid:LoadAnimation падает тихо
+        anim.Parent = workspace
 
         -- Предзагружаем анимацию — критично для R6
         pcall(function()
@@ -1270,25 +1272,30 @@ local function playAnimDirect(animId, duration)
         end)
 
         local track
-
-        -- R6: humanoid:LoadAnimation() — deprecated но единственный надёжный путь на R6
-        -- R15: пробуем Animator, фолбэк на humanoid
         local rigType = getCharacterRigType()
         if rigType == "R6" then
-            -- На R6 humanoid:LoadAnimation работает напрямую
+            -- На R6 только humanoid:LoadAnimation работает
             track = humanoid:LoadAnimation(anim)
         else
             local animator = humanoid:FindFirstChildOfClass("Animator")
-            if animator then
-                track = animator:LoadAnimation(anim)
-            else
-                track = humanoid:LoadAnimation(anim)
-            end
+            track = animator and animator:LoadAnimation(anim) or humanoid:LoadAnimation(anim)
         end
+
+        -- Убираем анимацию из workspace — она уже загружена в track
+        pcall(function() anim.Parent = nil end)
 
         if not track then return end
 
-        track.Priority = Enum.AnimationPriority.Action4
+        -- Action4 существует только в новых версиях — используем pcall
+        local prioOk = pcall(function()
+            track.Priority = Enum.AnimationPriority.Action4
+        end)
+        if not prioOk then
+            pcall(function()
+                track.Priority = Enum.AnimationPriority.Action
+            end)
+        end
+
         track:Play()
         _activeEmoteTrack = track
         success = true
@@ -2258,7 +2265,6 @@ local function processChatMessage(player, rawMessage)
     end
 
     -- v17.5: ReactToMention — отвечаем даже без триггера если упомянули наш ник
-    local myDisplayName = player.Character and Players.LocalPlayer.Name or Players.LocalPlayer.Name
     local msgLowerForMention = rawMessage:lower()
     local mentionHit = settings.ReactToMention
         and (msgLowerForMention:find(Players.LocalPlayer.Name:lower())
@@ -3854,7 +3860,7 @@ sidebarStatus.BackgroundTransparency = THEME.CardTransparency or 0.55
 sidebarStatus.BorderSizePixel = 0
 sidebarStatus.AnchorPoint = Vector2.new(0, 1)
 sidebarStatus.Position = UDim2.new(0, 6, 1, -10)
-sidebarStatus.Size = UDim2.new(1, -12, 0, 110)
+sidebarStatus.Size = UDim2.new(1, -12, 0, 122)
 sidebarStatus.Parent = sidebar
 makeCorner(sidebarStatus, 12)
 makeStroke(sidebarStatus, 1, Color3.fromRGB(255,255,255), 0.82)
@@ -3898,7 +3904,9 @@ local function makeSsRow(lo)
     makeCorner(dot, 999)
 
     local lbl = makeTextLabel(row, "...", 10, "semibold")
-    lbl.Size = UDim2.new(1, -12, 1, 0)
+    -- ФИКС: в горизонтальном UIListLayout нельзя давать Scale.X > 0 — label выходит за рамки.
+    -- dot=6px, gap=5px, padding left=10px right=6px → доступно sidebar(~130px) - 10 - 6 - 6 - 5 = ~103px
+    lbl.Size = UDim2.new(0, 98, 1, 0)
     lbl.TextColor3 = THEME.TextDim
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.TextTruncate = Enum.TextTruncate.AtEnd
