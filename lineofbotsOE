@@ -1261,11 +1261,8 @@ local function getCharacterRigType()
     return "R15"
 end
 
--- R6 анимации — ТОЛЬКО встроенные ID которые работают на клиенте без сервера
--- Кастомные ID каталога (3576XXXXXX, 3360XXXXXX) дают "AnimationClip not valid" на клиенте
--- Используем ТОЛЬКО эти 8 гарантированных ID:
+-- R6 анимации — встроенные ID для R6 скелета
 local R6_ANIM_IDS = {
-    -- Встроенные (100% работают)
     wave     = "507770239",
     laugh    = "507770818",
     cheer    = "507770677",
@@ -1274,34 +1271,64 @@ local R6_ANIM_IDS = {
     dance    = "507771019",
     dance2   = "507776043",
     dance3   = "507777268",
-    -- Маппинг всех кастомных на ближайший встроенный аналог
-    hello    = "507770239",  -- wave (приветствие)
-    shrug    = "507770453",  -- point (нет лучшего варианта)
-    salute   = "507770239",  -- wave
-    tilt     = "507770818",  -- laugh (голова двигается)
-    stadium  = "507770677",  -- cheer
-    shy      = "507770239",  -- wave
-    robot    = "507776043",  -- dance2
-    agree    = "507770677",  -- cheer (да/согласен)
-    disagree = "507770453",  -- point (нет/указать)
-    eyeroll  = "507770818",  -- laugh
-    confused = "507770453",  -- point
-    dizzy    = "507770818",  -- laugh
-    yay      = "507770677",  -- cheer
-    victory  = "507770677",  -- cheer
-    charging = "507770677",  -- cheer
-    sorry    = "507770239",  -- wave
-    facepalm = "507770818",  -- laugh
-    sad      = "507770453",  -- point
+    hello    = "507770239",
+    shrug    = "507770453",
+    salute   = "507770239",
+    tilt     = "507770818",
+    stadium  = "507770677",
+    shy      = "507770239",
+    robot    = "507776043",
+    agree    = "507770677",
+    disagree = "507770453",
+    eyeroll  = "507770818",
+    confused = "507770453",
+    dizzy    = "507770818",
+    yay      = "507770677",
+    victory  = "507770677",
+    charging = "507770677",
+    sorry    = "507770239",
+    facepalm = "507770818",
+    sad      = "507770453",
+}
+
+-- R15 анимации — те же встроенные эмоции но ID для R15 скелета
+-- Используются как фоллбэк когда humanoid:PlayEmote() не работает
+local R15_ANIM_IDS = {
+    wave     = "507770239",
+    laugh    = "507770818",
+    cheer    = "507770677",
+    point    = "507770453",
+    sit      = "2506281703",
+    dance    = "507771019",
+    dance2   = "507776043",
+    dance3   = "507777268",
+    hello    = "507770239",
+    shrug    = "507770453",
+    salute   = "507770239",
+    tilt     = "507770818",
+    stadium  = "507770677",
+    shy      = "507770239",
+    robot    = "507776043",
+    agree    = "507770677",
+    disagree = "507770453",
+    eyeroll  = "507770818",
+    confused = "507770453",
+    dizzy    = "507770818",
+    yay      = "507770677",
+    victory  = "507770677",
+    charging = "507770677",
+    sorry    = "507770239",
+    facepalm = "507770818",
+    sad      = "507770453",
 }
 
 -- Воспроизвести анимацию напрямую через AnimationTrack (R6 и R15)
 local function playAnimDirect(animId, duration)
     local humanoid = getLocalHumanoid()
-    if not humanoid then warn("[ANIM] no humanoid") return false end
+    if not humanoid then return false end
 
     local char = Players.LocalPlayer.Character
-    if not char then warn("[ANIM] no char") return false end
+    if not char then return false end
 
     local animator = humanoid:FindFirstChildOfClass("Animator")
     if not animator then
@@ -1314,48 +1341,36 @@ local function playAnimDirect(animId, duration)
     anim.Parent = humanoid
 
     local track
-    local ok, err = pcall(function()
+    local ok = pcall(function()
         track = animator:LoadAnimation(anim)
     end)
     pcall(function() anim.Parent = nil end)
 
-    if not ok or not track then
-        warn("[ANIM] LoadAnimation failed: "..tostring(err))
-        return false
-    end
+    if not ok or not track then return false end
 
-    warn("[ANIM] Length="..tostring(track.Length))
-
-    -- Устанавливаем максимально возможный приоритет
+    -- Максимальный приоритет
     for _, prio in ipairs({
         Enum.AnimationPriority.Action4,
         Enum.AnimationPriority.Action3,
         Enum.AnimationPriority.Action2,
         Enum.AnimationPriority.Action,
     }) do
-        local pOk = pcall(function() track.Priority = prio end)
-        if pOk then break end
+        if pcall(function() track.Priority = prio end) then break end
     end
 
-    local rigType = getCharacterRigType()
-
-    -- Сохраняем все играющие треки чтобы потом восстановить
-    local savedTracks = {}
+    -- Останавливаем все конкурирующие треки перед воспроизведением
     pcall(function()
         for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
-            table.insert(savedTracks, { track = t, speed = t.Speed })
-            t:Stop(0)  -- мгновенно останавливаем ВСЕ треки
+            t:Stop(0)
         end
     end)
 
     track:Play(0, 1, 1)
-
     _activeEmoteTrack = track
 
     if duration then
         _activeEmoteThread = task.delay(duration, function()
             pcall(function() track:Stop(0.1) end)
-            -- Восстанавливаем остановленные треки (idle/walk вернутся сами через Animate)
             _activeEmoteTrack = nil
             _activeEmoteThread = nil
         end)
@@ -1400,9 +1415,8 @@ local function playEmote(emoteName, duration)
             end)
         end
     else
-        -- PlayEmote не сработал — пробуем через AnimationTrack (фоллбэк R15 + все кастомные)
-        -- R6_ANIM_IDS содержит ID для всех эмоций включая agree/disagree/eyeroll
-        local animId = R6_ANIM_IDS[emoteName]
+        -- PlayEmote не сработал — фоллбэк через AnimationTrack с R15 ID
+        local animId = R15_ANIM_IDS[emoteName]
         if animId then
             playAnimDirect(animId, duration)
         end
