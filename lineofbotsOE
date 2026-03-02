@@ -1262,10 +1262,7 @@ local function getCharacterRigType()
 end
 
 -- R6 анимации — ТОЛЬКО встроенные ID которые работают на клиенте без сервера
--- Кастомные ID каталога (3576XXXXXX, 3360XXXXXX) дают "AnimationClip not valid" на клиенте
--- Используем ТОЛЬКО эти 8 гарантированных ID:
 local R6_ANIM_IDS = {
-    -- Встроенные (100% работают)
     wave     = "507770239",
     laugh    = "507770818",
     cheer    = "507770677",
@@ -1274,26 +1271,91 @@ local R6_ANIM_IDS = {
     dance    = "507771019",
     dance2   = "507776043",
     dance3   = "507777268",
-    -- Маппинг всех кастомных на ближайший встроенный аналог
-    hello    = "507770239",  -- wave (приветствие)
-    shrug    = "507770453",  -- point (нет лучшего варианта)
-    salute   = "507770239",  -- wave
-    tilt     = "507770818",  -- laugh (голова двигается)
-    stadium  = "507770677",  -- cheer
-    shy      = "507770239",  -- wave
-    robot    = "507776043",  -- dance2
-    agree    = "507770677",  -- cheer (да/согласен)
-    disagree = "507770453",  -- point (нет/указать)
-    eyeroll  = "507770818",  -- laugh
-    confused = "507770453",  -- point
-    dizzy    = "507770818",  -- laugh
-    yay      = "507770677",  -- cheer
-    victory  = "507770677",  -- cheer
-    charging = "507770677",  -- cheer
-    sorry    = "507770239",  -- wave
-    facepalm = "507770818",  -- laugh
-    sad      = "507770453",  -- point
+    hello    = "507770239",
+    shrug    = "507770453",
+    salute   = "507770239",
+    tilt     = "507770818",
+    stadium  = "507770677",
+    shy      = "507770239",
+    robot    = "507776043",
+    agree    = "507770677",
+    disagree = "507770453",
+    eyeroll  = "507770818",
+    confused = "507770453",
+    dizzy    = "507770818",
+    yay      = "507770677",
+    victory  = "507770677",
+    charging = "507770677",
+    sorry    = "507770239",
+    facepalm = "507770818",
+    sad      = "507770453",
 }
+
+-- Маппинг эмоции → /e команда чата (работает через сервер, не зависит от Animator)
+local R6_CHAT_EMOTES = {
+    wave     = "wave",
+    laugh    = "laugh",
+    cheer    = "cheer",
+    point    = "point",
+    sit      = "sit",
+    dance    = "dance",
+    dance2   = "dance2",
+    dance3   = "dance3",
+    hello    = "wave",
+    shrug    = "wave",
+    salute   = "wave",
+    tilt     = "laugh",
+    stadium  = "cheer",
+    shy      = "wave",
+    robot    = "dance2",
+    agree    = "cheer",
+    disagree = "point",
+    eyeroll  = "laugh",
+    confused = "point",
+    dizzy    = "laugh",
+    yay      = "cheer",
+    victory  = "cheer",
+    charging = "cheer",
+    sorry    = "wave",
+    facepalm = "laugh",
+    sad      = "point",
+}
+
+-- Отправить /e команду через чат — работает на сервере, не зависит от AnimationTrack
+local function playEmoteViaChat(emoteName)
+    local cmd = R6_CHAT_EMOTES[emoteName]
+    if not cmd then return false end
+
+    -- TextChatService (новый чат)
+    local okNew = pcall(function()
+        local tcs = game:GetService("TextChatService")
+        local channels = tcs:FindFirstChild("TextChannels")
+        local general = channels and (
+            channels:FindFirstChild("RBXGeneral") or
+            channels:FindFirstChild("General") or
+            channels:FindFirstChildOfClass("TextChannel")
+        )
+        if general then
+            general:SendAsync("/e " .. cmd)
+        else
+            error("no channel")
+        end
+    end)
+    if okNew then return true end
+
+    -- Legacy чат
+    local okOld = pcall(function()
+        local rs = game:GetService("ReplicatedStorage")
+        local ev = rs:FindFirstChild("DefaultChatSystemChatEvents")
+            and rs.DefaultChatSystemChatEvents:FindFirstChild("SayMessageRequest")
+        if ev then
+            ev:FireServer("/e " .. cmd, "All")
+        else
+            error("no legacy chat")
+        end
+    end)
+    return okOld
+end
 
 -- Воспроизвести анимацию напрямую через AnimationTrack (R6 и R15)
 local function playAnimDirect(animId, duration)
@@ -1374,7 +1436,10 @@ local function playEmote(emoteName, duration)
     local rigType = getCharacterRigType()
 
     if rigType == "R6" then
-        -- R6: PlayEmote не работает — сразу идём через AnimationTrack
+        -- МЕТОД 1: /e команда через чат (сервер выполняет анимацию — не зависит от Animator игры)
+        local chatOk = playEmoteViaChat(emoteName)
+        if chatOk then return end
+        -- МЕТОД 2: AnimationTrack (фоллбэк если чат недоступен)
         local animId = R6_ANIM_IDS[emoteName]
         if animId then
             playAnimDirect(animId, duration)
