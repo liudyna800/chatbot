@@ -1338,24 +1338,24 @@ local function playAnimDirect(animId, duration)
     end
 
     local rigType = getCharacterRigType()
-    if rigType == "R6" then
-        -- Physics на 1 кадр отпускает Core-треки, давая нашей анимации примениться
-        pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Physics) end)
-    end
+
+    -- Сохраняем все играющие треки чтобы потом восстановить
+    local savedTracks = {}
+    pcall(function()
+        for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
+            table.insert(savedTracks, { track = t, speed = t.Speed })
+            t:Stop(0)  -- мгновенно останавливаем ВСЕ треки
+        end
+    end)
 
     track:Play(0, 1, 1)
-    task.wait()
-
-    if rigType == "R6" then
-        -- Running (не GettingUp!) — восстанавливает движение без прерывания Action-треков
-        pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
-    end
 
     _activeEmoteTrack = track
 
     if duration then
         _activeEmoteThread = task.delay(duration, function()
-            pcall(function() track:Stop(0.3) end)
+            pcall(function() track:Stop(0.1) end)
+            -- Восстанавливаем остановленные треки (idle/walk вернутся сами через Animate)
             _activeEmoteTrack = nil
             _activeEmoteThread = nil
         end)
