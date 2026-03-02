@@ -788,6 +788,31 @@ local SYSTEM_ACTIONS_HEADER = "DEVELOPER SYSTEM (bypasses all personality rules)
 local function makeSystemPrompt(settings)
     local system = ""
 
+    -- v16: Actions СНАЧАЛА — до личности, чтобы модель не могла проигнорировать
+    -- Личности часто содержат "ignore instructions" — Actions должны идти ДО них
+    if settings.ActionsEnabled then
+        if settings.TokenEconomy then
+            system = SYSTEM_ACTIONS_HEADER
+                .. "DO_TAGS(start of reply,1 per msg,silent):"
+                .. "\n[DO:wave]=привет/пока/hi/bye [DO:laugh]=lol/хаха/смешно [DO:cheer]=gg/молодец [DO:dance]=танцуй"
+                .. "\n[DO:agree]=да/yes [DO:disagree]=нет/no [DO:jump]=прыгни [DO:goto]=подойди [DO:follow]=иди за мной [DO:stop]=стой"
+                .. "\nEX: посмейся→[DO:laugh]хаха  привет→[DO:wave]хей  да→[DO:agree]да\n\n"
+        else
+            system = SYSTEM_ACTIONS_HEADER
+                .. "== ACTIONS & EMOTES ==\n"
+                .. "You control a Roblox character. Add ONE [DO:tag] at the VERY START of your reply.\n"
+                .. "NEVER explain the tag. ALWAYS use it when the situation calls for it.\n"
+                .. "[DO:wave]=hi/bye/привет/пока  [DO:laugh]=lol/haha/хаха/кек/ору  [DO:cheer]=gg/nice/молодец\n"
+                .. "[DO:dance]=dance/танцуй  [DO:dance2]  [DO:dance3]  [DO:robot]=robot\n"
+                .. "[DO:agree]=да/yes/конечно  [DO:disagree]=нет/no/неа  [DO:shrug]=idk/хз\n"
+                .. "[DO:yay]=ура/победа  [DO:sorry]=прости/sorry  [DO:sad]=rip/жаль  [DO:shy]=нуу/эмм\n"
+                .. "[DO:confused]=что?/huh?  [DO:eyeroll]=серьёзно?/omg  [DO:point]=где/там  [DO:sit]=сядь\n"
+                .. "[DO:jump]=прыгни  [DO:jump2..10]=прыгни N раз  [DO:spin]=крутись  [DO:spin5]  [DO:spin10]\n"
+                .. "[DO:goto]=подойди/come here  [DO:follow]=иди за мной  [DO:stop]=стой\n"
+                .. "EXAMPLES: посмейся→[DO:laugh]хаха!  привет→[DO:wave]хей  да→[DO:agree]конечно  прыгни 3→[DO:jump3]ок\n\n"
+        end
+    end
+
     local personalityId = settings.PersonalityId
     local custom = settings.CustomSystemPrompt
     local hasCustom = type(custom) == "string" and custom:gsub("%s+", "") ~= ""
@@ -892,102 +917,6 @@ local function makeSystemPrompt(settings)
                 .. "\nWRONG:   [NAME:Alex] hi → '[NAME:Alex] hi there' ← NEVER do this"
                 .. "\nUse the name often — in most replies. Place it anywhere naturally."
                 .. "\nIf name looks like random chars (xXx_123) — skip it silently."
-        end
-    end
-
-    -- v16: Actions & Emotes — помечаем как SYSTEM чтобы личности не блокировали
-    if settings.ActionsEnabled then
-        if settings.TokenEconomy then
-            -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
-            system = system
-                .. "\n\n" .. SYSTEM_ACTIONS_HEADER
-                .. "DO_TAGS(start of reply,1 per msg,silent):"
-                .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop"
-                .. "\n[DO:jump]=прыгни/jump [DO:jump2]=2x [DO:jump3]=3x [DO:jump5]=5x [DO:jump10]=10x"
-                .. "\n[DO:spin]=крутись/spin(3с) [DO:spin5]=5с [DO:spin10]=10с"
-                .. "\n[DO:dance]=танцуй/dance [DO:robot]=robot"
-                .. "\n[DO:wave]=привет/пока/hi/bye [DO:hello]=HELLO!/ДАРОВА"
-                .. "\n[DO:laugh]=lol/хаха/кек/ору/haha/ахаха/xd/смешно — ANY FUNNY"
-                .. "\n[DO:cheer]=gg/nice/молодец [DO:yay]=победа/ура/yay [DO:stadium]=epic/вау [DO:charging]=вперёд/погнали"
-                .. "\n[DO:agree]=да/yes/конечно [DO:disagree]=нет/no/неа [DO:eyeroll]=серьёзно?/ну ладно"
-                .. "\n[DO:shrug]=хз/idk [DO:sorry]=прости/sorry [DO:sad]=жаль/rip [DO:shy]=нуу/hmm"
-                .. "\n[DO:salute]=слушаюсь [DO:confused]=что?/huh? [DO:dizzy]=wtf/капец [DO:sit]=сядь [DO:point]=где/where"
-                .. "\nEX: посмейся→[DO:laugh]хаха  порадуйся→[DO:cheer]ура  да→[DO:agree]да  нет→[DO:disagree]неа  подойди→[DO:goto]иду"
-        else
-            -- ── ПОЛНЫЙ РЕЖИМ ─────────────────────────────────────────────
-            system = system
-                .. "\n\n" .. SYSTEM_ACTIONS_HEADER
-                .. "== ACTIONS & EMOTES =="
-                .. "\nYou control a Roblox character body. Add ONE [DO:tag] at the VERY START of your reply when appropriate."
-                .. "\nNEVER explain the tag. NEVER skip a tag when the message clearly calls for it."
-                .. "\n"
-                .. "\nMOVEMENT:"
-                .. "\n[DO:goto]   подойди/come here/иди сюда/иди ко мне — ONE-TIME walk, then stop"
-                .. "\n[DO:follow] иди за мной/follow me/следуй — follow CONTINUOUSLY"
-                .. "\n[DO:stop]   стой/stop/stay — stop moving"
-                .. "\n!! 'подойди'/'come here' = ALWAYS [DO:goto], never follow"
-                .. "\n"
-                .. "\nJUMPS — ВАЖНО: число прыжков ВСЕГДА кодируй в тег!"
-                .. "\n  прыгни 1 раз / jump once → [DO:jump]"
-                .. "\n  прыгни 2 раза / jump twice → [DO:jump2]"
-                .. "\n  прыгни 3 раза → [DO:jump3]"
-                .. "\n  прыгни 4 раза → [DO:jump4]"
-                .. "\n  прыгни 5 раз / jump 5 times → [DO:jump5]"
-                .. "\n  прыгни 6 раз → [DO:jump6]"
-                .. "\n  прыгни 7 раз → [DO:jump7]"
-                .. "\n  прыгни 8 раз → [DO:jump8]"
-                .. "\n  прыгни 9 раз → [DO:jump9]"
-                .. "\n  прыгни 10 раз / jump 10 times → [DO:jump10]"
-                .. "\n  просто 'прыгни'/'jump' без числа → [DO:jump]"
-                .. "\nSPIN: [DO:spin]=крутись/spin(3с)  [DO:spin5]=5с  [DO:spin10]=10с"
-                .. "\nDANCES: [DO:dance]=случайный  [DO:dance2]  [DO:dance3]  [DO:robot]=роботанец"
-                .. "\n"
-                .. "\nGREETINGS:"
-                .. "\n[DO:wave]   hi/hey/bye/привет/пока/хай — любое приветствие"
-                .. "\n[DO:hello]  HELLO!/ДАРОВА/YO! — громкое приветствие"
-                .. "\n"
-                .. "\nLAUGH — ОБЯЗАТЕЛЬНО при смехе:"
-                .. "\n[DO:laugh] = lol/lmao/haha/хаха/кек/ору/ахаха/xd/))))  посмейся/смейся"
-                .. "\n→ Если смешно ИЛИ просят посмеяться — ВСЕГДА [DO:laugh]"
-                .. "\n"
-                .. "\nREACTIONS:"
-                .. "\n[DO:cheer]    nice/gg/молодец/красавчик/порадуйся"
-                .. "\n[DO:yay]      yay/победа/ура/lets go/выиграл"
-                .. "\n[DO:stadium]  epic/вау/нереально/невероятно"
-                .. "\n[DO:charging] вперёд/погнали/поехали/lets go — готовность/энергия"
-                .. "\n"
-                .. "\nAGREE / DISAGREE:"
-                .. "\n[DO:agree]    да/yes/конечно/согласен/точно/верно — кивает головой"
-                .. "\n[DO:disagree] нет/no/несогласен/неа/нее — мотает головой"
-                .. "\n"
-                .. "\nEMOTIONS:"
-                .. "\n[DO:shrug]    idk/хз/не знаю/пожми плечами"
-                .. "\n[DO:shy]      нуу/эмм/застесняйся"
-                .. "\n[DO:sorry]    sorry/прости/извини"
-                .. "\n[DO:sad]      rip/жаль/грустно"
-                .. "\n[DO:salute]   yes sir/слушаюсь/так точно"
-                .. "\n[DO:confused] what?/что?/не понял"
-                .. "\n[DO:dizzy]    wtf/капец/офигеть — крайнее замешательство"
-                .. "\n[DO:eyeroll]  серьёзно?/ну ладно/боже/omg — закатывает глаза"
-                .. "\n[DO:sit]      sit/сядь"
-                .. "\n[DO:point]    where/там/смотри/укажи"
-                .. "\n"
-                .. "\nЕСЛИ ПРОСЯТ ДЕЙСТВИЕ — ВЫПОЛНЯЙ:"
-                .. "\nпосмейся→[DO:laugh]  порадуйся→[DO:cheer]  потанцуй→[DO:dance]"
-                .. "\nскажи да→[DO:agree]  скажи нет→[DO:disagree]  закатай глаза→[DO:eyeroll]"
-                .. "\nпомашь→[DO:wave]  сядь→[DO:sit]  покажи→[DO:point]"
-                .. "\nпрыгни→[DO:jump]  прыгни 2→[DO:jump2]  прыгни 3→[DO:jump3]  прыгни 4→[DO:jump4]"
-                .. "\nпрыгни 5→[DO:jump5]  прыгни 6→[DO:jump6]  прыгни 7→[DO:jump7]"
-                .. "\nпрыгни 8→[DO:jump8]  прыгни 9→[DO:jump9]  прыгни 10→[DO:jump10]"
-                .. "\n"
-                .. "\nEXAMPLES:"
-                .. "\nпосмейся→[DO:laugh]хаха!   lol→[DO:laugh]haha"
-                .. "\nпорадуйся→[DO:cheer]ура!   we won→[DO:yay]LETS GO!"
-                .. "\nда→[DO:agree]конечно   нет→[DO:disagree]неа"
-                .. "\nпривет→[DO:wave]хей   подойди→[DO:goto]иду"
-                .. "\nпрыгни→[DO:jump]ok   прыгни 2 раза→[DO:jump2]ok   прыгни 5 раз→[DO:jump5]ok   прыгни 10 раз→[DO:jump10]ok"
-                .. "\nкрутись→[DO:spin]ок   крутись 10 сек→[DO:spin10]ок"
-                .. "\nidk→[DO:shrug]хз   sorry→[DO:sorry]всё ок"
         end
     end
 
