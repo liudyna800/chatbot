@@ -1182,25 +1182,13 @@ local CUSTOM_EMOTE_IDS = {
 local _customEmotesLoaded = false
 
 -- Прелоадим кастомные эмоции в HumanoidDescription персонажа
--- Без этого PlayEmote("Hello") вернёт false
+-- ВАЖНО: ApplyDescription заблокирован в большинстве инжекторов (Delta и др.)
+-- Поэтому кастомные эмоции (hello, shrug и т.д.) через PlayEmote не работают
+-- Используем только встроенные: wave, laugh, cheer, point, sit, dance, dance2, dance3
 local function preloadCustomEmotes(humanoid)
-    if _customEmotesLoaded then return end
-    -- task.spawn чтобы WaitForChild не блокировал основной поток
-    task.spawn(function()
-        pcall(function()
-            local desc = humanoid:FindFirstChildOfClass("HumanoidDescription")
-                or humanoid:WaitForChild("HumanoidDescription", 3)
-            if not desc then return end
-
-            local currentEmotes = desc:GetEmotes()
-            for name, id in pairs(CUSTOM_EMOTE_IDS) do
-                currentEmotes[name] = {id}
-            end
-            desc:SetEmotes(currentEmotes)
-            humanoid:ApplyDescription(desc)
-            _customEmotesLoaded = true
-        end)
-    end)
+    -- ApplyDescription не используем — не работает в Delta/executor окружении
+    -- Встроенные эмоции работают без прелоада
+    _customEmotesLoaded = true
 end
 
 -- Флаг включения системы
@@ -1387,42 +1375,44 @@ local function playEmote(emoteName, duration)
     stopCurrentEmote()
 
     local rigType = getCharacterRigType()
-    local char = Players.LocalPlayer.Character
-    warn("[RIG] emote="..tostring(emoteName).." rig="..tostring(rigType).." UpperTorso="..tostring(char and char:FindFirstChild("UpperTorso")~=nil).." Torso="..tostring(char and char:FindFirstChild("Torso")~=nil))
 
-    if rigType == "R6" then
-        local animId = R6_ANIM_IDS[emoteName]
-        warn("[RIG] R6 path animId="..tostring(animId))
-        if animId then
-            local ok = playAnimDirect(animId, duration)
-            warn("[RIG] playAnimDirect ok="..tostring(ok))
+    -- Встроенные эмоции Roblox — работают через PlayEmote на R6 и R15
+    -- wave, laugh, cheer, point, sit, dance, dance2, dance3
+    local builtinName = ({
+        wave="wave", laugh="laugh", cheer="cheer", point="point",
+        sit="sit", dance="dance", dance2="dance2", dance3="dance3",
+        -- маппинг кастомных на ближайший встроенный
+        hello="wave", hi="wave", bye="wave",
+        shrug="point", agree="cheer", disagree="point",
+        yay="cheer", victory="cheer", stadium="cheer", charging="cheer",
+        sorry="wave", sad="point", shy="wave", salute="wave",
+        tilt="laugh", confused="point", dizzy="laugh",
+        eyeroll="laugh", facepalm="laugh",
+        robot="dance2", lol="laugh", haha="laugh",
+    })[emoteName]
+
+    if builtinName then
+        -- PlayEmote работает для встроенных эмоций на R6 и R15
+        local ok, played = pcall(function()
+            return humanoid:PlayEmote(builtinName)
+        end)
+
+        if ok and played then
+            if duration then
+                _activeEmoteThread = task.delay(duration, function()
+                    pcall(function() humanoid:StopAnimations() end)
+                    _activeEmoteThread = nil
+                end)
+            end
+            return
         end
-        return
     end
 
-    -- R15: сначала пробуем PlayEmote (быстрее, надёжнее)
-    -- Убеждаемся что кастомные эмоции загружены
-    if CUSTOM_EMOTE_IDS[emoteName] and not _customEmotesLoaded then
-        preloadCustomEmotes(humanoid)
-    end
-
-    local ok, played = pcall(function()
-        return humanoid:PlayEmote(emoteName)
-    end)
-
-    if ok and played then
-        if duration then
-            _activeEmoteThread = task.delay(duration, function()
-                pcall(function() humanoid:StopAnimations() end)
-                _activeEmoteThread = nil
-            end)
-        end
-    else
-        -- PlayEmote не сработал — фоллбэк через AnimationTrack с R15 ID
-        local animId = R15_ANIM_IDS[emoteName]
-        if animId then
-            playAnimDirect(animId, duration)
-        end
+    -- Фоллбэк: AnimationTrack (если PlayEmote не сработал)
+    local animTable = (rigType == "R6") and R6_ANIM_IDS or R15_ANIM_IDS
+    local animId = animTable[emoteName]
+    if animId then
+        playAnimDirect(animId, duration)
     end
 end
 
@@ -1747,7 +1737,6 @@ end
 -- Выполнить действие по имени. cleanText — уже очищенный текст без тега.
 -- originalUserMsg — оригинальное сообщение пользователя (для умного парсинга прыжков)
 local function executeAction(actionName, sourcePlayer, cleanText, originalUserMsg)
-    warn("[ACT] actionName="..tostring(actionName).." ActionsEnabled="..tostring(ClientSettings.ActionsEnabled))
     if actionName and ClientSettings.ActionsEnabled then
         -- Умный парсинг числа прыжков: если ИИ написал [DO:jump] но в сообщении было число
         -- Например: "прыгни 5 раз" → ИИ пишет [DO:jump] → мы видим 5 → вызываем doJump(5)
