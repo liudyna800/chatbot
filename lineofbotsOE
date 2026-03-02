@@ -1387,12 +1387,15 @@ local function playEmote(emoteName, duration)
     stopCurrentEmote()
 
     local rigType = getCharacterRigType()
+    local char = Players.LocalPlayer.Character
+    warn("[RIG] emote="..tostring(emoteName).." rig="..tostring(rigType).." UpperTorso="..tostring(char and char:FindFirstChild("UpperTorso")~=nil).." Torso="..tostring(char and char:FindFirstChild("Torso")~=nil))
 
     if rigType == "R6" then
-        -- R6: PlayEmote не работает — сразу идём через AnimationTrack
         local animId = R6_ANIM_IDS[emoteName]
+        warn("[RIG] R6 path animId="..tostring(animId))
         if animId then
-            playAnimDirect(animId, duration)
+            local ok = playAnimDirect(animId, duration)
+            warn("[RIG] playAnimDirect ok="..tostring(ok))
         end
         return
     end
@@ -1744,6 +1747,7 @@ end
 -- Выполнить действие по имени. cleanText — уже очищенный текст без тега.
 -- originalUserMsg — оригинальное сообщение пользователя (для умного парсинга прыжков)
 local function executeAction(actionName, sourcePlayer, cleanText, originalUserMsg)
+    warn("[ACT] actionName="..tostring(actionName).." ActionsEnabled="..tostring(ClientSettings.ActionsEnabled))
     if actionName and ClientSettings.ActionsEnabled then
         -- Умный парсинг числа прыжков: если ИИ написал [DO:jump] но в сообщении было число
         -- Например: "прыгни 5 раз" → ИИ пишет [DO:jump] → мы видим 5 → вызываем doJump(5)
