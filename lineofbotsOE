@@ -4487,7 +4487,7 @@ generalScroll.Size = UDim2.new(1, -8, 1, -55)
 generalScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 generalScroll.ScrollBarThickness = 4
 generalScroll.ScrollBarImageTransparency = 0.75
-pcall(function() generalScroll.ScrollBarInset = Enum.ScrollBarInset.ScrollBar end)
+generalScroll.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
 generalScroll.Parent = generalFrame
 
 local generalScrollPad = Instance.new("UIPadding")
@@ -4529,7 +4529,7 @@ behaviorScroll.Size = UDim2.new(1, -8, 1, -55)
 behaviorScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 behaviorScroll.ScrollBarThickness = 4
 behaviorScroll.ScrollBarImageTransparency = 0.75
-pcall(function() behaviorScroll.ScrollBarInset = Enum.ScrollBarInset.ScrollBar end)
+behaviorScroll.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
 behaviorScroll.Parent = behaviorFrame
 
 local behaviorScrollPad = Instance.new("UIPadding")
@@ -4776,7 +4776,7 @@ local function makeRightControlRow(parent, labelText, descText, controlWidth)
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, 42) -- Match ToggleRow height
     row.Parent = parent
-    makeCorner(row, 10)
+    makeCorner(row, 22)
     local st = makeStroke(row, 1, Color3.fromRGB(255,255,255), 0.78)
 
     local pad = Instance.new("UIPadding")
@@ -4819,7 +4819,7 @@ local function makeKeybindRow(parent, labelText, descText, currentKey, onChanged
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, 42) -- Standard height
     row.Parent = parent
-    makeCorner(row, 10)
+    makeCorner(row, 22)
     makeStroke(row, 1, THEME.Stroke, 0.6)
 
     local pad = Instance.new("UIPadding")
@@ -4938,7 +4938,7 @@ local function makeSliderRow(parent, labelText, minVal, maxVal, currentVal, call
     row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
     row.Size = UDim2.new(1, 0, 0, 42)
     row.Parent = parent
-    makeCorner(row, 10)
+    makeCorner(row, 22)
     makeStroke(row, 1, THEME.Stroke, 0.6)
 
     local pad = Instance.new("UIPadding")
@@ -5071,7 +5071,7 @@ local function makeVisualizerCard(parent)
     card.BackgroundColor3 = THEME.Card
     card.Size = UDim2.new(1, 0, 0, 180)
     card.Parent = parent
-    makeCorner(card, 8)
+    makeCorner(card, 22)
     makeStroke(card, 1, THEME.Stroke, THEME.StrokeTransparency or 0.8)
     
     -- Minimap Grid Background
@@ -6097,7 +6097,7 @@ local function refreshUserPicker()
         row.BackgroundTransparency = 0.5
         row.Size = UDim2.new(1, 0, 0, 36)
         row.Parent = userList
-        makeCorner(row, 8)
+        makeCorner(row, 22)
         makeStroke(row, 1, THEME.Stroke, 0.6)
 
         local pad = makePadding(row, 8)
@@ -6224,7 +6224,7 @@ local mod3_list = Instance.new("ScrollingFrame")
 mod3_list.BackgroundTransparency = 1
 mod3_list.BorderSizePixel = 0
 mod3_list.Position = UDim2.new(0, 0, 0, 0)
-mod3_list.Size = UDim2.new(1, 0, 1, 0)
+mod3_list.Size = UDim2.new(1, -8, 1, 0)
 mod3_list.ScrollBarThickness = 4
 mod3_list.ScrollBarImageTransparency = 0.75
 pcall(function()
@@ -6644,7 +6644,7 @@ mod3_rebuild = function()
         row.Size = UDim2.new(1, 0, 0, rowH)
         row.LayoutOrder = 1
         row.Parent = rowWrap
-        makeCorner(row, 14)
+        makeCorner(row, 22)
         -- Keep rows as true "bubbles" (no visible divider/border lines).
         local stroke = makeStroke(row, 1, THEME.Stroke, 1)
         pcall(function()
@@ -7377,7 +7377,7 @@ local function mod2_makeCard(parent)
     card.BackgroundTransparency = 0
     card.BorderSizePixel = 0
     card.Parent = parent
-    makeCorner(card, 16)
+    makeCorner(card, 22)
     makeStroke(card, 1, THEME.Stroke, 0.25)
 
     local grad = Instance.new("UIGradient")
@@ -7636,7 +7636,7 @@ local mod2_listScroll = Instance.new("ScrollingFrame")
 mod2_listScroll.BackgroundTransparency = 1
 mod2_listScroll.BorderSizePixel = 0
 mod2_listScroll.Position = UDim2.new(0, 0, 0, 58)
-mod2_listScroll.Size = UDim2.new(1, 0, 1, -156)
+mod2_listScroll.Size = UDim2.new(1, -8, 1, -156)
 mod2_listScroll.ScrollBarThickness = 3
 mod2_listScroll.ScrollBarImageTransparency = 0.75
 mod2_listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -7835,7 +7835,7 @@ local function mod2_makeRow(entry, layoutOrder)
     row.Size = UDim2.new(1, 0, 0, 60)
     row.LayoutOrder = layoutOrder or 0
     row.Parent = mod2_listScroll
-    makeCorner(row, 14)
+    makeCorner(row, 22)
     local stroke = makeStroke(row, 1, THEME.Stroke, 0.55)
 
     local headshot = Instance.new("ImageLabel")
@@ -8073,7 +8073,7 @@ local function makeModCard(parent, title, subtitle)
     card.BackgroundTransparency = 0
     card.BorderSizePixel = 0
     card.Parent = parent
-    makeCorner(card, 14)
+    makeCorner(card, 22)
     makeStroke(card, 1, THEME.Stroke, 0.25)
 
     local header = Instance.new("Frame")
@@ -8417,6 +8417,7 @@ logScroll.Position = UDim2.new(0, 0, 0, 55)
 logScroll.Size = UDim2.new(1, -8, 1, -55)
 logScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 logScroll.ScrollBarThickness = 4
+logScroll.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
 logScroll.Parent = infoFrame
 
 local logLayout = Instance.new("UIListLayout")
@@ -8459,7 +8460,7 @@ ctLog.BackgroundColor3 = THEME.InputBg
 ctLog.BackgroundTransparency = 0.3
 ctLog.BorderSizePixel = 0
 ctLog.Position = UDim2.new(0, 0, 0, 46)
-ctLog.Size = UDim2.new(1, 0, 1, -104)
+ctLog.Size = UDim2.new(1, -8, 1, -104)
 ctLog.CanvasSize = UDim2.new(0, 0, 0, 0)
 ctLog.ScrollBarThickness = 3
 ctLog.ScrollBarImageTransparency = 0.7
