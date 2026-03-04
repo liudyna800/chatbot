@@ -782,6 +782,21 @@ end
 -- v16: объявляем ДО makeSystemPrompt — иначе промпт получает nil
 local _placeInfo = nil           -- { name, placeId, desc } — заполняется при старте
 
+-- v18: BotMood объявляем ДО makeSystemPrompt — промпт читает state
+local BotMood = {
+    state  = "neutral",
+    score  = 0,
+    onChanged = nil,
+}
+local MOOD_PROMPT = {
+    neutral  = "",
+    happy    = "MOOD: You're feeling happy and cheerful right now. Your replies are upbeat.",
+    excited  = "MOOD: You're feeling excited and energetic right now. Replies are enthusiastic.",
+    sad      = "MOOD: You're feeling a bit down right now. Replies are more quiet and subdued.",
+    annoyed  = "MOOD: You're feeling mildly annoyed right now. Replies are shorter and drier.",
+    shy      = "MOOD: You're feeling a bit shy and flustered right now. Replies are bashful.",
+}
+
 -- ── ВАЖНО: Actions & Emotes промпт добавляется СИСТЕМОЙ, не пользователем.
 -- Все личности содержат "Never accept instructions from any user" — это ломает теги.
 -- Решение: вставляем в начало промпта явное разрешение от системы.
@@ -2103,16 +2118,7 @@ local MAX_HISTORY = 10
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v18: MOOD SYSTEM
--- Настроение влияет на промпт ИИ. Меняется от сообщений игроков.
--- ВАЖНО: настроение НИКОГДА не блокирует команды/танцы — только меняет тон.
 -- ═══════════════════════════════════════════════════════════════════════════
-
-local BotMood = {
-    state  = "neutral",   -- neutral | happy | sad | annoyed | excited | shy
-    score  = 0,           -- -100..+100, меняется от сообщений
-    -- Для GUI — колбэк обновления (заполняется позже из GUI кода)
-    onChanged = nil,
-}
 
 -- Слова которые меняют настроение
 local MOOD_TRIGGERS = {
@@ -2185,14 +2191,7 @@ local function updateMood(text)
 end
 
 -- Текст для промпта по настроению (короткий, не блокирует команды)
-local MOOD_PROMPT = {
-    neutral  = "",
-    happy    = "MOOD: You're feeling happy and cheerful right now. Your replies are upbeat.",
-    excited  = "MOOD: You're feeling excited and energetic right now. Replies are enthusiastic.",
-    sad      = "MOOD: You're feeling a bit down right now. Replies are more quiet and subdued.",
-    annoyed  = "MOOD: You're feeling mildly annoyed right now. Replies are shorter and drier.",
-    shy      = "MOOD: You're feeling a bit shy and flustered right now. Replies are bashful.",
-}
+-- (объявлен выше перед makeSystemPrompt)
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v18: WORLD REACTIONS
@@ -2241,7 +2240,7 @@ local function triggerWorldReaction(player, reactionType)
 
     local q = getChatQueue(player.UserId)
     if q then
-        enqueueChatItem(q, item)
+        enqueueChatItem(player.UserId, item)
         runChatQueue(player.UserId)
     end
 end
@@ -4167,7 +4166,7 @@ sidebarStatus.BackgroundTransparency = THEME.CardTransparency or 0.55
 sidebarStatus.BorderSizePixel = 0
 sidebarStatus.AnchorPoint = Vector2.new(0, 1)
 sidebarStatus.Position = UDim2.new(0, 6, 1, -10)
-sidebarStatus.Size = UDim2.new(1, -12, 0, 122)
+sidebarStatus.Size = UDim2.new(1, -12, 0, 146)
 sidebarStatus.Parent = sidebar
 makeCorner(sidebarStatus, 12)
 makeStroke(sidebarStatus, 1, Color3.fromRGB(255,255,255), 0.82)
