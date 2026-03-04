@@ -896,6 +896,21 @@ local function makeSystemPrompt(settings)
         end
     end
 
+    -- v18: WorldReactions — объясняем ИИ что такое [SYSTEM:] события
+    if settings.WorldReactions then
+        system = system
+            .. "\n\n== WORLD EVENTS =="
+            .. "\nSometimes you receive a message starting with [SYSTEM: ...]. This is NOT from a player — it's an automatic event happening around you in the game world."
+            .. "\nExamples:"
+            .. "\n  [SYSTEM: Alex just jumped near you. React naturally in 1 short sentence.]"
+            .. "\n  [SYSTEM: Bob is staring right at you. Acknowledge them in 1 short sentence.]"
+            .. "\nRULES for [SYSTEM:] events:"
+            .. "\n  - React naturally and briefly — 1 sentence max"
+            .. "\n  - Stay in character"
+            .. "\n  - NEVER print '[SYSTEM:' in your reply"
+            .. "\n  - Respond in the language matching your personality (Russian by default)"
+    end
+
     -- v16: Actions & Emotes — помечаем как SYSTEM чтобы личности не блокировали
     if settings.ActionsEnabled then
         if settings.TokenEconomy then
@@ -2238,7 +2253,9 @@ local function handleQueuedChat(item)
         end
     end
 
-    table.insert(apiMessages, { role = "user", content = "[LANG:" .. getLangForUser(item.cleaned, item.userId) .. "] " .. userContent })
+    -- world items отвечаем на языке личности (RU), не детектируем язык [SYSTEM:] текста
+    local langTag = item.isWorld and "RU" or getLangForUser(item.cleaned, item.userId)
+    table.insert(apiMessages, { role = "user", content = "[LANG:" .. langTag .. "] " .. userContent })
 
     local model = getModel(settings)
     if model == "" then return end
