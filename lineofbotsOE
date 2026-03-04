@@ -4078,9 +4078,8 @@ local function makeSsRow(lo)
     row.LayoutOrder = lo
     row.Parent = sidebarStatus
 
-    -- Точка — позиционируем абсолютно, не через UIListLayout
     local dot = Instance.new("Frame")
-    dot.Size = UDim2.new(0, 7, 0, 7)
+    dot.Size = UDim2.new(0, 6, 0, 6)
     dot.AnchorPoint = Vector2.new(0, 0.5)
     dot.Position = UDim2.new(0, 0, 0.5, 0)
     dot.BackgroundColor3 = Color3.fromRGB(80, 80, 100)
@@ -4089,11 +4088,13 @@ local function makeSsRow(lo)
     makeCorner(dot, 999)
 
     local lbl = makeTextLabel(row, "...", 10, "semibold")
-    lbl.Size = UDim2.new(1, -14, 1, 0)
-    lbl.Position = UDim2.new(0, 12, 0, 0)
+    lbl.Size = UDim2.new(1, -10, 1, 0)
+    lbl.Position = UDim2.new(0, 10, 0, 0)
+    lbl.AnchorPoint = Vector2.new(0, 0)
     lbl.TextColor3 = THEME.TextDim
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.TextTruncate = Enum.TextTruncate.AtEnd
+    lbl.TextYAlignment = Enum.TextYAlignment.Center
     return dot, lbl
 end
 
@@ -4650,11 +4651,17 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     makeCorner(row, 12)
     local st = makeStroke(row, 1, Color3.fromRGB(255,255,255), 0.78)
 
-    -- Точка-индикатор — абсолютно позиционирована, не зависит от padding
+    -- Точка-индикатор — выравниваем по строке заголовка, не по центру всего row
     local dot = Instance.new("Frame")
     dot.Size = UDim2.new(0, 6, 0, 6)
     dot.AnchorPoint = Vector2.new(0, 0.5)
-    dot.Position = UDim2.new(0, 6, 0.5, 0)
+    -- Если есть описание: заголовок на y=8, высота 18 → центр заголовка на y=17
+    -- Если нет описания: центр row
+    dot.Position = UDim2.new(0, 8, 0, hasDesc and 17 or 0)
+    if not hasDesc then
+        dot.AnchorPoint = Vector2.new(0, 0.5)
+        dot.Position = UDim2.new(0, 8, 0.5, 0)
+    end
     dot.BackgroundColor3 = initialState and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(80, 80, 100)
     dot.BackgroundTransparency = 0
     dot.BorderSizePixel = 0
@@ -4662,23 +4669,19 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     dot.Parent = row
     makeCorner(dot, 999)
 
-    local pad = Instance.new("UIPadding")
-    pad.PaddingLeft  = UDim.new(0, 18)
-    pad.PaddingRight = UDim.new(0, 14)
-    pad.Parent = row
-
     local hasDesc = descText and descText ~= ""
     local label = makeTextLabel(row, labelText, 13, "semibold")
     label.Name = "Label"
-    label.Size = UDim2.new(1, -72, 0, 18)
-    label.Position = hasDesc and UDim2.new(0, 0, 0, 8) or UDim2.new(0, 0, 0.5, -9)
+    -- Отступ слева учитывает: 8px до точки + 6px точка + 6px зазор = 20px, справа 14px для switch
+    label.Size = UDim2.new(1, -78, 0, 18)
+    label.Position = hasDesc and UDim2.new(0, 22, 0, 8) or UDim2.new(0, 22, 0.5, -9)
 
     if hasDesc then
         local desc = makeTextLabel(row, descText, 11, "medium")
         desc.Name = "Description"
         desc.TextColor3 = THEME.TextDim
-        desc.Position = UDim2.new(0, 0, 0, 27)
-        desc.Size = UDim2.new(1, -62, 0, 16)
+        desc.Position = UDim2.new(0, 22, 0, 27)
+        desc.Size = UDim2.new(1, -78, 0, 16)
         desc.TextTruncate = Enum.TextTruncate.AtEnd
         desc.ClipsDescendants = false
     end
