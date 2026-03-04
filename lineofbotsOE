@@ -73,7 +73,7 @@ local ClientSettings = {
         groq = "llama-3.1-8b-instant",
     },
     Temperature = 0.7,
-    MaxTokens = 512,
+    MaxTokens = 1024,
     PersonalityId = "Friendly",
     CustomSystemPrompt = "",
     Trigger = {
@@ -1250,6 +1250,21 @@ local function stopCurrentEmote()
         pcall(function() _activeEmoteTrack:Stop(0.3) end)
         _activeEmoteTrack = nil
     end
+    -- Дополнительно: останавливаем все Action-треки через Animator
+    local hum = getLocalHumanoid()
+    local animator = hum and hum:FindFirstChildOfClass("Animator")
+    if animator then
+        pcall(function()
+            for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
+                if t.Priority == Enum.AnimationPriority.Action
+                or t.Priority == Enum.AnimationPriority.Action2
+                or t.Priority == Enum.AnimationPriority.Action3
+                or t.Priority == Enum.AnimationPriority.Action4 then
+                    t:Stop(0.3)
+                end
+            end
+        end)
+    end
 end
 
 -- Определяем тип рига персонажа (R6 или R15)
@@ -1420,7 +1435,24 @@ local function playEmote(emoteName, duration)
             if ok then
                 if duration then
                     _activeEmoteThread = task.delay(duration, function()
-                        pcall(function() playEmoteFn:Invoke("idle") end)
+                        -- Возврат в idle через Animate скрипт
+                        local animateNow = Players.LocalPlayer.Character
+                            and Players.LocalPlayer.Character:FindFirstChild("Animate")
+                        local fn = animateNow and animateNow:FindFirstChild("PlayEmote")
+                        if fn then pcall(function() fn:Invoke("idle") end) end
+                        -- Дополнительно останавливаем все Action треки
+                        local hum = getLocalHumanoid()
+                        local animator = hum and hum:FindFirstChildOfClass("Animator")
+                        if animator then
+                            pcall(function()
+                                for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
+                                    if t.Priority == Enum.AnimationPriority.Action
+                                    or t.Priority == Enum.AnimationPriority.Action2 then
+                                        t:Stop(0.3)
+                                    end
+                                end
+                            end)
+                        end
                         _activeEmoteThread = nil
                     end)
                 end
@@ -1442,7 +1474,20 @@ local function playEmote(emoteName, duration)
         if ok and played then
             if duration then
                 _activeEmoteThread = task.delay(duration, function()
-                    pcall(function() humanoid:StopAnimations() end)
+                    -- Правильная остановка R15 анимации через Animator
+                    local animator = humanoid:FindFirstChildOfClass("Animator")
+                    if animator then
+                        pcall(function()
+                            for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
+                                if t.Priority == Enum.AnimationPriority.Action
+                                or t.Priority == Enum.AnimationPriority.Action2
+                                or t.Priority == Enum.AnimationPriority.Action3
+                                or t.Priority == Enum.AnimationPriority.Action4 then
+                                    t:Stop(0.3)
+                                end
+                            end
+                        end)
+                    end
                     _activeEmoteThread = nil
                 end)
             end
@@ -4198,7 +4243,7 @@ end
     local contentArea = Instance.new("Frame")
     contentArea.BackgroundTransparency = 1
     contentArea.Position = UDim2.new(0, sidebarWidth, 0, 0)
-    contentArea.Size = UDim2.new(1, -sidebarWidth - 8, 1, 0)
+    contentArea.Size = UDim2.new(1, -sidebarWidth - 16, 1, 0)
     contentArea.ClipsDescendants = true
     contentArea.Parent = window
 
