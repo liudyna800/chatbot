@@ -3107,7 +3107,7 @@ local function makeButton(parent, text, icon, style)
     btn.Text = ""
     btn.BackgroundTransparency = 1
     btn.Size = UDim2.new(1, 0, 0, 38)
-    makeCorner(btn, 10)
+    makeCorner(btn, 18)
 
     local content = Instance.new("Frame")
     content.Name = "Content"
@@ -3115,7 +3115,7 @@ local function makeButton(parent, text, icon, style)
     content.BackgroundColor3 = style.BaseBg or THEME.Button
     content.Size = UDim2.new(1, 0, 1, 0)
     content.Parent = btn
-    makeCorner(content, 10)
+    makeCorner(content, 18)
     local contentStroke = makeStroke(content, 1, style.StrokeColor or THEME.Stroke,
         (style.StrokeT ~= nil) and style.StrokeT or THEME.StrokeTransparency)
     contentStroke.Name = "Stroke"
@@ -3223,7 +3223,7 @@ local function pushNotificationInternal(titleText, bodyText, accent, actions)
     card.BorderSizePixel = 0
     card.Parent = wrapper
     
-    makeCorner(card, 12)
+    makeCorner(card, 22)
     
     local glassStroke = Instance.new("UIStroke")
     glassStroke.Color = Color3.fromRGB(255, 255, 255)
@@ -3511,7 +3511,7 @@ local function makeToggle(parent, text, initialState, callback)
     local container = Instance.new("Frame")
     container.BackgroundTransparency = 0
     container.Size = UDim2.new(1, 0, 0, 52)
-    makeCorner(container, 12)
+    makeCorner(container, 22)
     container.BackgroundColor3 = THEME.Card
     makeStroke(container, 1, THEME.Stroke, THEME.StrokeTransparency)
     container.Parent = parent
@@ -3549,7 +3549,7 @@ local function makeToggle(parent, text, initialState, callback)
     knob.AnchorPoint = Vector2.new(0, 0.5)
     knob.Position = initialState and UDim2.new(0, 25, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
     knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    makeCorner(knob, 10)
+    makeCorner(knob, 12)
     knob.Parent = switchBg
 
     -- Тень кнопки (тонкая подсветка снизу)
@@ -4050,7 +4050,7 @@ sidebarStatus.Position = UDim2.new(0, 6, 1, -10)
 sidebarStatus.Size = UDim2.new(1, -12, 0, 116)
 sidebarStatus.ClipsDescendants = true
 sidebarStatus.Parent = sidebar
-makeCorner(sidebarStatus, 12)
+makeCorner(sidebarStatus, 18)
 makeStroke(sidebarStatus, 1, Color3.fromRGB(255,255,255), 0.82)
 
 local ssPad = Instance.new("UIPadding")
@@ -4377,7 +4377,7 @@ local function makeTabButton(name, iconId)
     btn.BackgroundColor3 = THEME.SidebarSelected
     btn.ClipsDescendants = true
     btn.Parent = tabContainer
-    makeCorner(btn, 10)
+    makeCorner(btn, 18)
 
     -- Акцентная полоска (переливается когда активна)
     local strip = Instance.new("Frame")
@@ -4483,7 +4483,7 @@ generalScroll.Name = "GeneralScroll"
 generalScroll.BackgroundTransparency = 1
 generalScroll.BorderSizePixel = 0
 generalScroll.Position = UDim2.new(0, 0, 0, 55)
-generalScroll.Size = UDim2.new(1, 0, 1, -55)
+generalScroll.Size = UDim2.new(1, -8, 1, -55)
 generalScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 generalScroll.ScrollBarThickness = 4
 generalScroll.ScrollBarImageTransparency = 0.75
@@ -4492,7 +4492,7 @@ generalScroll.Parent = generalFrame
 
 local generalScrollPad = Instance.new("UIPadding")
 generalScrollPad.PaddingLeft  = UDim.new(0, 0)
-generalScrollPad.PaddingRight = UDim.new(0, 0)
+generalScrollPad.PaddingRight = UDim.new(0, 8)
 generalScrollPad.Parent = generalScroll
 
 local generalLayout = Instance.new("UIListLayout")
@@ -4525,7 +4525,7 @@ behaviorScroll.Name = "BehaviorScroll"
 behaviorScroll.BackgroundTransparency = 1
 behaviorScroll.BorderSizePixel = 0
 behaviorScroll.Position = UDim2.new(0, 0, 0, 55)
-behaviorScroll.Size = UDim2.new(1, 0, 1, -55)
+behaviorScroll.Size = UDim2.new(1, -8, 1, -55)
 behaviorScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 behaviorScroll.ScrollBarThickness = 4
 behaviorScroll.ScrollBarImageTransparency = 0.75
@@ -4534,7 +4534,7 @@ behaviorScroll.Parent = behaviorFrame
 
 local behaviorScrollPad = Instance.new("UIPadding")
 behaviorScrollPad.PaddingLeft  = UDim.new(0, 0)
-behaviorScrollPad.PaddingRight = UDim.new(0, 0)
+behaviorScrollPad.PaddingRight = UDim.new(0, 8)
 behaviorScrollPad.Parent = behaviorScroll
 
 local behaviorLayout = Instance.new("UIListLayout")
@@ -4566,7 +4566,7 @@ local function makeSectionCard(parent, titleText, subtitleText)
     card.Position = UDim2.new(0, 12, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
     card.Parent = parent
-    makeCorner(card, 12)
+    makeCorner(card, 22)
     -- Белая рамка — ключ к эффекту стекла
     makeStroke(card, 1, Color3.fromRGB(255, 255, 255), 0.72)
 
@@ -4648,7 +4648,7 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     row.BorderSizePixel = 0
     row.Size = UDim2.new(1, 0, 0, descText and descText ~= "" and 56 or 46)
     row.Parent = parent
-    makeCorner(row, 12)
+    makeCorner(row, 22)
     local st = makeStroke(row, 1, Color3.fromRGB(255,255,255), 0.78)
 
     -- Точка-индикатор — выравниваем по строке заголовка, не по центру всего row
@@ -4695,7 +4695,7 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     switchBg.BackgroundColor3 = initialState and THEME.ToggleOn or THEME.ToggleOff
     switchBg.BorderSizePixel = 0
     switchBg.Parent = row
-    makeCorner(switchBg, 12)
+    makeCorner(switchBg, 14)
     local switchStroke = Instance.new("UIStroke")
     switchStroke.Color = Color3.fromRGB(255,255,255)
     switchStroke.Transparency = initialState and 0.7 or 0.92
@@ -5604,14 +5604,14 @@ advDesc.Size = UDim2.new(1, 0, 0, 16)
 local advancedScroll = Instance.new("ScrollingFrame")
 advancedScroll.BackgroundTransparency = 1
 advancedScroll.Position = UDim2.new(0, 0, 0, 55)
-advancedScroll.Size = UDim2.new(1, 0, 1, -55)
+advancedScroll.Size = UDim2.new(1, -8, 1, -55)
 advancedScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 advancedScroll.ScrollBarThickness = 0 -- Hidden per user request
 advancedScroll.Parent = advancedFrame
 
 local advancedScrollPad = Instance.new("UIPadding")
 advancedScrollPad.PaddingLeft  = UDim.new(0, 0)
-advancedScrollPad.PaddingRight = UDim.new(0, 0)
+advancedScrollPad.PaddingRight = UDim.new(0, 8)
 advancedScrollPad.Parent = advancedScroll
 
 local advancedLayout = Instance.new("UIListLayout")
@@ -5989,14 +5989,14 @@ percDesc.Size = UDim2.new(1, 0, 0, 16)
 local perceptionScroll = Instance.new("ScrollingFrame")
 perceptionScroll.BackgroundTransparency = 1
 perceptionScroll.Position = UDim2.new(0, 0, 0, 55)
-perceptionScroll.Size = UDim2.new(1, 0, 1, -55)
+perceptionScroll.Size = UDim2.new(1, -8, 1, -55)
 perceptionScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 perceptionScroll.ScrollBarThickness = 0 -- Hidden per user request
 perceptionScroll.Parent = perceptionFrame
 
 local perceptionScrollPad = Instance.new("UIPadding")
 perceptionScrollPad.PaddingLeft  = UDim.new(0, 0)
-perceptionScrollPad.PaddingRight = UDim.new(0, 0)
+perceptionScrollPad.PaddingRight = UDim.new(0, 8)
 perceptionScrollPad.Parent = perceptionScroll
 
 local perceptionLayout = Instance.new("UIListLayout")
@@ -8194,7 +8194,7 @@ local function createPlayerRow(parentScroll, userId, displayName, name, isBlocke
     row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
     row.BorderSizePixel = 0
     row.Parent = parentScroll
-    makeCorner(row, 12)
+    makeCorner(row, 22)
     local stroke = makeStroke(row, 1, THEME.Stroke, 0.55)
 
     local grad = Instance.new("UIGradient")
@@ -8414,7 +8414,7 @@ infoText.Size = UDim2.new(1, 0, 0, 16)
 local logScroll = Instance.new("ScrollingFrame")
 logScroll.BackgroundTransparency = 1
 logScroll.Position = UDim2.new(0, 0, 0, 55)
-logScroll.Size = UDim2.new(1, 0, 1, -55)
+logScroll.Size = UDim2.new(1, -8, 1, -55)
 logScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 logScroll.ScrollBarThickness = 4
 logScroll.Parent = infoFrame
