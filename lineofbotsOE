@@ -2116,7 +2116,9 @@ task.delay(5, function()
             continue
         end
 
-        local myRoot = getLocalRootPart()
+        -- Берём рут напрямую из LocalPlayer.Character (не через кеш)
+        local myChar = Players.LocalPlayer.Character
+        local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
         if not myRoot then continue end
 
         local myPos  = myRoot.Position
