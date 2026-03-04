@@ -2147,6 +2147,7 @@ task.delay(5, function()
                 enqueueChatItem(uid, {
                     player=p, userId=uid, name=p.Name,
                     displayName=name, cleaned=pool[math.random(#pool)],
+                    isWorld=true,
                 })
                 runChatQueue(uid)
             end
@@ -2166,6 +2167,7 @@ task.delay(5, function()
                         enqueueChatItem(uid, {
                             player=p, userId=uid, name=p.Name,
                             displayName=name, cleaned=pool[math.random(#pool)],
+                            isWorld=true,
                         })
                         runChatQueue(uid)
                     end
@@ -2237,9 +2239,9 @@ end
 
 local function handleQueuedChat(item)
     local settings = ClientSettings
-    if not settings.Enabled or not settings.AutoReply then
-        return
-    end
+    -- world reactions (item.isWorld) работают даже без AutoReply — только Enabled нужен
+    if not settings.Enabled then return end
+    if not item.isWorld and not settings.AutoReply then return end
 
     -- history = nil если память выключена
     local history = getHistory(settings, item.userId)
