@@ -113,6 +113,7 @@ local ClientSettings = {
     FollowMode = "Pathfinding",
     AntiSpam = true,         -- v17.5: игнорировать одинаковые сообщения подряд
     ReactToMention = true,   -- v17.5: реагировать на упоминание своего ника
+    WorldReactions = true,   -- v18: реагировать на прыжки/взгляды игроков рядом
 }
 
 local ClientSecrets = {
@@ -2088,6 +2089,91 @@ end
 local ChatHistory = {}
 local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
 local MAX_HISTORY = 10
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- v18: WORLD REACTIONS
+-- Бот реагирует на прыжки и взгляды игроков в своём радиусе.
+-- Cooldown 60 сек на игрока. task.delay(5) гарантирует что все функции
+-- (enqueueChatItem, runChatQueue и др.) уже объявлены к моменту запуска.
+-- ═══════════════════════════════════════════════════════════════════════════
+local _worldReactCooldowns = {}
+local WORLD_REACT_COOLDOWN  = 60
+
+local function _canWorldReact(userId)
+    local t = _worldReactCooldowns[userId]
+    if t and (os.clock() - t) < WORLD_REACT_COOLDOWN then return false end
+    _worldReactCooldowns[userId] = os.clock()
+    return true
+end
+
+task.delay(5, function()
+    local prevAir = {}
+    while true do
+        task.wait(0.5)
+
+        if not ClientSettings.WorldReactions or not ClientSettings.Enabled then
+            task.wait(5)
+            continue
+        end
+
+        local myRoot = getLocalRootPart()
+        if not myRoot then continue end
+
+        local myPos  = myRoot.Position
+        local radius = ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30
+
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p == Players.LocalPlayer then continue end
+            local char = p.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if not root then continue end
+            if (root.Position - myPos).Magnitude > radius then continue end
+
+            local uid     = p.UserId
+            local reacted = false
+
+            -- Прыжок: переход из земли в воздух
+            local hum      = char:FindFirstChildOfClass("Humanoid")
+            local humState = hum and hum:GetState()
+            local inAir    = humState == Enum.HumanoidStateType.Jumping
+                          or humState == Enum.HumanoidStateType.Freefall
+            if inAir and not prevAir[uid] and _canWorldReact(uid) then
+                reacted = true
+                local name = p.DisplayName or p.Name
+                local pool = {
+                    "[SYSTEM: "..name.." just jumped near you. React naturally in 1 short sentence.]",
+                    "[SYSTEM: "..name.." is jumping around next to you. Notice it briefly in 1 sentence.]",
+                }
+                enqueueChatItem(uid, {
+                    player=p, userId=uid, name=p.Name,
+                    displayName=name, cleaned=pool[math.random(#pool)],
+                })
+                runChatQueue(uid)
+            end
+            prevAir[uid] = inAir
+
+            -- Взгляд: игрок смотрит прямо на нас (dot > 0.93 ≈ угол 22°)
+            if not reacted then
+                local toUs = myRoot.Position - root.Position
+                if toUs.Magnitude > 1 and _canWorldReact(uid) then
+                    local dot = root.CFrame.LookVector:Dot(toUs.Unit)
+                    if dot > 0.93 then
+                        local name = p.DisplayName or p.Name
+                        local pool = {
+                            "[SYSTEM: "..name.." is staring right at you. Acknowledge them in 1 short sentence.]",
+                            "[SYSTEM: "..name.." keeps looking at you. React briefly in 1 sentence.]",
+                        }
+                        enqueueChatItem(uid, {
+                            player=p, userId=uid, name=p.Name,
+                            displayName=name, cleaned=pool[math.random(#pool)],
+                        })
+                        runChatQueue(uid)
+                    end
+                end
+            end
+        end
+    end
+end)
 
 
 
@@ -5170,6 +5256,15 @@ makeToggleRow(
     "Бот реагирует когда кто-то упоминает его ник в чате, даже без триггера.",
     ClientSettings.ReactToMention ~= false,
     function(state) ClientSettings.ReactToMention = state end
+)
+
+-- v18: Реакции на мир
+makeToggleRow(
+    automation,
+    "👀 Реакции на мир",
+    "Бот замечает прыжки и взгляды игроков рядом и реагирует сам. Раз в минуту на каждого игрока.",
+    ClientSettings.WorldReactions ~= false,
+    function(state) ClientSettings.WorldReactions = state end
 )
 
 -- v16: Команды и эмоции
