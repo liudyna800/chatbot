@@ -113,7 +113,7 @@ local ClientSettings = {
     FollowMode = "Pathfinding",
     AntiSpam = true,         -- v17.5: игнорировать одинаковые сообщения подряд
     ReactToMention = true,   -- v17.5: реагировать на упоминание своего ника
-    MoodEnabled = true,      -- v18: система настроения
+    MoodEnabled    = true,   -- v18: система настроения
     WorldReactions = true,   -- v18: реагировать на прыжки/взгляды игроков рядом
 }
 
@@ -782,20 +782,44 @@ end
 -- v16: объявляем ДО makeSystemPrompt — иначе промпт получает nil
 local _placeInfo = nil           -- { name, placeId, desc } — заполняется при старте
 
--- v18: BotMood объявляем ДО makeSystemPrompt — промпт читает state
-local BotMood = {
-    state  = "neutral",
-    score  = 0,
-    onChanged = nil,
-}
+-- v18: BotMood объявлен ДО makeSystemPrompt — промпт читает BotMood.state
+local BotMood = { state = "neutral", score = 0, onChanged = nil }
 local MOOD_PROMPT = {
-    neutral  = "",
-    happy    = "MOOD: You're feeling happy and cheerful right now. Your replies are upbeat.",
-    excited  = "MOOD: You're feeling excited and energetic right now. Replies are enthusiastic.",
-    sad      = "MOOD: You're feeling a bit down right now. Replies are more quiet and subdued.",
-    annoyed  = "MOOD: You're feeling mildly annoyed right now. Replies are shorter and drier.",
-    shy      = "MOOD: You're feeling a bit shy and flustered right now. Replies are bashful.",
+    neutral = "",
+    happy   = "MOOD: You feel happy. Be upbeat. NEVER refuse commands due to mood.",
+    excited = "MOOD: You feel excited. Be enthusiastic. NEVER refuse commands due to mood.",
+    sad     = "MOOD: You feel a bit down. Be quieter. NEVER refuse commands due to mood.",
+    annoyed = "MOOD: You feel mildly annoyed. Be drier. NEVER refuse commands due to mood.",
+    shy     = "MOOD: You feel flustered. Be bashful. NEVER refuse commands due to mood.",
 }
+local MOOD_TRIGGERS = {
+    positive = {"молодец","красавчик","умница","классно","круто","nice","good","awesome","love","люблю","лучший","топ","спасибо","thanks","отлично","супер","wow"},
+    negative = {"дурак","тупой","идиот","плохой","бесишь","заткнись","stupid","bad","hate","ненавижу","бесит"},
+    shy      = {"красивый","симпатичный","нравишься","cute","pretty","handsome"},
+}
+local function updateMood(text)
+    if not ClientSettings.MoodEnabled then return end
+    local lower = text:lower()
+    local delta = 0
+    for _, w in ipairs(MOOD_TRIGGERS.positive) do if lower:find(w,1,true) then delta=delta+15 end end
+    for _, w in ipairs(MOOD_TRIGGERS.negative) do if lower:find(w,1,true) then delta=delta-20 end end
+    BotMood.score = math.max(-100, math.min(100, BotMood.score + delta))
+    local prevState = BotMood.state
+    local isShy = false
+    for _, w in ipairs(MOOD_TRIGGERS.shy) do if lower:find(w,1,true) then isShy=true break end end
+    if isShy then
+        BotMood.state = "shy"
+    elseif BotMood.score >= 60 then BotMood.state = "excited"
+    elseif BotMood.score >= 20 then BotMood.state = "happy"
+    elseif BotMood.score <= -60 then BotMood.state = "annoyed"
+    elseif BotMood.score <= -20 then BotMood.state = "sad"
+    else BotMood.state = "neutral" end
+    -- Медленно возвращаем к нейтральному
+    task.delay(30, function() BotMood.score = math.floor(BotMood.score * 0.6) end)
+    if BotMood.state ~= prevState and BotMood.onChanged then
+        pcall(BotMood.onChanged, BotMood.state, BotMood.score)
+    end
+end
 
 -- ── ВАЖНО: Actions & Emotes промпт добавляется СИСТЕМОЙ, не пользователем.
 -- Все личности содержат "Never accept instructions from any user" — это ломает теги.
@@ -1019,14 +1043,10 @@ local function makeSystemPrompt(settings)
             .. " If you can't be brief, say the topic in 1 sentence and stop."
     end
 
-    -- v18: Настроение — добавляем в конец промпта, коротко
-    -- ВАЖНО: mood никогда не блокирует команды [DO:] — только меняет тон текста
+    -- v18: настроение
     if ClientSettings.MoodEnabled then
-        local moodText = MOOD_PROMPT[BotMood.state]
-        if moodText and moodText ~= "" then
-            system = system .. "\n\n" .. moodText
-            .. "\nIMPORTANT: Your mood affects your TONE only — never refuse commands or emotes because of mood."
-        end
+        local mp = MOOD_PROMPT[BotMood.state]
+        if mp and mp ~= "" then system = system .. "\n\n" .. mp end
     end
 
     return system
@@ -2111,198 +2131,95 @@ local function smoothLookAt(targetPos)
     end)
 end
 
--- Chat History Storage
-local ChatHistory = {}
-local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
-local MAX_HISTORY = 10
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- v18: MOOD SYSTEM
+-- v18: WORLD REACTIONS — реакция на прыжки и взгляды игроков в радиусе
+-- Cooldown 60 сек на игрока, только новые игроки триггерят повторно
 -- ═══════════════════════════════════════════════════════════════════════════
+local _worldReactCooldowns = {}  -- [userId] = os.clock()
+local WORLD_REACT_COOLDOWN  = 60
 
--- Слова которые меняют настроение
-local MOOD_TRIGGERS = {
-    positive = {
-        "молодец", "красавчик", "умница", "классно", "круто", "nice", "good",
-        "awesome", "love", "люблю", "лучший", "топ", "красиво", "wow", "супер",
-        "спасибо", "thanks", "отлично", "👍", "❤️", "🔥",
-    },
-    negative = {
-        "дурак", "тупой", "идиот", "плохой", "бесишь", "стоп", "заткнись",
-        "stupid", "bad", "hate", "ненавижу", "бесит", "раздражает", "👎",
-    },
-    excited = {
-        "танцуй", "прыгай", "крутись", "dance", "jump", "spin", "вперёд",
-        "давай", "go", "lets go", "погнали", "ура", "yay",
-    },
-    shy = {
-        "красивый", "симпатичный", "нравишься", "cute", "pretty", "handsome",
-        "флирт", "мне нравишься",
-    },
-}
-
-local function updateMood(text)
-    if not ClientSettings.MoodEnabled then return end
-    local lower = text:lower()
-    local delta = 0
-
-    for _, w in ipairs(MOOD_TRIGGERS.positive) do
-        if lower:find(w, 1, true) then delta = delta + 15 end
-    end
-    for _, w in ipairs(MOOD_TRIGGERS.negative) do
-        if lower:find(w, 1, true) then delta = delta - 20 end
-    end
-    for _, w in ipairs(MOOD_TRIGGERS.excited) do
-        if lower:find(w, 1, true) then delta = delta + 10 end
-    end
-    for _, w in ipairs(MOOD_TRIGGERS.shy) do
-        if lower:find(w, 1, true) then delta = delta + 8 end
-    end
-
-    BotMood.score = math.max(-100, math.min(100, BotMood.score + delta))
-
-    -- Определяем состояние по score
-    local prevState = BotMood.state
-    if BotMood.score >= 60 then
-        BotMood.state = "excited"
-    elseif BotMood.score >= 20 then
-        BotMood.state = "happy"
-    elseif BotMood.score <= -60 then
-        BotMood.state = "annoyed"
-    elseif BotMood.score <= -20 then
-        BotMood.state = "sad"
-    else
-        BotMood.state = "neutral"
-    end
-
-    -- Особый случай: флирт → shy
-    for _, w in ipairs(MOOD_TRIGGERS.shy) do
-        if lower:find(w, 1, true) then BotMood.state = "shy" break end
-    end
-
-    -- Медленное возвращение к нейтральному со временем
-    task.delay(30, function()
-        BotMood.score = BotMood.score * 0.7
-    end)
-
-    if BotMood.onChanged then
-        pcall(BotMood.onChanged, BotMood.state, BotMood.score)
-    end
-end
-
--- Текст для промпта по настроению (короткий, не блокирует команды)
--- (объявлен выше перед makeSystemPrompt)
-
--- ═══════════════════════════════════════════════════════════════════════════
--- v18: WORLD REACTIONS
--- Бот реагирует на прыжки и взгляды игроков в радиусе раз в минуту на игрока
--- ═══════════════════════════════════════════════════════════════════════════
-
-local _worldReactCooldowns = {}  -- userId → os.clock() последней реакции
-local _worldReactSeenPlayers = {} -- userId → true (уже видели этого игрока, не реагируем повторно на "новый")
-local WORLD_REACT_COOLDOWN = 60  -- секунд между реакциями на одного игрока
-
-local function canWorldReact(userId)
-    local last = _worldReactCooldowns[userId]
-    if last and (os.clock() - last) < WORLD_REACT_COOLDOWN then return false end
+local function _canWorldReact(userId)
+    local t = _worldReactCooldowns[userId]
+    if t and (os.clock() - t) < WORLD_REACT_COOLDOWN then return false end
     _worldReactCooldowns[userId] = os.clock()
     return true
 end
 
-local function triggerWorldReaction(player, reactionType)
+local function _fireWorldReaction(player, kind)
     if not ClientSettings.WorldReactions then return end
-    if not ClientSettings.Enabled then return end
-    if not canWorldReact(player.UserId) then return end
+    if not ClientSettings.Enabled         then return end
+    if not _canWorldReact(player.UserId)  then return end
 
-    -- Формируем фейковый chat item и кидаем в очередь
-    local prompts = {
+    local name = player.DisplayName or player.Name
+    local msgs = {
         jump = {
-            "[SYSTEM: " .. (player.DisplayName or player.Name) .. " just jumped near you. React briefly and naturally — notice it, say something short.]",
-            "[SYSTEM: " .. (player.DisplayName or player.Name) .. " is jumping around near you. Acknowledge it naturally in 1 sentence.]",
+            "[SYSTEM: "..name.." just jumped near you. React briefly in 1 sentence.]",
+            "[SYSTEM: "..name.." keeps jumping around. Say something short about it.]",
         },
         look = {
-            "[SYSTEM: " .. (player.DisplayName or player.Name) .. " is looking directly at you. React briefly — say hi or acknowledge them naturally.]",
-            "[SYSTEM: Someone (" .. (player.DisplayName or player.Name) .. ") has been staring at you. React naturally in 1 short sentence.]",
+            "[SYSTEM: "..name.." is staring at you. Acknowledge them naturally in 1 sentence.]",
+            "[SYSTEM: "..name.." is looking right at you. React briefly.]",
         },
     }
-
-    local pool = prompts[reactionType] or prompts.jump
-    local msg = pool[math.random(1, #pool)]
+    local pool = msgs[kind] or msgs.jump
+    local text = pool[math.random(#pool)]
 
     local item = {
         player      = player,
         userId      = player.UserId,
         name        = player.Name,
-        displayName = player.DisplayName or player.Name,
-        cleaned     = msg,
-        isWorld     = true,  -- пометка что это world reaction, не обычный чат
+        displayName = name,
+        cleaned     = text,
+        isWorld     = true,
     }
-
-    local q = getChatQueue(player.UserId)
-    if q then
-        enqueueChatItem(player.UserId, item)
-        runChatQueue(player.UserId)
-    end
+    enqueueChatItem(player.UserId, item)
+    runChatQueue(player.UserId)
 end
 
--- Монитор: следим за прыжками и взглядами в радиусе
-local _worldReactThread = nil
-local function startWorldReactMonitor()
-    if _worldReactThread then return end
-    _worldReactThread = task.spawn(function()
-        local prevJumpState = {}  -- userId → bool (был ли в воздухе)
-        while true do
-            task.wait(0.5)
-            if not ClientSettings.WorldReactions or not ClientSettings.Enabled then
-                task.wait(5)
-                continue
+task.delay(4, function()
+    local prevAir = {}
+    while true do
+        task.wait(0.5)
+        if not ClientSettings.WorldReactions or not ClientSettings.Enabled then
+            task.wait(5) continue
+        end
+        local myRoot = getLocalRootPart()
+        if not myRoot then continue end
+        local myPos  = myRoot.Position
+        local radius = ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p == Players.LocalPlayer then continue end
+            local char = p.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if not root then continue end
+            if (root.Position - myPos).Magnitude > radius then continue end
+            local uid = p.UserId
+            -- Прыжок
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            local inAir = hum and (
+                hum:GetState() == Enum.HumanoidStateType.Jumping or
+                hum:GetState() == Enum.HumanoidStateType.Freefall)
+            if inAir and not prevAir[uid] then
+                task.spawn(_fireWorldReaction, p, "jump")
             end
-
-            local myRoot = getLocalRootPart()
-            if not myRoot then continue end
-
-            local myPos  = myRoot.Position
-            local myLook = myRoot.CFrame.LookVector
-            local radius = (ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30)
-
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p == Players.LocalPlayer then continue end
-                local char = p.Character
-                local root = char and char:FindFirstChild("HumanoidRootPart")
-                if not root then continue end
-
-                local dist = (root.Position - myPos).Magnitude
-                if dist > radius then continue end
-
-                local uid = p.UserId
-
-                -- Реакция на прыжок
-                local humanoid = char:FindFirstChildOfClass("Humanoid")
-                local inAir = humanoid and (
-                    humanoid:GetState() == Enum.HumanoidStateType.Jumping or
-                    humanoid:GetState() == Enum.HumanoidStateType.Freefall
-                )
-                if inAir and not prevJumpState[uid] then
-                    -- Новый прыжок
-                    task.spawn(function() triggerWorldReaction(p, "jump") end)
-                end
-                prevJumpState[uid] = inAir
-
-                -- Реакция на взгляд: игрок смотрит прямо на нас
-                local theirLook = root.CFrame.LookVector
-                local toUs = (myRoot.Position - root.Position)
-                if toUs.Magnitude > 0.1 then
-                    local dot = theirLook:Dot(toUs.Unit)
-                    if dot > 0.92 then  -- ~23° угол — смотрит прямо на нас
-                        task.spawn(function() triggerWorldReaction(p, "look") end)
-                    end
+            prevAir[uid] = inAir
+            -- Взгляд на нас
+            local toUs = (myRoot.Position - root.Position)
+            if toUs.Magnitude > 1 then
+                local dot = root.CFrame.LookVector:Dot(toUs.Unit)
+                if dot > 0.93 then
+                    task.spawn(_fireWorldReaction, p, "look")
                 end
             end
         end
-    end)
-end
+    end
+end)
 
-task.delay(3, startWorldReactMonitor)
+-- Chat History Storage
+local ChatHistory = {}
+local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
+local MAX_HISTORY = 10
 
 
 
@@ -2581,8 +2498,8 @@ local function processChatMessage(player, rawMessage)
     local message = normalizeOneLine(rawMessage)
     if message == "" then return end
 
-    -- v18: обновляем настроение по тексту сообщения
-    updateMood(rawMessage)
+    -- v18: обновляем настроение
+    if ClientSettings.MoodEnabled then task.spawn(function() updateMood(rawMessage) end) end
 
     -- Selective Mode Check
     if settings.Range.SelectiveMode then
@@ -4166,7 +4083,7 @@ sidebarStatus.BackgroundTransparency = THEME.CardTransparency or 0.55
 sidebarStatus.BorderSizePixel = 0
 sidebarStatus.AnchorPoint = Vector2.new(0, 1)
 sidebarStatus.Position = UDim2.new(0, 6, 1, -10)
-sidebarStatus.Size = UDim2.new(1, -12, 0, 146)
+sidebarStatus.Size = UDim2.new(1, -12, 0, 148)
 sidebarStatus.Parent = sidebar
 makeCorner(sidebarStatus, 12)
 makeStroke(sidebarStatus, 1, Color3.fromRGB(255,255,255), 0.82)
@@ -4226,21 +4143,18 @@ local dotMem,   lblMem   = makeSsRow(4)
 local dotModel, lblModel = makeSsRow(5)
 local dotMood,  lblMood  = makeSsRow(6)
 
--- v18: Цвета и эмодзи для каждого настроения
 local MOOD_UI = {
-    neutral  = { color = Color3.fromRGB(150, 150, 170), icon = "😐" },
-    happy    = { color = Color3.fromRGB(80,  220, 120), icon = "😊" },
-    excited  = { color = Color3.fromRGB(255, 200,  50), icon = "🤩" },
-    sad      = { color = Color3.fromRGB(100, 140, 220), icon = "😔" },
-    annoyed  = { color = Color3.fromRGB(220,  80,  80), icon = "😤" },
-    shy      = { color = Color3.fromRGB(255, 150, 200), icon = "😳" },
+    neutral  = {c=Color3.fromRGB(150,150,170), icon="😐"},
+    happy    = {c=Color3.fromRGB(80,220,120),  icon="😊"},
+    excited  = {c=Color3.fromRGB(255,200,50),  icon="🤩"},
+    sad      = {c=Color3.fromRGB(100,140,220), icon="😔"},
+    annoyed  = {c=Color3.fromRGB(220,80,80),   icon="😤"},
+    shy      = {c=Color3.fromRGB(255,150,200), icon="😳"},
 }
-
--- Регистрируем колбэк обновления индикатора
 BotMood.onChanged = function(state, score)
     local m = MOOD_UI[state] or MOOD_UI.neutral
-    dotMood.BackgroundColor3 = m.color
-    lblMood.Text = m.icon .. " " .. state .. " (" .. math.floor(score) .. ")"
+    dotMood.BackgroundColor3 = m.c
+    lblMood.Text = m.icon.." "..state
 end
 
 local function updateCtStatus()
@@ -4268,14 +4182,9 @@ local function updateCtStatus()
     lblModel.Text = short
 
     -- v18: настроение
-    if s.MoodEnabled then
-        local m = MOOD_UI[BotMood.state] or MOOD_UI.neutral
-        dotMood.BackgroundColor3 = m.color
-        lblMood.Text = m.icon .. " " .. BotMood.state
-    else
-        dotMood.BackgroundColor3 = Color3.fromRGB(80, 80, 90)
-        lblMood.Text = "Настроение: выкл"
-    end
+    local m = MOOD_UI[BotMood.state] or MOOD_UI.neutral
+    dotMood.BackgroundColor3 = ClientSettings.MoodEnabled and m.c or Color3.fromRGB(80,80,90)
+    lblMood.Text = ClientSettings.MoodEnabled and (m.icon.." "..BotMood.state) or "Настроение: выкл"
 end
 
 -- Автообновление статуса каждые 3 секунды
@@ -5418,18 +5327,15 @@ makeToggleRow(
     function(state) ClientSettings.ReactToMention = state end
 )
 
--- v18: Система настроения
+-- v18: Настроение
 makeToggleRow(
     automation,
     "🎭 Настроение",
-    "Бот меняет тон ответов в зависимости от общения. Добрые слова = хорошее настроение. Грубость = плохое. Команды и танцы работают всегда.",
+    "Бот меняет тон от общения. Добрые слова = хорошее настроение, грубость = плохое. Команды и танцы работают при любом настроении.",
     ClientSettings.MoodEnabled ~= false,
     function(state)
         ClientSettings.MoodEnabled = state
-        if not state then
-            BotMood.state = "neutral"
-            BotMood.score = 0
-        end
+        if not state then BotMood.state="neutral" BotMood.score=0 end
     end
 )
 
@@ -5437,7 +5343,7 @@ makeToggleRow(
 makeToggleRow(
     automation,
     "👀 Реакции на мир",
-    "Бот замечает если кто-то прыгает рядом или смотрит на него — и реагирует. Раз в минуту на игрока.",
+    "Бот замечает прыжки и взгляды игроков рядом и реагирует. Раз в минуту на игрока, только в радиусе.",
     ClientSettings.WorldReactions ~= false,
     function(state) ClientSettings.WorldReactions = state end
 )
