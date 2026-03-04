@@ -2105,90 +2105,7 @@ local function _canWorldReact(userId)
     _worldReactCooldowns[userId] = os.clock()
     return true
 end
-
-task.delay(5, function()
-    local prevAir = {}
-    local tickCount = 0
-    while true do
-        task.wait(0.5)
-        tickCount = tickCount + 1
-
-        if not ClientSettings.WorldReactions or not ClientSettings.Enabled then
-            task.wait(5)
-            continue
-        end
-
-        -- Берём рут напрямую из LocalPlayer.Character (не через кеш)
-        local myChar = Players.LocalPlayer.Character
-        local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
-
-        -- Каждые 10 тиков (~5 сек) пишем статус
-        if tickCount % 10 == 0 then
-            local allPlayers = Players:GetPlayers()
-            warn("[WORLD] tick="..tickCount.." myRoot="..tostring(myRoot~=nil).." players="..#allPlayers)
-        end
-
-        if not myRoot then continue end
-
-        local myPos  = myRoot.Position
-        local radius = ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30
-
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p == Players.LocalPlayer then continue end
-            local char = p.Character
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if not root then continue end
-            if (root.Position - myPos).Magnitude > radius then continue end
-
-            local uid     = p.UserId
-            local reacted = false
-
-            -- Прыжок: переход из земли в воздух
-            local hum      = char:FindFirstChildOfClass("Humanoid")
-            local humState = hum and hum:GetState()
-            local inAir    = humState == Enum.HumanoidStateType.Jumping
-                          or humState == Enum.HumanoidStateType.Freefall
-            if inAir and not prevAir[uid] and _canWorldReact(uid) then
-                reacted = true
-                local name = p.DisplayName or p.Name
-                warn("[WORLD] jump detected from "..name.." enqueuing...")
-                local pool = {
-                    "[SYSTEM: "..name.." just jumped near you. React naturally in 1 short sentence.]",
-                    "[SYSTEM: "..name.." is jumping around next to you. Notice it briefly in 1 sentence.]",
-                }
-                enqueueChatItem(uid, {
-                    player=p, userId=uid, name=p.Name,
-                    displayName=name, cleaned=pool[math.random(#pool)],
-                    isWorld=true,
-                })
-                warn("[WORLD] runChatQueue called for "..tostring(uid))
-                runChatQueue(uid)
-            end
-            prevAir[uid] = inAir
-
-            -- Взгляд: игрок смотрит прямо на нас (dot > 0.93 ≈ угол 22°)
-            if not reacted then
-                local toUs = myRoot.Position - root.Position
-                if toUs.Magnitude > 1 and _canWorldReact(uid) then
-                    local dot = root.CFrame.LookVector:Dot(toUs.Unit)
-                    if dot > 0.93 then
-                        local name = p.DisplayName or p.Name
-                        local pool = {
-                            "[SYSTEM: "..name.." is staring right at you. Acknowledge them in 1 short sentence.]",
-                            "[SYSTEM: "..name.." keeps looking at you. React briefly in 1 sentence.]",
-                        }
-                        enqueueChatItem(uid, {
-                            player=p, userId=uid, name=p.Name,
-                            displayName=name, cleaned=pool[math.random(#pool)],
-                            isWorld=true,
-                        })
-                        runChatQueue(uid)
-                    end
-                end
-            end
-        end
-    end
-end)
+-- (монитор запускается ниже после объявления runChatQueue)
 
 
 
@@ -2255,7 +2172,6 @@ local function handleQueuedChat(item)
     -- world reactions (item.isWorld) работают даже без AutoReply — только Enabled нужен
     if not settings.Enabled then return end
     if not item.isWorld and not settings.AutoReply then return end
-    warn("[WORLD] handleQueuedChat reached, isWorld="..tostring(item.isWorld).." cleaned="..tostring(item.cleaned):sub(1,60))
 
     -- history = nil если память выключена
     local history = getHistory(settings, item.userId)
@@ -2403,6 +2319,70 @@ local function runChatQueue(userId)
         q.running = false
     end)
 end
+
+-- v18: WORLD REACTIONS монитор — здесь runChatQueue уже объявлена
+task.delay(5, function()
+    local prevAir = {}
+    while true do
+        task.wait(0.5)
+        if not ClientSettings.WorldReactions or not ClientSettings.Enabled then
+            task.wait(5) continue
+        end
+        local myChar = Players.LocalPlayer.Character
+        local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
+        if not myRoot then continue end
+        local myPos  = myRoot.Position
+        local radius = ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p == Players.LocalPlayer then continue end
+            local char = p.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if not root then continue end
+            if (root.Position - myPos).Magnitude > radius then continue end
+            local uid     = p.UserId
+            local reacted = false
+            -- Прыжок
+            local hum      = char:FindFirstChildOfClass("Humanoid")
+            local humState = hum and hum:GetState()
+            local inAir    = humState == Enum.HumanoidStateType.Jumping
+                          or humState == Enum.HumanoidStateType.Freefall
+            if inAir and not prevAir[uid] and _canWorldReact(uid) then
+                reacted = true
+                local name = p.DisplayName or p.Name
+                local msgs = {
+                    "[SYSTEM: "..name.." just jumped near you. React naturally in 1 short sentence.]",
+                    "[SYSTEM: "..name.." is jumping around next to you. Notice it briefly.]",
+                }
+                enqueueChatItem(uid, {
+                    player=p, userId=uid, name=p.Name,
+                    displayName=name, cleaned=msgs[math.random(#msgs)],
+                    isWorld=true,
+                })
+                runChatQueue(uid)
+            end
+            prevAir[uid] = inAir
+            -- Взгляд
+            if not reacted then
+                local toUs = myRoot.Position - root.Position
+                if toUs.Magnitude > 1 and _canWorldReact(uid) then
+                    if root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 then
+                        local name = p.DisplayName or p.Name
+                        local msgs = {
+                            "[SYSTEM: "..name.." is staring right at you. Acknowledge them in 1 short sentence.]",
+                            "[SYSTEM: "..name.." keeps looking at you. React briefly.]",
+                        }
+                        enqueueChatItem(uid, {
+                            player=p, userId=uid, name=p.Name,
+                            displayName=name, cleaned=msgs[math.random(#msgs)],
+                            isWorld=true,
+                        })
+                        runChatQueue(uid)
+                    end
+                end
+            end
+        end
+    end
+end)
 
 -- v17.5: Антиспам — один словарь на весь модуль
 local _lastMsgPerUser = {}
