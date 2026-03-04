@@ -2140,6 +2140,7 @@ task.delay(5, function()
             if inAir and not prevAir[uid] and _canWorldReact(uid) then
                 reacted = true
                 local name = p.DisplayName or p.Name
+                warn("[WORLD] jump detected from "..name.." enqueuing...")
                 local pool = {
                     "[SYSTEM: "..name.." just jumped near you. React naturally in 1 short sentence.]",
                     "[SYSTEM: "..name.." is jumping around next to you. Notice it briefly in 1 sentence.]",
@@ -2149,6 +2150,7 @@ task.delay(5, function()
                     displayName=name, cleaned=pool[math.random(#pool)],
                     isWorld=true,
                 })
+                warn("[WORLD] runChatQueue called for "..tostring(uid))
                 runChatQueue(uid)
             end
             prevAir[uid] = inAir
@@ -2242,6 +2244,7 @@ local function handleQueuedChat(item)
     -- world reactions (item.isWorld) работают даже без AutoReply — только Enabled нужен
     if not settings.Enabled then return end
     if not item.isWorld and not settings.AutoReply then return end
+    warn("[WORLD] handleQueuedChat reached, isWorld="..tostring(item.isWorld).." cleaned="..tostring(item.cleaned):sub(1,60))
 
     -- history = nil если память выключена
     local history = getHistory(settings, item.userId)
@@ -4004,7 +4007,7 @@ sidebarTitle.TextColor3 = THEME.Text  -- статичный белый — ни�
 sidebarTitle.Position = UDim2.new(0, 22, 0, 14)
 sidebarTitle.Size = UDim2.new(1, -24, 0, 20)
 
-local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v17.5 Shell", 10, "semibold")
+local sidebarSubtitle = makeTextLabel(sidebarLogoArea, "v18 Shell", 10, "semibold")
 sidebarSubtitle.TextColor3 = THEME.TextDim
 sidebarSubtitle.Position = UDim2.new(0, 22, 0, 36)
 sidebarSubtitle.Size = UDim2.new(1, -24, 0, 13)
