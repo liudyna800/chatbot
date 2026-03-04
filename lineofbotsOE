@@ -786,11 +786,12 @@ local _placeInfo = nil           -- { name, placeId, desc } — заполняе
 local BotMood = { state = "neutral", score = 0, onChanged = nil }
 local MOOD_PROMPT = {
     neutral = "",
-    happy   = "MOOD: You feel happy. Be upbeat. NEVER refuse commands due to mood.",
-    excited = "MOOD: You feel excited. Be enthusiastic. NEVER refuse commands due to mood.",
-    sad     = "MOOD: You feel a bit down. Be quieter. NEVER refuse commands due to mood.",
-    annoyed = "MOOD: You feel mildly annoyed. Be drier. NEVER refuse commands due to mood.",
-    shy     = "MOOD: You feel flustered. Be bashful. NEVER refuse commands due to mood.",
+    -- Без языковых слов — только инструкция тона, не влияет на язык ответа
+    happy   = "[MOOD:happy] Tone: cheerful and upbeat. Commands/emotes: always execute regardless of mood.",
+    excited = "[MOOD:excited] Tone: energetic and enthusiastic. Commands/emotes: always execute regardless of mood.",
+    sad     = "[MOOD:sad] Tone: quiet and subdued. Commands/emotes: always execute regardless of mood.",
+    annoyed = "[MOOD:annoyed] Tone: dry and brief. Commands/emotes: always execute regardless of mood.",
+    shy     = "[MOOD:shy] Tone: bashful and flustered. Commands/emotes: always execute regardless of mood.",
 }
 local MOOD_TRIGGERS = {
     positive = {"молодец","красавчик","умница","классно","круто","nice","good","awesome","love","люблю","лучший","топ","спасибо","thanks","отлично","супер","wow"},
@@ -809,14 +810,14 @@ local function updateMood(text)
     for _, w in ipairs(MOOD_TRIGGERS.shy) do if lower:find(w,1,true) then isShy=true break end end
     if isShy then
         BotMood.state = "shy"
-    elseif BotMood.score >= 60 then BotMood.state = "excited"
-    elseif BotMood.score >= 20 then BotMood.state = "happy"
-    elseif BotMood.score <= -60 then BotMood.state = "annoyed"
-    elseif BotMood.score <= -20 then BotMood.state = "sad"
+    elseif BotMood.score >= 40 then BotMood.state = "excited"
+    elseif BotMood.score >= 10 then BotMood.state = "happy"
+    elseif BotMood.score <= -40 then BotMood.state = "annoyed"
+    elseif BotMood.score <= -10 then BotMood.state = "sad"
     else BotMood.state = "neutral" end
     -- Медленно возвращаем к нейтральному
     task.delay(30, function() BotMood.score = math.floor(BotMood.score * 0.6) end)
-    if BotMood.state ~= prevState and BotMood.onChanged then
+    if BotMood.onChanged then
         pcall(BotMood.onChanged, BotMood.state, BotMood.score)
     end
 end
@@ -2173,8 +2174,11 @@ local function _fireWorldReaction(player, kind)
         cleaned     = text,
         isWorld     = true,
     }
-    enqueueChatItem(player.UserId, item)
-    runChatQueue(player.UserId)
+    -- task.delay(0) гарантирует что runChatQueue уже объявлена к моменту вызова
+    task.delay(0, function()
+        enqueueChatItem(player.UserId, item)
+        runChatQueue(player.UserId)
+    end)
 end
 
 task.delay(4, function()
@@ -4082,8 +4086,9 @@ sidebarStatus.BackgroundColor3 = THEME.Card
 sidebarStatus.BackgroundTransparency = THEME.CardTransparency or 0.55
 sidebarStatus.BorderSizePixel = 0
 sidebarStatus.AnchorPoint = Vector2.new(0, 1)
-sidebarStatus.Position = UDim2.new(0, 6, 1, -10)
-sidebarStatus.Size = UDim2.new(1, -12, 0, 148)
+sidebarStatus.Position = UDim2.new(0, 6, 1, -8)
+sidebarStatus.Size = UDim2.new(1, -12, 0, 145)
+sidebarStatus.ClipsDescendants = true
 sidebarStatus.Parent = sidebar
 makeCorner(sidebarStatus, 12)
 makeStroke(sidebarStatus, 1, Color3.fromRGB(255,255,255), 0.82)
@@ -4154,7 +4159,7 @@ local MOOD_UI = {
 BotMood.onChanged = function(state, score)
     local m = MOOD_UI[state] or MOOD_UI.neutral
     dotMood.BackgroundColor3 = m.c
-    lblMood.Text = m.icon.." "..state
+    lblMood.Text = m.icon.." "..state.." ("..tostring(math.floor(score))..")"
 end
 
 local function updateCtStatus()
@@ -4184,7 +4189,7 @@ local function updateCtStatus()
     -- v18: настроение
     local m = MOOD_UI[BotMood.state] or MOOD_UI.neutral
     dotMood.BackgroundColor3 = ClientSettings.MoodEnabled and m.c or Color3.fromRGB(80,80,90)
-    lblMood.Text = ClientSettings.MoodEnabled and (m.icon.." "..BotMood.state) or "Настроение: выкл"
+    lblMood.Text = ClientSettings.MoodEnabled and (m.icon.." "..BotMood.state.." ("..tostring(math.floor(BotMood.score))..")") or "Настроение: выкл"
 end
 
 -- Автообновление статуса каждые 3 секунды
