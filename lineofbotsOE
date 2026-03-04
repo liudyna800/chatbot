@@ -3925,6 +3925,10 @@ local function createInterface()
             ClientSettings.UI.WindowHeight = winH
         end
     end
+
+    -- contentArea внутри окна не может учитывать UICorner через ClipsDescendants.
+    -- Решение: сам contentArea уменьшен, контент не доходит до скруглённых углов.
+    local contentAreaRightMargin = 20
     
     local gui = Instance.new("ScreenGui")
     gui.Name = "LineOfBotsUI"
@@ -4243,16 +4247,16 @@ end
     local contentArea = Instance.new("Frame")
     contentArea.BackgroundTransparency = 1
     contentArea.Position = UDim2.new(0, sidebarWidth, 0, 0)
-    contentArea.Size = UDim2.new(1, -sidebarWidth - 16, 1, 0)
+    contentArea.Size = UDim2.new(1, -sidebarWidth - contentAreaRightMargin, 1, 0)
     contentArea.ClipsDescendants = true
     contentArea.Parent = window
 
-    local contentPadValue = isMobile and 14 or 20
+    local contentPadValue = isMobile and 12 or 16
     local contentPad = Instance.new("UIPadding")
     contentPad.PaddingTop    = UDim.new(0, contentPadValue)
     contentPad.PaddingBottom = UDim.new(0, contentPadValue)
     contentPad.PaddingLeft   = UDim.new(0, contentPadValue)
-    contentPad.PaddingRight  = UDim.new(0, contentPadValue)
+    contentPad.PaddingRight  = UDim.new(0, 4)
     contentPad.Parent = contentArea
     
 local function cancelFrameTweens(frame)
