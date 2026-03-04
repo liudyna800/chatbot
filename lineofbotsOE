@@ -2108,8 +2108,10 @@ end
 
 task.delay(5, function()
     local prevAir = {}
+    local tickCount = 0
     while true do
         task.wait(0.5)
+        tickCount = tickCount + 1
 
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then
             task.wait(5)
@@ -2119,6 +2121,13 @@ task.delay(5, function()
         -- Берём рут напрямую из LocalPlayer.Character (не через кеш)
         local myChar = Players.LocalPlayer.Character
         local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
+
+        -- Каждые 10 тиков (~5 сек) пишем статус
+        if tickCount % 10 == 0 then
+            local allPlayers = Players:GetPlayers()
+            warn("[WORLD] tick="..tickCount.." myRoot="..tostring(myRoot~=nil).." players="..#allPlayers)
+        end
+
         if not myRoot then continue end
 
         local myPos  = myRoot.Position
