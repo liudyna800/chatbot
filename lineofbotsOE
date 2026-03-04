@@ -2278,6 +2278,11 @@ local function handleQueuedChat(item)
     end
 
     local text, err = providerRouter:chatCompletions(payload)
+    -- v18: при rate limit (429) — ждём 5 сек и повторяем один раз, не отключаем бота
+    if (not text or text == "") and err and tostring(err):find("429") then
+        task.wait(5)
+        text, err = providerRouter:chatCompletions(payload)
+    end
     if err or not text or text == "" then
         return
     end
@@ -3483,21 +3488,14 @@ local function handleRateLimitNotice(force)
         return
     end
     rateLimitNoticeAt = now
-
-    if ClientSettings.AutoReply then
-        ClientSettings.AutoReply = false
-        updateChatListening()
-        if autoReplyToggle and autoReplyToggle.Set then
-            autoReplyToggle.Set(false)
-        end
-    end
-
-    local title = "API rate limited"
-    local body = "Auto-reply has been disabled. Connect your API key to continue."
+    -- v18: НЕ отключаем AutoReply — токены Groq восстанавливаются за секунды.
+    -- Просто уведомляем пользователя, бот продолжит работу автоматически.
+    local title = "Rate limit"
+    local body = "Groq временно ограничил запросы. Бот автоматически продолжит через несколько секунд."
     if pushNotification then
         pushNotification(title, body, THEME and THEME.Accent or nil)
     end
-    Logger:Add("warn", title .. " " .. body)
+    Logger:Add("warn", title .. ": " .. body)
 end
 
 onApiRateLimited = function()
@@ -4200,7 +4198,7 @@ end
     local contentArea = Instance.new("Frame")
     contentArea.BackgroundTransparency = 1
     contentArea.Position = UDim2.new(0, sidebarWidth, 0, 0)
-    contentArea.Size = UDim2.new(1, -sidebarWidth, 1, 0)
+    contentArea.Size = UDim2.new(1, -sidebarWidth - 8, 1, 0)
     contentArea.ClipsDescendants = true
     contentArea.Parent = window
 
