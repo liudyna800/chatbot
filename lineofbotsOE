@@ -3928,7 +3928,7 @@ local function createInterface()
 
     -- contentArea внутри окна не может учитывать UICorner через ClipsDescendants.
     -- Решение: сам contentArea уменьшен, контент не доходит до скруглённых углов.
-    local contentAreaRightMargin = 0
+    local contentAreaRightMargin = 18
     
     local gui = Instance.new("ScreenGui")
     gui.Name = "LineOfBotsUI"
@@ -3986,7 +3986,7 @@ local function createInterface()
     end
     window.BackgroundColor3 = THEME.Window
     window.BackgroundTransparency = THEME.WindowTransparency or 0.05
-    window.ClipsDescendants = true
+    window.ClipsDescendants = false
     window.Parent = gui
     makeCorner(window, 18)
     local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
