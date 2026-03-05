@@ -4609,7 +4609,7 @@ local function makeSectionCard(parent, titleText, subtitleText)
     card.BackgroundColor3 = THEME.Card
     card.BackgroundTransparency = THEME.CardTransparency or 0.55
     card.BorderSizePixel = 0
-    card.Size = UDim2.new(1, -24, 0, 0)
+    card.Size = UDim2.new(1, -40, 0, 0)
     card.Position = UDim2.new(0, 12, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
     card.Parent = parent
