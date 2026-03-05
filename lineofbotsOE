@@ -4720,7 +4720,7 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     local label = makeTextLabel(row, labelText, 13, "semibold")
     label.Name = "Label"
     -- Отступ слева учитывает: 8px до точки + 6px точка + 6px зазор = 20px, справа 14px для switch
-    label.Size = UDim2.new(1, -78, 0, 18)
+    label.Size = UDim2.new(1, -90, 0, 18)
     label.Position = hasDesc and UDim2.new(0, 22, 0, 8) or UDim2.new(0, 22, 0.5, -9)
 
     if hasDesc then
@@ -4728,7 +4728,7 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
         desc.Name = "Description"
         desc.TextColor3 = THEME.TextDim
         desc.Position = UDim2.new(0, 22, 0, 27)
-        desc.Size = UDim2.new(1, -78, 0, 16)
+        desc.Size = UDim2.new(1, -90, 0, 16)
         desc.TextTruncate = Enum.TextTruncate.AtEnd
         desc.ClipsDescendants = false
     end
@@ -4738,7 +4738,7 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     switchBg.Name = "SwitchBg"
     switchBg.Size = UDim2.new(0, 44, 0, 24)
     switchBg.AnchorPoint = Vector2.new(1, 0.5)
-    switchBg.Position = UDim2.new(1, 0, 0.5, 0)
+    switchBg.Position = UDim2.new(1, -10, 0.5, 0)
     switchBg.BackgroundColor3 = initialState and THEME.ToggleOn or THEME.ToggleOff
     switchBg.BorderSizePixel = 0
     switchBg.Parent = row
