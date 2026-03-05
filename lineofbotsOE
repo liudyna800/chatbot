@@ -1,4 +1,20 @@
-print("LOB VERSION: v18.2.3 LOADED")
+print("LOB VERSION: v18.2.6 LOADED")
+
+-- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
+local LOB_KEY_FILE = "lob_apikey.txt"
+local function saveApiKey(key)
+    pcall(function()
+        if writefile then writefile(LOB_KEY_FILE, tostring(key or "")) end
+    end)
+end
+local function loadApiKey()
+    local ok, result = pcall(function()
+        if readfile then return readfile(LOB_KEY_FILE) end
+        return ""
+    end)
+    return (ok and type(result)=="string") and result or ""
+end
+
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
@@ -117,10 +133,19 @@ local ClientSettings = {
     WorldReactions = true,   -- v18: реагировать на прыжки/взгляды игроков рядом
 }
 
+-- Загружаем сохранённый API ключ при старте
+do
+    local saved = loadApiKey()
+    if saved and saved:sub(1,4) == "gsk_" and #saved > 8 then
+        ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
+        ClientSettings.ApiKeys.groq = saved
+    end
+end
+
 local ClientSecrets = {
-    groq = "hehawhehehehhaw",
-    groq2 = "wwww",
-    groq3 = "awwasybau",
+    groq = "",
+    groq2 = "",
+    groq3 = "",
 }
 
 local CurrentGui = nil
@@ -5971,6 +5996,7 @@ do
         local clean = raw:gsub("%s+", "")
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.groq = clean
+        saveApiKey(clean) -- автосохранение на диск
 
         apiCheckBtn.Text = "Проверяю..."
         apiCheckBtn.BackgroundTransparency = 0.4
@@ -6011,6 +6037,7 @@ do
             ClientSettings.ApiKeys = {}
         end
         ClientSettings.ApiKeys.groq = clean
+        saveApiKey(clean) -- автосохранение на диск
         apiBox.Text = clean
         -- Сбрасываем статус при смене ключа
         tween(apiStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
