@@ -4155,7 +4155,7 @@ local dotModel, lblModel = makeSsRow(5)
 local function updateCtStatus()
     local s = ClientSettings
     local key = getGroqApiKey and getGroqApiKey() or ""
-    local hasKey = type(key)=="string" and #key > 8
+    local hasKey = type(key)=="string" and #key > 8 and key:sub(1,4) == "gsk_"
 
     dotApi.BackgroundColor3  = hasKey and Color3.fromRGB(80,220,120) or Color3.fromRGB(220,80,80)
     lblApi.Text  = hasKey and "API: OK" or "API: нет ключа"
