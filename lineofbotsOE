@@ -1,4 +1,4 @@
-print("LOB VERSION: v18.2.6 LOADED")
+print("LOB VERSION: v18.2.8 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 local LOB_KEY_FILE = "lob_apikey.txt"
@@ -5991,15 +5991,6 @@ do
     onRateLimitUpdate = refreshLimitDisplay
     if GroqRateLimitCache.updatedAt then refreshLimitDisplay() end
 
-    -- Автопроверка ключа при открытии вкладки если ключ уже сохранён
-    task.spawn(function()
-        task.wait(0.5)
-        local savedKey = getGroqApiKey()
-        if savedKey and savedKey:sub(1,4) == "gsk_" and #savedKey > 8 then
-            doApiCheck()
-        end
-    end)
-
     local function doApiCheck()
         local raw = tostring(apiBox.Text or "")
         local clean = raw:gsub("%s+", "")
@@ -6039,6 +6030,15 @@ do
     end
 
     apiCheckBtn.MouseButton1Click:Connect(doApiCheck)
+
+    -- Автопроверка ключа при открытии вкладки если ключ уже сохранён
+    task.spawn(function()
+        task.wait(0.5)
+        local savedKey = getGroqApiKey()
+        if savedKey and savedKey:sub(1,4) == "gsk_" and #savedKey > 8 then
+            doApiCheck()
+        end
+    end)
     apiBox.FocusLost:Connect(function()
         local raw = tostring(apiBox.Text or "")
         local clean = raw:gsub("%s+", "")
