@@ -1,4 +1,4 @@
-print("LOB VERSION: v18.2.8 LOADED")
+print("LOB VERSION: v18.3.2 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 local LOB_KEY_FILE = "lob_apikey.txt"
@@ -2401,6 +2401,18 @@ local function handleQueuedChat(item)
                 role    = "system",
                 content = "⚠ TOXIC BEHAVIOR DETECTED: player(s) [" .. table.concat(toxicNames, ", ") 
                     .. "] were repeatedly moving back-and-forth behind you. React naturally — call them out, say you noticed, or warn them."
+            })
+        end
+    end
+
+    -- v18.2.9: Веб-поиск — ищем по запросу пользователя и добавляем контекст
+    if settings.WebSearch and item.cleaned and #item.cleaned > 3 then
+        task.spawn(function() end) -- yield чтобы не блокировать
+        local searchResult = doWebSearch(item.cleaned)
+        if searchResult and searchResult ~= "" and not searchResult:find("не найдены") and not searchResult:find("Ошибка") then
+            table.insert(apiMessages, {
+                role = "system",
+                content = "[WEB SEARCH RESULTS for: " .. item.cleaned .. "]\n" .. searchResult .. "\n[Use this information to answer the user. Current year is 2026.]"
             })
         end
     end
@@ -8914,6 +8926,16 @@ local function ctDoSend()
             userContent = "[NAME:User] " .. msg
         end
         -- Инжектируем тег языка — так же как в игровом чате
+        -- v18.2.9: Веб-поиск для чата с ИИ
+        if settings.WebSearch and msg and #msg > 3 then
+            local searchResult = doWebSearch(msg)
+            if searchResult and searchResult ~= "" and not searchResult:find("не найдены") and not searchResult:find("Ошибка") then
+                table.insert(apiMsgs, {
+                    role = "system",
+                    content = "[WEB SEARCH RESULTS for: " .. msg .. "]\n" .. searchResult .. "\n[Use this information to answer the user. Current year is 2026.]"
+                })
+            end
+        end
         table.insert(apiMsgs, { role = "user", content = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent })
 
         local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 200, 1024)
