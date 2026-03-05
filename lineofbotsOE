@@ -563,30 +563,41 @@ local function doWebSearch(query)
     local encoded = query:gsub("[^%w%-_%.~]", function(c)
         return string.format("%%%02X", string.byte(c))
     end)
-    -- SearXNG публичный инстанс — реальные результаты поиска
-    local ok, res = pcall(httprequest, {
-        Url = "https://searx.be/search?q=" .. encoded .. "&format=json&language=ru&categories=general",
-        Method = "GET",
-        Headers = {
-            ["Accept"] = "application/json",
-            ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        },
-    })
-    if not ok or not res then return nil end
-    local body = res.Body or res.body or ""
-    local ok2, data = pcall(function() return HttpService:JSONDecode(body) end)
-    if not ok2 or not data or not data.results then return nil end
-    local parts = {}
-    for i, r in ipairs(data.results) do
-        if i > 4 then break end
-        if r.title and r.content then
-            table.insert(parts, r.title .. ": " .. r.content)
-        elseif r.title then
-            table.insert(parts, r.title)
+    -- Пробуем несколько SearXNG инстансов по очереди
+    local instances = {
+        "https://searx.be/search?q=" .. encoded .. "&format=json&language=ru",
+        "https://search.bus-hit.me/search?q=" .. encoded .. "&format=json&language=ru",
+        "https://paulgo.io/search?q=" .. encoded .. "&format=json&language=ru",
+    }
+    for _, url in ipairs(instances) do
+        local ok, res = pcall(httprequest, {
+            Url = url,
+            Method = "GET",
+            Headers = {
+                ["Accept"] = "application/json",
+                ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            },
+        })
+        if ok and res then
+            local body = res.Body or res.body or ""
+            local ok2, data = pcall(function() return HttpService:JSONDecode(body) end)
+            if ok2 and data and data.results and #data.results > 0 then
+                local parts = {}
+                for i, r in ipairs(data.results) do
+                    if i > 5 then break end
+                    if r.title and r.content then
+                        table.insert(parts, r.title .. ": " .. r.content)
+                    elseif r.title then
+                        table.insert(parts, r.title)
+                    end
+                end
+                if #parts > 0 then
+                    return table.concat(parts, "\n")
+                end
+            end
         end
     end
-    if #parts == 0 then return nil end
-    return table.concat(parts, "\n")
+    return nil
 end
 
 
@@ -959,6 +970,13 @@ local function makeSystemPrompt(settings)
                 .. "\nIf you don't know specific game rules/objectives, say honestly 'I'm not sure about all the rules here, but this is " .. tostring(info.name) .. "'"
         end
     end
+
+    -- v18.3: Текущая дата и разрешение на актуальные знания
+    system = system
+        .. "\n\n== CURRENT DATE =="
+        .. "\nThe current real-world date is 2026. You are aware of events, memes, trends, news up to 2026."
+        .. "\nDo NOT say 'I don't know about 2026' or 'that's in the future' — 2026 is NOW."
+        .. "\nWhen asked about recent memes, trends, news — answer confidently based on what you know."
 
     -- v17: PlayerAwareness
     if settings.PlayerAwareness then
