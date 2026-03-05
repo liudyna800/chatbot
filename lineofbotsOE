@@ -2452,13 +2452,13 @@ local function handleQueuedChat(item)
                 type = "function",
                 ["function"] = {
                     name = "web_search",
-                    description = "Поиск актуальной информации в интернете: новости, мемы, события, факты.",
+                    description = "Search for current news, memes, trends, viral content, events. Use for any question about recent/current topics.",
                     parameters = {
                         type = "object",
                         properties = {
                             query = {
                                 type = "string",
-                                description = "Поисковый запрос на русском или английском"
+                                description = "Search query in Russian or English"
                             }
                         },
                         required = {"query"}
@@ -2467,6 +2467,16 @@ local function handleQueuedChat(item)
             }
         }
         payload.tool_choice = "auto"
+        -- Сразу делаем поиск и добавляем в последнее сообщение пользователя
+        if item and item.cleaned and #item.cleaned > 8 then
+            local sr = doWebSearch(item.cleaned)
+            if sr then
+                local last = apiMessages[#apiMessages]
+                if last and last.role == "user" then
+                    last.content = last.content .. "\n\n[ВЕБ-ПОИСК]:\n" .. sr
+                end
+            end
+        end
     end
 
     local text, err = providerRouter:chatCompletions(payload)
@@ -8960,7 +8970,7 @@ local function ctDoSend()
                     }
                 }
             }
-            payload.tool_choice = "auto"
+            payload.tool_choice = "required"
         end
 
         local text, err = providerRouter:chatCompletions(payload)
