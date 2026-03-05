@@ -4693,7 +4693,7 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     row.BackgroundColor3 = THEME.Button
     row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
     row.BorderSizePixel = 0
-    row.Size = UDim2.new(1, 0, 0, descText and descText ~= "" and 56 or 46)
+    row.Size = UDim2.new(1, -8, 0, descText and descText ~= "" and 56 or 46)
     row.Parent = parent
     makeCorner(row, 22)
     local st = makeStroke(row, 1, Color3.fromRGB(255,255,255), 0.78)
@@ -4821,7 +4821,7 @@ local function makeRightControlRow(parent, labelText, descText, controlWidth)
     row.BackgroundColor3 = THEME.Button
     row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
     row.BorderSizePixel = 0
-    row.Size = UDim2.new(1, 0, 0, 42) -- Match ToggleRow height
+    row.Size = UDim2.new(1, -8, 0, 42) -- Match ToggleRow height
     row.Parent = parent
     makeCorner(row, 22)
     local st = makeStroke(row, 1, Color3.fromRGB(255,255,255), 0.78)
@@ -4844,7 +4844,7 @@ local function makeRightControlRow(parent, labelText, descText, controlWidth)
         desc.Position = UDim2.new(0, 0, 0, 22)
         desc.Size = UDim2.new(1, -(cw + 18), 0, 14)
         
-        row.Size = UDim2.new(1, 0, 0, 48) -- Match ToggleRow height
+        row.Size = UDim2.new(1, -8, 0, 48) -- Match ToggleRow height
     end
 
     local ctrl = Instance.new("Frame")
@@ -4864,7 +4864,7 @@ local function makeKeybindRow(parent, labelText, descText, currentKey, onChanged
     row.BackgroundColor3 = THEME.Button
     row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
     row.BorderSizePixel = 0
-    row.Size = UDim2.new(1, 0, 0, 42) -- Standard height
+    row.Size = UDim2.new(1, -8, 0, 42) -- Standard height
     row.Parent = parent
     makeCorner(row, 22)
     makeStroke(row, 1, THEME.Stroke, 0.6)
@@ -4887,7 +4887,7 @@ local function makeKeybindRow(parent, labelText, descText, currentKey, onChanged
         desc.TextColor3 = THEME.TextDim
         desc.Position = UDim2.new(0, 0, 0, 22)
         desc.Size = UDim2.new(1, -(pillW + 14), 0, 14)
-        row.Size = UDim2.new(1, 0, 0, 48) -- Match ToggleRow height
+        row.Size = UDim2.new(1, -8, 0, 48) -- Match ToggleRow height
     end
 
     local bindBtn = makeButton(row, tostring(keyText), "noArrow", {
@@ -4983,7 +4983,7 @@ local function makeSliderRow(parent, labelText, minVal, maxVal, currentVal, call
     row.Name = labelText:gsub("%W+", "") .. "Row"
     row.BackgroundColor3 = THEME.Button
     row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
-    row.Size = UDim2.new(1, 0, 0, 42)
+    row.Size = UDim2.new(1, -8, 0, 42)
     row.Parent = parent
     makeCorner(row, 22)
     makeStroke(row, 1, THEME.Stroke, 0.6)
@@ -6142,7 +6142,7 @@ local function refreshUserPicker()
         local row = Instance.new("Frame")
         row.BackgroundColor3 = THEME.Card
         row.BackgroundTransparency = 0.5
-        row.Size = UDim2.new(1, 0, 0, 36)
+        row.Size = UDim2.new(1, -8, 0, 36)
         row.Parent = userList
         makeCorner(row, 22)
         makeStroke(row, 1, THEME.Stroke, 0.6)
@@ -7879,7 +7879,7 @@ local function mod2_makeRow(entry, layoutOrder)
     row.BackgroundColor3 = THEME.Sidebar
     row.BackgroundTransparency = 0.65
     row.BorderSizePixel = 0
-    row.Size = UDim2.new(1, 0, 0, 60)
+    row.Size = UDim2.new(1, -8, 0, 60)
     row.LayoutOrder = layoutOrder or 0
     row.Parent = mod2_listScroll
     makeCorner(row, 22)
@@ -8236,7 +8236,7 @@ end
 
 local function createPlayerRow(parentScroll, userId, displayName, name, isBlocked, onAction)
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, 0, 0, 62)
+    row.Size = UDim2.new(1, -8, 0, 62)
     row.BackgroundColor3 = THEME.Button
     row.BackgroundTransparency = THEME.ButtonTransparency or 0.60
     row.BorderSizePixel = 0
