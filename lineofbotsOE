@@ -559,36 +559,33 @@ end
 -- v18.2.9: Веб-поиск через DuckDuckGo (для tool use)
 local function doWebSearch(query)
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if not httprequest then return "Поиск недоступен." end
-    local encoded = query:gsub(" ", "+"):gsub("[^%w%+%-_%.~]", function(c)
+    if not httprequest then return nil end
+    local encoded = query:gsub("[^%w%-_%.~]", function(c)
         return string.format("%%%02X", string.byte(c))
     end)
+    -- SearXNG публичный инстанс — реальные результаты поиска
     local ok, res = pcall(httprequest, {
-        Url = "https://api.duckduckgo.com/?q=" .. encoded .. "&format=json&no_html=1&skip_disambig=1",
+        Url = "https://searx.be/search?q=" .. encoded .. "&format=json&language=ru&categories=general",
         Method = "GET",
-        Headers = { ["Accept"] = "application/json" },
+        Headers = {
+            ["Accept"] = "application/json",
+            ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
     })
-    if not ok or not res then return "Ошибка поиска." end
+    if not ok or not res then return nil end
     local body = res.Body or res.body or ""
-    local data = pcall(function() return HttpService:JSONDecode(body) end) and HttpService:JSONDecode(body) or nil
-    if not data then return "Не удалось разобрать результаты." end
+    local ok2, data = pcall(function() return HttpService:JSONDecode(body) end)
+    if not ok2 or not data or not data.results then return nil end
     local parts = {}
-    -- Abstract (основной ответ)
-    if data.AbstractText and data.AbstractText ~= "" then
-        table.insert(parts, data.AbstractText)
-    end
-    -- RelatedTopics (связанные темы)
-    if data.RelatedTopics then
-        local count = 0
-        for _, t in ipairs(data.RelatedTopics) do
-            if count >= 3 then break end
-            if type(t) == "table" and t.Text and t.Text ~= "" then
-                table.insert(parts, t.Text)
-                count = count + 1
-            end
+    for i, r in ipairs(data.results) do
+        if i > 4 then break end
+        if r.title and r.content then
+            table.insert(parts, r.title .. ": " .. r.content)
+        elseif r.title then
+            table.insert(parts, r.title)
         end
     end
-    if #parts == 0 then return "Результаты не найдены для: " .. query end
+    if #parts == 0 then return nil end
     return table.concat(parts, "\n")
 end
 
