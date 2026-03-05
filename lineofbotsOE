@@ -4539,8 +4539,10 @@ generalScroll.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
 generalScroll.Parent = generalFrame
 
 local generalScrollPad = Instance.new("UIPadding")
-generalScrollPad.PaddingLeft  = UDim.new(0, 0)
-generalScrollPad.PaddingRight = UDim.new(0, 4)
+generalScrollPad.PaddingLeft  = UDim.new(0, 8)
+generalScrollPad.PaddingRight = UDim.new(0, 12)
+generalScrollPad.PaddingTop   = UDim.new(0, 4)
+generalScrollPad.PaddingBottom = UDim.new(0, 8)
 generalScrollPad.Parent = generalScroll
 
 local generalLayout = Instance.new("UIListLayout")
@@ -4581,8 +4583,10 @@ behaviorScroll.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
 behaviorScroll.Parent = behaviorFrame
 
 local behaviorScrollPad = Instance.new("UIPadding")
-behaviorScrollPad.PaddingLeft  = UDim.new(0, 0)
-behaviorScrollPad.PaddingRight = UDim.new(0, 4)
+behaviorScrollPad.PaddingLeft  = UDim.new(0, 8)
+behaviorScrollPad.PaddingRight = UDim.new(0, 12)
+behaviorScrollPad.PaddingTop   = UDim.new(0, 4)
+behaviorScrollPad.PaddingBottom = UDim.new(0, 8)
 behaviorScrollPad.Parent = behaviorScroll
 
 local behaviorLayout = Instance.new("UIListLayout")
@@ -4610,8 +4614,8 @@ local function makeSectionCard(parent, titleText, subtitleText)
     card.BackgroundColor3 = THEME.Card
     card.BackgroundTransparency = THEME.CardTransparency or 0.55
     card.BorderSizePixel = 0
-    card.Size = UDim2.new(1, -40, 0, 0)
-    card.Position = UDim2.new(0, 12, 0, 0)
+    card.Size = UDim2.new(1, 0, 0, 0)
+    card.Position = UDim2.new(0, 0, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
     card.Parent = parent
     makeCorner(card, 22)
@@ -5658,8 +5662,10 @@ advancedScroll.ScrollBarThickness = 0 -- Hidden per user request
 advancedScroll.Parent = advancedFrame
 
 local advancedScrollPad = Instance.new("UIPadding")
-advancedScrollPad.PaddingLeft  = UDim.new(0, 0)
-advancedScrollPad.PaddingRight = UDim.new(0, 4)
+advancedScrollPad.PaddingLeft  = UDim.new(0, 8)
+advancedScrollPad.PaddingRight = UDim.new(0, 12)
+advancedScrollPad.PaddingTop   = UDim.new(0, 4)
+advancedScrollPad.PaddingBottom = UDim.new(0, 8)
 advancedScrollPad.Parent = advancedScroll
 
 local advancedLayout = Instance.new("UIListLayout")
@@ -6043,8 +6049,10 @@ perceptionScroll.ScrollBarThickness = 0 -- Hidden per user request
 perceptionScroll.Parent = perceptionFrame
 
 local perceptionScrollPad = Instance.new("UIPadding")
-perceptionScrollPad.PaddingLeft  = UDim.new(0, 0)
-perceptionScrollPad.PaddingRight = UDim.new(0, 4)
+perceptionScrollPad.PaddingLeft  = UDim.new(0, 8)
+perceptionScrollPad.PaddingRight = UDim.new(0, 12)
+perceptionScrollPad.PaddingTop   = UDim.new(0, 4)
+perceptionScrollPad.PaddingBottom = UDim.new(0, 8)
 perceptionScrollPad.Parent = perceptionScroll
 
 local perceptionLayout = Instance.new("UIListLayout")
