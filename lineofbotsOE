@@ -2421,21 +2421,18 @@ local function handleQueuedChat(item)
         end
     end
 
-    -- v18.2.9: Веб-поиск — ищем по запросу пользователя и добавляем контекст
+    -- v18.3.6: Веб-поиск — вставляем результаты прямо в сообщение пользователя
+    local searchContext = ""
     if settings.WebSearch and item.cleaned and #item.cleaned > 3 then
-        task.spawn(function() end) -- yield чтобы не блокировать
         local searchResult = doWebSearch(item.cleaned)
-        if searchResult and searchResult ~= "" and not searchResult:find("не найдены") and not searchResult:find("Ошибка") then
-            table.insert(apiMessages, {
-                role = "system",
-                content = "[WEB SEARCH RESULTS for: " .. item.cleaned .. "]\n" .. searchResult .. "\n[Use this information to answer the user. Current year is 2026.]"
-            })
+        if searchResult and searchResult ~= "" then
+            searchContext = "\n\n[РЕАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй ТОЛЬКО это, не выдумывай]:\n" .. searchResult .. "\n[Отвечай коротко, 1-2 предложения, на основе этих данных.]"
         end
     end
 
     -- world items отвечаем на языке личности (RU), не детектируем язык [SYSTEM:] текста
     local langTag = item.isWorld and "RU" or getLangForUser(item.cleaned, item.userId)
-    table.insert(apiMessages, { role = "user", content = "[LANG:" .. langTag .. "] " .. userContent })
+    table.insert(apiMessages, { role = "user", content = "[LANG:" .. langTag .. "] " .. userContent .. searchContext })
 
     local model = getModel(settings)
     if model == "" then return end
@@ -8942,17 +8939,15 @@ local function ctDoSend()
             userContent = "[NAME:User] " .. msg
         end
         -- Инжектируем тег языка — так же как в игровом чате
-        -- v18.2.9: Веб-поиск для чата с ИИ
+        -- v18.3.6: Веб-поиск для чата с ИИ
+        local searchContext = ""
         if settings.WebSearch and msg and #msg > 3 then
             local searchResult = doWebSearch(msg)
-            if searchResult and searchResult ~= "" and not searchResult:find("не найдены") and not searchResult:find("Ошибка") then
-                table.insert(apiMsgs, {
-                    role = "system",
-                    content = "[WEB SEARCH RESULTS for: " .. msg .. "]\n" .. searchResult .. "\n[Use this information to answer the user. Current year is 2026.]"
-                })
+            if searchResult and searchResult ~= "" then
+                searchContext = "\n\n[РЕАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй ТОЛЬКО это, не выдумывай]:\n" .. searchResult .. "\n[Отвечай коротко, 1-2 предложения, на основе этих данных.]"
             end
         end
-        table.insert(apiMsgs, { role = "user", content = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent })
+        table.insert(apiMsgs, { role = "user", content = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent .. searchContext })
 
         local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 200, 1024)
         local payload = {
