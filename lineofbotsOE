@@ -131,6 +131,7 @@ local ClientSettings = {
     AntiSpam = true,         -- v17.5: игнорировать одинаковые сообщения подряд
     ReactToMention = true,   -- v17.5: реагировать на упоминание своего ника
     WorldReactions = true,   -- v18: реагировать на прыжки/взгляды игроков рядом
+    WebSearch = false,       -- v18.2: использовать compound-beta для веб-поиска
 }
 
 -- Загружаем сохранённый API ключ при старте
@@ -555,7 +556,43 @@ local function isRateLimited(statusCode, statusMsg, body)
     return false
 end
 
--- Глобальный кэш лимитов Groq — обновляется после каждого запроса
+-- v18.2.9: Веб-поиск через DuckDuckGo (для tool use)
+local function doWebSearch(query)
+    local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if not httprequest then return "Поиск недоступен." end
+    local encoded = query:gsub(" ", "+"):gsub("[^%w%+%-_%.~]", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end)
+    local ok, res = pcall(httprequest, {
+        Url = "https://api.duckduckgo.com/?q=" .. encoded .. "&format=json&no_html=1&skip_disambig=1",
+        Method = "GET",
+        Headers = { ["Accept"] = "application/json" },
+    })
+    if not ok or not res then return "Ошибка поиска." end
+    local body = res.Body or res.body or ""
+    local data = pcall(function() return HttpService:JSONDecode(body) end) and HttpService:JSONDecode(body) or nil
+    if not data then return "Не удалось разобрать результаты." end
+    local parts = {}
+    -- Abstract (основной ответ)
+    if data.AbstractText and data.AbstractText ~= "" then
+        table.insert(parts, data.AbstractText)
+    end
+    -- RelatedTopics (связанные темы)
+    if data.RelatedTopics then
+        local count = 0
+        for _, t in ipairs(data.RelatedTopics) do
+            if count >= 3 then break end
+            if type(t) == "table" and t.Text and t.Text ~= "" then
+                table.insert(parts, t.Text)
+                count = count + 1
+            end
+        end
+    end
+    if #parts == 0 then return "Результаты не найдены для: " .. query end
+    return table.concat(parts, "\n")
+end
+
+
 local GroqRateLimitCache = {
     remainingRequests = nil,
     limitRequests     = nil,
@@ -606,7 +643,6 @@ function GroqProvider:chatCompletions(payload)
         ["Authorization"] = "Bearer " .. apiKey,
     }, payload)
 
-    -- Парсим лимиты из заголовков после каждого запроса
     if respHeaders then
         parseRateLimitHeaders(respHeaders)
     end
@@ -627,11 +663,56 @@ function GroqProvider:chatCompletions(payload)
         return nil, "ContentFiltered"
     end
 
+    -- Tool use: модель хочет сделать поиск
+    if choice.finish_reason == "tool_calls" and choice.message and choice.message.tool_calls then
+        local toolResults = {}
+        for _, tc in ipairs(choice.message.tool_calls) do
+            if tc.function_ and tc.function_.name == "web_search" or
+               tc["function"] and tc["function"].name == "web_search" then
+                local fn = tc.function_ or tc["function"]
+                local args = {}
+                pcall(function() args = HttpService:JSONDecode(fn.arguments or "{}") end)
+                local query = args.query or ""
+                local searchResult = doWebSearch(query)
+                table.insert(toolResults, {
+                    role = "tool",
+                    tool_call_id = tc.id,
+                    content = searchResult,
+                })
+            end
+        end
+        if #toolResults > 0 then
+            -- Отправляем второй запрос с результатами поиска
+            local msgs2 = {}
+            for _, m in ipairs(payload.messages) do table.insert(msgs2, m) end
+            table.insert(msgs2, choice.message)
+            for _, tr in ipairs(toolResults) do table.insert(msgs2, tr) end
+            local payload2 = {
+                model = payload.model,
+                temperature = payload.temperature,
+                max_tokens = payload.max_tokens,
+                messages = msgs2,
+            }
+            local res2, sc2, sm2, b2, rh2 = postJson(url, {
+                ["Content-Type"] = "application/json",
+                ["Authorization"] = "Bearer " .. apiKey,
+            }, payload2)
+            if rh2 then parseRateLimitHeaders(rh2) end
+            if res2 then
+                local c2 = res2.choices and res2.choices[1]
+                local msg2 = c2 and c2.message
+                local content2 = msg2 and msg2.content
+                if type(content2) == "string" and content2 ~= "" then
+                    return content2, nil
+                end
+            end
+        end
+    end
+
     local msg = choice.message
     local content = msg and msg.content
 
     -- compound-beta возвращает content как массив блоков [{type="text", text="..."}]
-    -- обычные модели возвращают content как строку
     if type(content) == "table" then
         local parts = {}
         for _, block in ipairs(content) do
@@ -2346,6 +2427,29 @@ local function handleQueuedChat(item)
     -- Qwen3 отключаем reasoning
     if model == "qwen/qwen3-32b" then
         payload.reasoning_effort = "none"
+    end
+    -- Веб-поиск через tool use
+    if settings.WebSearch then
+        payload.tools = {
+            {
+                type = "function",
+                ["function"] = {
+                    name = "web_search",
+                    description = "Поиск актуальной информации в интернете: новости, мемы, события, факты.",
+                    parameters = {
+                        type = "object",
+                        properties = {
+                            query = {
+                                type = "string",
+                                description = "Поисковый запрос на русском или английском"
+                            }
+                        },
+                        required = {"query"}
+                    }
+                }
+            }
+        }
+        payload.tool_choice = "auto"
     end
 
     local text, err = providerRouter:chatCompletions(payload)
@@ -5370,6 +5474,17 @@ makeToggleRow(
             stopFollowing()
             stopCurrentEmote()
         end
+    end
+)
+
+-- v18.2: Веб-поиск
+makeToggleRow(
+    automation,
+    "🌐 Веб-поиск",
+    "Бот ищет актуальную информацию в интернете (мемы, новости, события 2025-2026). Использует compound-beta.",
+    ClientSettings.WebSearch == true,
+    function(state)
+        ClientSettings.WebSearch = state
     end
 )
 
