@@ -5996,16 +5996,16 @@ do
         task.wait(0.5)
         local savedKey = getGroqApiKey()
         if savedKey and savedKey:sub(1,4) == "gsk_" and #savedKey > 8 then
-            apiCheckBtn:MouseButton1Click()
+            doApiCheck()
         end
     end)
 
-    apiCheckBtn.MouseButton1Click:Connect(function()
+    local function doApiCheck()
         local raw = tostring(apiBox.Text or "")
         local clean = raw:gsub("%s+", "")
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.groq = clean
-        saveApiKey(clean) -- автосохранение на диск
+        saveApiKey(clean)
 
         apiCheckBtn.Text = "Проверяю..."
         apiCheckBtn.BackgroundTransparency = 0.4
@@ -6022,7 +6022,6 @@ do
                 setApiStatus(false, "ошибка executor", "HTTP недоступен в этом executor.")
                 return
             end
-            -- Один запрос — результат уйдёт в parseRateLimitHeaders через кэш
             local ok2, res2 = pcall(req, {
                 Url    = "https://api.groq.com/openai/v1/chat/completions",
                 Method = "POST",
@@ -6034,11 +6033,12 @@ do
             if tonumber(s2) == 401 then setApiStatus(false, "❌ неверный ключ", "Проверь на console.groq.com"); return end
             if tonumber(s2) == 429 then setApiStatus(false, "⚠️ rate limit", "Ключ верный, лимит исчерпан."); return end
             if tonumber(s2) ~= 200 then setApiStatus(false, "❌ ошибка " .. tostring(s2), "Неожиданный ответ."); return end
-            -- Парсим заголовки (этот req идёт в обход postJson, нужно вручную)
             parseRateLimitHeaders(res2.Headers or res2.headers or {})
             setApiStatus(true, "✓ работает", nil)
         end)
-    end)
+    end
+
+    apiCheckBtn.MouseButton1Click:Connect(doApiCheck)
     apiBox.FocusLost:Connect(function()
         local raw = tostring(apiBox.Text or "")
         local clean = raw:gsub("%s+", "")
