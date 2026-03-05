@@ -559,50 +559,45 @@ end
 -- v18.2.9: Веб-поиск через DuckDuckGo (для tool use)
 local function doWebSearch(query)
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if not httprequest then print("LOB SEARCH: no httprequest") return nil end
+    if not httprequest then return nil end
     local encoded = query:gsub("[^%w%-_%.~]", function(c)
         return string.format("%%%02X", string.byte(c))
     end)
-    local instances = {
-        "https://searx.be/search?q=" .. encoded .. "&format=json&language=ru",
-        "https://search.bus-hit.me/search?q=" .. encoded .. "&format=json&language=ru",
-        "https://paulgo.io/search?q=" .. encoded .. "&format=json&language=ru",
-    }
-    for _, url in ipairs(instances) do
-        print("LOB SEARCH: trying " .. url:sub(1, 40))
-        local ok, res = pcall(httprequest, {
-            Url = url,
-            Method = "GET",
-            Headers = {
-                ["Accept"] = "application/json",
-                ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            },
-        })
-        if ok and res then
-            local status = res.StatusCode or res.statusCode or "?"
-            local body = res.Body or res.body or ""
-            print("LOB SEARCH: status=" .. tostring(status) .. " bodylen=" .. #body)
-            local ok2, data = pcall(function() return HttpService:JSONDecode(body) end)
-            if ok2 and data and data.results and #data.results > 0 then
-                print("LOB SEARCH: got " .. #data.results .. " results!")
-                local parts = {}
-                for i, r in ipairs(data.results) do
-                    if i > 5 then break end
-                    if r.title and r.content then
-                        table.insert(parts, r.title .. ": " .. r.content)
-                    elseif r.title then
-                        table.insert(parts, r.title)
+    -- Google News RSS — работает без блокировок
+    local ok, res = pcall(httprequest, {
+        Url = "https://news.google.com/rss/search?q=" .. encoded .. "&hl=ru&gl=RU&ceid=RU:ru",
+        Method = "GET",
+        Headers = { ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+    })
+    if ok and res then
+        local body = res.Body or res.body or ""
+        local status = res.StatusCode or res.statusCode or 0
+        print("LOB SEARCH: Google RSS status=" .. tostring(status) .. " len=" .. #body)
+        if status == 200 and #body > 100 then
+            local parts = {}
+            for title in body:gmatch("<title><!%[CDATA%[(.-)%]%]></title>") do
+                if not title:find("Google News") then
+                    table.insert(parts, title)
+                    if #parts >= 5 then break end
+                end
+            end
+            -- fallback если нет CDATA
+            if #parts == 0 then
+                for title in body:gmatch("<title>(.-)</title>") do
+                    if not title:find("Google News") and #title > 5 then
+                        table.insert(parts, title)
+                        if #parts >= 5 then break end
                     end
                 end
-                if #parts > 0 then return table.concat(parts, "\n") end
-            else
-                print("LOB SEARCH: no results or parse fail, ok2=" .. tostring(ok2))
             end
-        else
-            print("LOB SEARCH: pcall fail, ok=" .. tostring(ok))
+            if #parts > 0 then
+                print("LOB SEARCH: got " .. #parts .. " news items")
+                return "Последние новости по теме:\n" .. table.concat(parts, "\n")
+            end
         end
+    else
+        print("LOB SEARCH: Google RSS failed")
     end
-    print("LOB SEARCH: all instances failed")
     return nil
 end
 
