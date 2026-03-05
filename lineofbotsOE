@@ -6258,8 +6258,8 @@ local mod3_shell = Instance.new("Frame")
 mod3_shell.BackgroundColor3 = THEME.Button
 mod3_shell.BackgroundTransparency = 0.55
 mod3_shell.BorderSizePixel = 0
-mod3_shell.Position = UDim2.new(0, 0, 0, 70)
-mod3_shell.Size = UDim2.new(1, 0, 1, -70)
+mod3_shell.Position = UDim2.new(0, 8, 0, 70)
+mod3_shell.Size = UDim2.new(1, -16, 1, -78)
 mod3_shell.Parent = moderationFrame
 makeCorner(mod3_shell, 18)
 makeStroke(mod3_shell, 1, THEME.Stroke, 0.35)
@@ -8495,7 +8495,8 @@ tabFrames["Чат с ИИ"] = chatTestFrame
 -- Хедер: заголовок + счётчик токенов справа
 local ctHeader = Instance.new("Frame")
 ctHeader.BackgroundTransparency = 1
-ctHeader.Size = UDim2.new(1, 0, 0, 40)
+ctHeader.Size = UDim2.new(1, -16, 0, 40)
+ctHeader.Position = UDim2.new(0, 8, 0, 0)
 ctHeader.Parent = chatTestFrame
 
 local ctTitle = makeTextLabel(ctHeader, "Чат с ИИ", 18, "bold")
@@ -8515,8 +8516,8 @@ ctLog.Name = "ChatLog"
 ctLog.BackgroundColor3 = THEME.InputBg
 ctLog.BackgroundTransparency = 0.3
 ctLog.BorderSizePixel = 0
-ctLog.Position = UDim2.new(0, 0, 0, 46)
-ctLog.Size = UDim2.new(1, 0, 1, -104)
+ctLog.Position = UDim2.new(0, 8, 0, 46)
+ctLog.Size = UDim2.new(1, -16, 1, -112)
 ctLog.CanvasSize = UDim2.new(0, 0, 0, 0)
 ctLog.ScrollBarThickness = 0
 ctLog.ScrollBarImageTransparency = 0.7
@@ -8622,8 +8623,8 @@ end
 -- ── Строка ввода (внизу) ──────────────────────────────────────────
 local ctInputArea = Instance.new("Frame")
 ctInputArea.BackgroundTransparency = 1
-ctInputArea.Position = UDim2.new(0, 0, 1, -52)
-ctInputArea.Size = UDim2.new(1, 0, 0, 48)
+ctInputArea.Position = UDim2.new(0, 8, 1, -56)
+ctInputArea.Size = UDim2.new(1, -16, 0, 48)
 ctInputArea.Parent = chatTestFrame
 
 -- Поле ввода
