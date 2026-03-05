@@ -5991,6 +5991,15 @@ do
     onRateLimitUpdate = refreshLimitDisplay
     if GroqRateLimitCache.updatedAt then refreshLimitDisplay() end
 
+    -- Автопроверка ключа при открытии вкладки если ключ уже сохранён
+    task.spawn(function()
+        task.wait(0.5)
+        local savedKey = getGroqApiKey()
+        if savedKey and savedKey:sub(1,4) == "gsk_" and #savedKey > 8 then
+            apiCheckBtn:MouseButton1Click()
+        end
+    end)
+
     apiCheckBtn.MouseButton1Click:Connect(function()
         local raw = tostring(apiBox.Text or "")
         local clean = raw:gsub("%s+", "")
@@ -9033,6 +9042,25 @@ end)
     end
 
     switchTab("Основное")
+
+    -- Автопроверка API при старте если ключ сохранён
+    task.spawn(function()
+        task.wait(2)
+        local savedKey = getGroqApiKey()
+        if savedKey and savedKey:sub(1,4) == "gsk_" and #savedKey > 8 then
+            local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+            if not req then return end
+            local ok2, res2 = pcall(req, {
+                Url    = "https://api.groq.com/openai/v1/chat/completions",
+                Method = "POST",
+                Headers = { ["Authorization"] = "Bearer " .. savedKey, ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode({ model = "llama-3.1-8b-instant", max_tokens = 1, messages = {{ role = "user", content = "hi" }} }),
+            })
+            if ok2 and res2 then
+                parseRateLimitHeaders(res2.Headers or res2.headers or {})
+            end
+        end
+    end)
 end
 
 createInterface()
