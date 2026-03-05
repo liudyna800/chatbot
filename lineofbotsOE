@@ -559,17 +559,17 @@ end
 -- v18.2.9: Веб-поиск через DuckDuckGo (для tool use)
 local function doWebSearch(query)
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if not httprequest then return nil end
+    if not httprequest then print("LOB SEARCH: no httprequest") return nil end
     local encoded = query:gsub("[^%w%-_%.~]", function(c)
         return string.format("%%%02X", string.byte(c))
     end)
-    -- Пробуем несколько SearXNG инстансов по очереди
     local instances = {
         "https://searx.be/search?q=" .. encoded .. "&format=json&language=ru",
         "https://search.bus-hit.me/search?q=" .. encoded .. "&format=json&language=ru",
         "https://paulgo.io/search?q=" .. encoded .. "&format=json&language=ru",
     }
     for _, url in ipairs(instances) do
+        print("LOB SEARCH: trying " .. url:sub(1, 40))
         local ok, res = pcall(httprequest, {
             Url = url,
             Method = "GET",
@@ -579,9 +579,12 @@ local function doWebSearch(query)
             },
         })
         if ok and res then
+            local status = res.StatusCode or res.statusCode or "?"
             local body = res.Body or res.body or ""
+            print("LOB SEARCH: status=" .. tostring(status) .. " bodylen=" .. #body)
             local ok2, data = pcall(function() return HttpService:JSONDecode(body) end)
             if ok2 and data and data.results and #data.results > 0 then
+                print("LOB SEARCH: got " .. #data.results .. " results!")
                 local parts = {}
                 for i, r in ipairs(data.results) do
                     if i > 5 then break end
@@ -591,12 +594,15 @@ local function doWebSearch(query)
                         table.insert(parts, r.title)
                     end
                 end
-                if #parts > 0 then
-                    return table.concat(parts, "\n")
-                end
+                if #parts > 0 then return table.concat(parts, "\n") end
+            else
+                print("LOB SEARCH: no results or parse fail, ok2=" .. tostring(ok2))
             end
+        else
+            print("LOB SEARCH: pcall fail, ok=" .. tostring(ok))
         end
     end
+    print("LOB SEARCH: all instances failed")
     return nil
 end
 
