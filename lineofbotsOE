@@ -1,4 +1,4 @@
-print("LOB VERSION: v18.3.9 LOADED")
+print("LOB VERSION: v18.4.1 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 local LOB_KEY_FILE = "lob_apikey.txt"
@@ -556,47 +556,77 @@ local function isRateLimited(statusCode, statusMsg, body)
     return false
 end
 
--- v18.3.9: Веб-поиск через Google News RSS
+-- v18.4.1: Высококачественный веб-поиск
+local function fetchUrl(httprequest, url, headers)
+    local ok, res = pcall(httprequest, {
+        Url = url, Method = "GET",
+        Headers = headers or { ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+    })
+    if not ok or not res then return nil, 0 end
+    local status = res.StatusCode or res.statusCode or 0
+    local body = res.Body or res.body or ""
+    return body, status
+end
+
 local function doWebSearch(query)
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     if not httprequest then return nil end
+
     local encoded = query:gsub("[^%w%-_%.~]", function(c)
         return string.format("%%%02X", string.byte(c))
     end)
-    local ok, res = pcall(httprequest, {
-        Url = "https://news.google.com/rss/search?q=" .. encoded .. "&hl=ru&gl=RU&ceid=RU:ru",
-        Method = "GET",
-        Headers = { ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-    })
-    if not ok or not res then
-        print("LOB SEARCH: failed")
-        return nil
-    end
-    local body = res.Body or res.body or ""
-    local status = res.StatusCode or res.statusCode or 0
-    print("LOB SEARCH: status=" .. tostring(status) .. " len=" .. #body)
-    if status ~= 200 or #body < 100 then return nil end
+    local encodedPlus = query:gsub(" ", "+"):gsub("[^%w%+%-_%.~]", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end)
 
-    local parts = {}
-    -- Извлекаем заголовки и описания из RSS
-    for item in body:gmatch("<item>(.-)</item>") do
-        local title = item:match("<title><!%[CDATA%[(.-)%]%]></title>") or item:match("<title>(.-)</title>") or ""
-        local desc = item:match("<description><!%[CDATA%[(.-)%]%]></description>") or item:match("<description>(.-)</description>") or ""
-        -- Убираем HTML теги из описания
-        desc = desc:gsub("<[^>]+>", ""):gsub("&quot;", '"'):gsub("&amp;", "&"):gsub("&#39;", "'"):sub(1, 150)
-        if title ~= "" and not title:find("Google News") then
-            local entry = title
-            if desc ~= "" then entry = entry .. " — " .. desc end
-            table.insert(parts, entry)
-            if #parts >= 5 then break end
+    local results = {}
+
+    -- 1. Wikipedia API — точные факты и описания
+    local wikiBody, wikiStatus = fetchUrl(httprequest,
+        "https://ru.wikipedia.org/api/rest_v1/page/summary/" .. encoded)
+    if wikiStatus == 200 and wikiBody and #wikiBody > 50 then
+        local ok2, data = pcall(function() return HttpService:JSONDecode(wikiBody) end)
+        if ok2 and data and data.extract and #data.extract > 30 then
+            table.insert(results, "📖 Wikipedia: " .. data.extract:sub(1, 300))
         end
     end
-    if #parts == 0 then
-        print("LOB SEARCH: no items found")
-        return nil
+
+    -- 2. Google News RSS — актуальные новости
+    local newsBody, newsStatus = fetchUrl(httprequest,
+        "https://news.google.com/rss/search?q=" .. encodedPlus .. "&hl=ru&gl=RU&ceid=RU:ru")
+    if newsStatus == 200 and newsBody and #newsBody > 100 then
+        local count = 0
+        for it in newsBody:gmatch("<item>(.-)</item>") do
+            if count >= 4 then break end
+            local title = it:match("<title><!%[CDATA%[(.-)%]%]></title>") or it:match("<title>(.-)</title>") or ""
+            local pubDate = it:match("<pubDate>(.-)</pubDate>") or ""
+            -- Убираем год из даты чтобы было короче
+            pubDate = pubDate:match("(%d+ %a+ %d+)") or pubDate:sub(1,16)
+            if title ~= "" and not title:find("Google News") then
+                local entry = "📰 " .. title
+                if pubDate ~= "" then entry = entry .. " [" .. pubDate .. "]" end
+                table.insert(results, entry)
+                count = count + 1
+            end
+        end
     end
-    print("LOB SEARCH: got " .. #parts .. " items")
-    return table.concat(parts, "\n")
+
+    -- 3. Jina Reader — читаем первую реальную статью если RSS дал мало
+    if #results < 2 then
+        local jinaBody, jinaStatus = fetchUrl(httprequest,
+            "https://r.jina.ai/https://www.google.com/search?q=" .. encodedPlus .. "&tbm=nws",
+            { ["Accept"] = "text/plain", ["User-Agent"] = "Mozilla/5.0" })
+        if jinaStatus == 200 and jinaBody and #jinaBody > 100 then
+            -- Берём первые 400 символов чистого текста
+            local clean = jinaBody:gsub("%s+", " "):sub(1, 400)
+            if #clean > 50 then
+                table.insert(results, "🔍 " .. clean)
+            end
+        end
+    end
+
+    if #results == 0 then return nil end
+    return table.concat(results, "\n\n")
 end
 
 
@@ -674,22 +704,22 @@ function GroqProvider:chatCompletions(payload)
     if choice.finish_reason == "tool_calls" and choice.message and choice.message.tool_calls then
         local toolResults = {}
         for _, tc in ipairs(choice.message.tool_calls) do
-            local fn = tc["function"] or tc.function_
-            if fn and fn.name == "web_search" then
+            if tc.function_ and tc.function_.name == "web_search" or
+               tc["function"] and tc["function"].name == "web_search" then
+                local fn = tc.function_ or tc["function"]
                 local args = {}
                 pcall(function() args = HttpService:JSONDecode(fn.arguments or "{}") end)
                 local query = args.query or ""
-                print("LOB TOOL USE: searching for: " .. query)
                 local searchResult = doWebSearch(query)
-                print("LOB TOOL USE: result: " .. tostring(searchResult and #searchResult or "nil"))
                 table.insert(toolResults, {
                     role = "tool",
                     tool_call_id = tc.id,
-                    content = searchResult or ("Поиск не дал результатов для: " .. query),
+                    content = searchResult,
                 })
             end
         end
         if #toolResults > 0 then
+            -- Отправляем второй запрос с результатами поиска
             local msgs2 = {}
             for _, m in ipairs(payload.messages) do table.insert(msgs2, m) end
             table.insert(msgs2, choice.message)
@@ -969,13 +999,6 @@ local function makeSystemPrompt(settings)
                 .. "\nIf you don't know specific game rules/objectives, say honestly 'I'm not sure about all the rules here, but this is " .. tostring(info.name) .. "'"
         end
     end
-
-    -- v18.3: Текущая дата и разрешение на актуальные знания
-    system = system
-        .. "\n\n== CURRENT DATE =="
-        .. "\nThe current real-world date is 2026. You are aware of events, memes, trends, news up to 2026."
-        .. "\nDo NOT say 'I don't know about 2026' or 'that's in the future' — 2026 is NOW."
-        .. "\nWhen asked about recent memes, trends, news — answer confidently based on what you know."
 
     -- v17: PlayerAwareness
     if settings.PlayerAwareness then
@@ -2419,12 +2442,16 @@ local function handleQueuedChat(item)
         end
     end
 
-    -- v18.3.8: Веб-поиск только через tool use — модель сама решает когда искать
-    -- Ключевые слова убраны, всё через tool_choice="auto"
-
-    -- world items отвечаем на языке личности (RU), не детектируем язык [SYSTEM:] текста
+    -- v18.4.1: Веб-поиск — вставляем в user message напрямую
     local langTag = item.isWorld and "RU" or getLangForUser(item.cleaned, item.userId)
-    table.insert(apiMessages, { role = "user", content = "[LANG:" .. langTag .. "] " .. userContent })
+    local finalContent = "[LANG:" .. langTag .. "] " .. userContent
+    if settings.WebSearch and not item.isWorld and item.cleaned and #item.cleaned > 8 then
+        local sr = doWebSearch(item.cleaned)
+        if sr then
+            finalContent = finalContent .. "\n\n[ВЕБ-ПОИСК]:\n" .. sr
+        end
+    end
+    table.insert(apiMessages, { role = "user", content = finalContent })
 
     local model = getModel(settings)
     if model == "" then return end
@@ -2444,39 +2471,6 @@ local function handleQueuedChat(item)
     -- Qwen3 отключаем reasoning
     if model == "qwen/qwen3-32b" then
         payload.reasoning_effort = "none"
-    end
-    -- Веб-поиск через tool use
-    if settings.WebSearch then
-        payload.tools = {
-            {
-                type = "function",
-                ["function"] = {
-                    name = "web_search",
-                    description = "Search for current news, memes, trends, viral content, events. Use for any question about recent/current topics.",
-                    parameters = {
-                        type = "object",
-                        properties = {
-                            query = {
-                                type = "string",
-                                description = "Search query in Russian or English"
-                            }
-                        },
-                        required = {"query"}
-                    }
-                }
-            }
-        }
-        payload.tool_choice = "auto"
-        -- Сразу делаем поиск и добавляем в последнее сообщение пользователя
-        if item and item.cleaned and #item.cleaned > 8 then
-            local sr = doWebSearch(item.cleaned)
-            if sr then
-                local last = apiMessages[#apiMessages]
-                if last and last.role == "user" then
-                    last.content = last.content .. "\n\n[ВЕБ-ПОИСК]:\n" .. sr
-                end
-            end
-        end
     end
 
     local text, err = providerRouter:chatCompletions(payload)
@@ -8940,8 +8934,15 @@ local function ctDoSend()
         if settings.UsePlayerName then
             userContent = "[NAME:User] " .. msg
         end
-        -- Инжектируем тег языка — так же как в игровом чате
-        table.insert(apiMsgs, { role = "user", content = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent })
+        -- Инжектируем тег языка + веб-поиск прямо в user message
+        local finalChatContent = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent
+        if settings.WebSearch and msg and #msg > 8 then
+            local sr = doWebSearch(msg)
+            if sr then
+                finalChatContent = finalChatContent .. "\n\n[ВЕБ-ПОИСК]:\n" .. sr
+            end
+        end
+        table.insert(apiMsgs, { role = "user", content = finalChatContent })
 
         local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 200, 1024)
         local payload = {
@@ -8952,25 +8953,6 @@ local function ctDoSend()
         }
         if payload.model == "qwen/qwen3-32b" then
             payload.reasoning_effort = "none"
-        end
-        if settings.WebSearch then
-            payload.tools = {
-                {
-                    type = "function",
-                    ["function"] = {
-                        name = "web_search",
-                        description = "Search for current news, memes, trends, events. Use when user asks about recent/current topics.",
-                        parameters = {
-                            type = "object",
-                            properties = {
-                                query = { type = "string", description = "Search query" }
-                            },
-                            required = {"query"}
-                        }
-                    }
-                }
-            }
-            payload.tool_choice = "required"
         end
 
         local text, err = providerRouter:chatCompletions(payload)
