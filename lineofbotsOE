@@ -4107,13 +4107,13 @@ local function createInterface()
     local isMobile = isPhone or isTablet
 
     if isPhone then
-        -- Телефон: компактное окно, подходящее для узкого экрана
-        winW = math.floor(math.min(viewportSize.X * 0.92, 420))
-        winH = math.floor(math.min(viewportSize.Y * 0.80, 540))
+        -- Телефон: то же соотношение сторон что на ПК (700×460), просто влезает в экран
+        winW = math.min(700, math.floor(viewportSize.X * 0.96))
+        winH = math.floor(winW * (460 / 700))
     elseif isTablet then
-        -- Планшет: чуть меньше стандартного ПК размера
-        winW = math.floor(math.min(viewportSize.X * 0.75, 750))
-        winH = math.floor(math.min(viewportSize.Y * 0.72, 520))
+        -- Планшет: стандартный ПК размер, просто немного меньше если экран мал
+        winW = math.min(700, math.floor(viewportSize.X * 0.88))
+        winH = math.floor(winW * (460 / 700))
     else
         -- ПК: сохранённые пресеты
         local presets = {
