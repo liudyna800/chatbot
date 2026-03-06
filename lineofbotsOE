@@ -8891,7 +8891,12 @@ local function ctDoSend()
         msg = msg:gsub("#", "")
         msg = msg:gsub("%s+", " "):match("^%s*(.-)%s*$")
     end
-    if msg == "" then return end  -- БАГ-ФИХ: не забываем сбросить ctSending
+    if msg == "" then
+        ctSending = false
+        ctSendBtn.BackgroundTransparency = 0
+        ctSendBtn.Text = ">>"
+        return
+    end
 
     ctSending = true
     ctInputBox.Text = ""
@@ -9004,11 +9009,11 @@ local function ctDoSend()
         end
     end)
 
-    -- БАГ-ФИХ таймаута: thisReqId сохранён ДО инкремента счётчика
-    -- Таймер сработает только если этот конкретный запрос завис
-    task.delay(90, function()
-        if ChatTestCallback and ctMsgCounter - 1 == thisReqId then
-            ChatTestCallback("⏱️ Нет ответа (90с). Проверь интернет или смени модель.", true)
+    -- Таймаут: если за 20 сек нет ответа — разблокируем
+    local savedReqId = thisReqId
+    task.delay(20, function()
+        if ChatTestCallback ~= nil then
+            ChatTestCallback("⏱️ Нет ответа (20с). Проверь интернет или смени модель.", true)
         end
     end)
 end
