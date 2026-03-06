@@ -1,4 +1,4 @@
-print("LOB VERSION: v18.4.1 LOADED")
+print("LOB VERSION: v18.2.8 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 local LOB_KEY_FILE = "lob_apikey.txt"
@@ -484,13 +484,7 @@ end
 -- HTTP Client for direct API calls
 -- HTTP Client for direct API calls (Executor Compatible)
 local function postJson(url, headers, bodyTable)
-    local body
-    local encOk, encErr = pcall(function()
-        body = HttpService:JSONEncode(bodyTable)
-    end)
-    if not encOk then
-        return nil, 0, "JSONEncodeFailed", tostring(encErr), {}
-    end
+    local body = HttpService:JSONEncode(bodyTable)
     
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     
@@ -562,77 +556,101 @@ local function isRateLimited(statusCode, statusMsg, body)
     return false
 end
 
--- v18.4.1: Высококачественный веб-поиск
-local function fetchUrl(httprequest, url, headers)
-    local ok, res = pcall(httprequest, {
-        Url = url, Method = "GET",
-        Headers = headers or { ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-    })
-    if not ok or not res then return nil, 0 end
-    local status = res.StatusCode or res.statusCode or 0
-    local body = res.Body or res.body or ""
-    return body, status
-end
-
+-- v18.4.3: Веб-поиск — три источника: Wikipedia + Google News RSS + Jina Reader (fallback)
 local function doWebSearch(query)
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if not httprequest then return nil end
+    if not httprequest then return "Поиск недоступен." end
 
-    local encoded = query:gsub("[^%w%-_%.~]", function(c)
-        return string.format("%%%02X", string.byte(c))
-    end)
-    local encodedPlus = query:gsub(" ", "+"):gsub("[^%w%+%-_%.~]", function(c)
-        return string.format("%%%02X", string.byte(c))
-    end)
+    -- URL-encode helper
+    local function urlEncode(s)
+        return s:gsub(" ", "+"):gsub("[^%w%+%-_%.~]", function(c)
+            return string.format("%%%02X", string.byte(c))
+        end)
+    end
+
+    -- URL-encode для path (пробел = %20, не +)
+    local function urlEncodePath(s)
+        return s:gsub("[^%w%-_%.~]", function(c)
+            return string.format("%%%02X", string.byte(c))
+        end)
+    end
+
+    -- Убрать XML/HTML теги и entities
+    local function stripTags(s)
+        s = s:gsub("<[^>]+>", "")
+        s = s:gsub("&amp;", "&"):gsub("&lt;", "<"):gsub("&gt;", ">")
+              :gsub("&quot;", '"'):gsub("&#39;", "'"):gsub("&nbsp;", " ")
+        return (s:match("^%s*(.-)%s*$") or s)
+    end
 
     local results = {}
 
-    -- 1. Wikipedia API — точные факты и описания
-    local wikiBody, wikiStatus = fetchUrl(httprequest,
-        "https://ru.wikipedia.org/api/rest_v1/page/summary/" .. encoded)
-    if wikiStatus == 200 and wikiBody and #wikiBody > 50 then
-        local ok2, data = pcall(function() return HttpService:JSONDecode(wikiBody) end)
-        if ok2 and data and data.extract and #data.extract > 30 then
-            table.insert(results, "📖 Wikipedia: " .. data.extract:sub(1, 300))
+    -- ── 1. Wikipedia Summary API ──────────────────────────────────
+    -- Точные факты и энциклопедические описания
+    local wikiTerm = (query:match("^([%w%s%-]+)") or query):match("^%s*(.-)%s*$") or query
+    local ok1, res1 = pcall(httprequest, {
+        Url    = "https://en.wikipedia.org/api/rest_v1/page/summary/" .. urlEncodePath(wikiTerm),
+        Method = "GET",
+        Headers = { ["Accept"] = "application/json" },
+    })
+    if ok1 and res1 then
+        local body1 = res1.Body or res1.body or ""
+        local ok_dec, data1 = pcall(function() return HttpService:JSONDecode(body1) end)
+        if ok_dec and data1 and type(data1.extract) == "string" and data1.extract ~= ""
+           and data1.type ~= "disambiguation" then
+            table.insert(results, "[Wiki] " .. data1.extract:sub(1, 500))
         end
     end
 
-    -- 2. Google News RSS — актуальные новости
-    local newsBody, newsStatus = fetchUrl(httprequest,
-        "https://news.google.com/rss/search?q=" .. encodedPlus .. "&hl=ru&gl=RU&ceid=RU:ru")
-    if newsStatus == 200 and newsBody and #newsBody > 100 then
-        local count = 0
-        for it in newsBody:gmatch("<item>(.-)</item>") do
-            if count >= 4 then break end
-            local title = it:match("<title><!%[CDATA%[(.-)%]%]></title>") or it:match("<title>(.-)</title>") or ""
-            local pubDate = it:match("<pubDate>(.-)</pubDate>") or ""
-            -- Убираем год из даты чтобы было короче
-            pubDate = pubDate:match("(%d+ %a+ %d+)") or pubDate:sub(1,16)
-            if title ~= "" and not title:find("Google News") then
-                local entry = "📰 " .. title
-                if pubDate ~= "" then entry = entry .. " [" .. pubDate .. "]" end
+    -- ── 2. Google News RSS ────────────────────────────────────────
+    -- Актуальные новости с датой публикации
+    local ok2, res2 = pcall(httprequest, {
+        Url    = "https://news.google.com/rss/search?q=" .. urlEncode(query) .. "&hl=en-US&gl=US&ceid=US:en",
+        Method = "GET",
+        Headers = { ["Accept"] = "application/rss+xml, text/xml" },
+    })
+    if ok2 and res2 then
+        local body2 = res2.Body or res2.body or ""
+        local newsCount = 0
+        -- Парсим <item>: title + pubDate
+        for item in body2:gmatch("<item>(.-)</item>") do
+            if newsCount >= 3 then break end
+            local rawTitle = item:match("<title><!%[CDATA%[(.-)%]%]></title>")
+                          or item:match("<title>([^<]+)</title>") or ""
+            local rawDate  = item:match("<pubDate>([^<]+)</pubDate>") or ""
+            local t = stripTags(rawTitle):sub(1, 160)
+            local d = rawDate:match("^(.-%d%d%d%d)") or rawDate:sub(1, 30) -- "Mon, 06 Mar 2026"
+            if t ~= "" and not t:find("^Google News") then
+                local entry = (d ~= "") and ("[News " .. d .. "] " .. t) or ("[News] " .. t)
                 table.insert(results, entry)
-                count = count + 1
+                newsCount = newsCount + 1
             end
         end
     end
 
-    -- 3. Jina Reader — читаем первую реальную статью если RSS дал мало
+    -- ── 3. Jina Reader — fallback если первые два дали мало ───────
+    -- Читает реальный текст любой страницы через r.jina.ai
     if #results < 2 then
-        local jinaBody, jinaStatus = fetchUrl(httprequest,
-            "https://r.jina.ai/https://www.google.com/search?q=" .. encodedPlus .. "&tbm=nws",
-            { ["Accept"] = "text/plain", ["User-Agent"] = "Mozilla/5.0" })
-        if jinaStatus == 200 and jinaBody and #jinaBody > 100 then
-            -- Берём первые 400 символов чистого текста
-            local clean = jinaBody:gsub("%s+", " "):sub(1, 400)
-            if #clean > 50 then
-                table.insert(results, "🔍 " .. clean)
+        local jinaUrl = "https://r.jina.ai/https://en.wikipedia.org/wiki/" .. urlEncodePath(wikiTerm)
+        local ok3, res3 = pcall(httprequest, {
+            Url    = jinaUrl,
+            Method = "GET",
+            Headers = { ["Accept"] = "text/plain" },
+        })
+        if ok3 and res3 then
+            local body3 = res3.Body or res3.body or ""
+            -- Берём первые ~500 символов содержательного текста
+            local text = body3:gsub("\n+", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+            if #text > 80 then
+                table.insert(results, "[Jina] " .. text:sub(1, 500))
             end
         end
     end
 
-    if #results == 0 then return nil end
-    return table.concat(results, "\n\n")
+    if #results == 0 then
+        return "Результаты не найдены для: " .. query
+    end
+    return table.concat(results, "\n")
 end
 
 
@@ -949,11 +967,6 @@ local function makeSystemPrompt(settings)
         else
             system = custom
         end
-        -- Убираем символы которые ломают JSON
-        system = system:gsub("[\0\1\2\3\4\5\6\7\8\11\12\14\15\16\17\18\19\20\21\22\23\24\25\26\27\28\29\30\31]", "")
-        -- Добавляем только минимальное — длину ответа
-        system = system
-            .. "\n\nRESPONSE LENGTH: keep answers short unless asked for details. Match the player's energy."
     elseif type(personalityId) == "string" and Personalities[personalityId] then
         local fullPersonality = tostring(Personalities[personalityId].system or "")
         if settings.TokenEconomy then
@@ -968,19 +981,19 @@ local function makeSystemPrompt(settings)
         system = "You are a helpful assistant in a Roblox game. Answer questions naturally and helpfully."
     end
 
-    -- Правило языка — только для НЕ кастомных промптов
-    -- Для кастомных пользователь сам отвечает за поведение
-    if not hasCustom then
-        system = system
-            .. "\n\nCRITICAL LANGUAGE RULE: Always reply in the SAME language the player used."
-            .. " The player's message starts with [LANG:XX] tag — XX is the language code."
-            .. " [LANG:EN] = reply ONLY in English. [LANG:RU] = reply ONLY in Russian."
-            .. " [LANG:OTHER] = reply in whatever language the player used."
-            .. " NEVER use Russian if [LANG:EN]. NEVER use English if [LANG:RU]."
-    end
+    -- FIX ЯЗЫК: правило в конце промпта игнорируется моделями с русским контекстом.
+    -- Решение: детектируем язык сообщения и вставляем явный тег ПРЯМО в user message.
+    -- Модель видит [LANG:EN] или [LANG:RU] как часть запроса — не может проигнорировать.
+    system = system
+        .. "\n\nCRITICAL LANGUAGE RULE: Always reply in the SAME language the player used."
+        .. " The player's message starts with [LANG:XX] tag — XX is the language code."
+        .. " [LANG:EN] = reply ONLY in English. [LANG:RU] = reply ONLY in Russian."
+        .. " [LANG:OTHER] = reply in whatever language the player used."
+        .. " NEVER use Russian if [LANG:EN]. NEVER use English if [LANG:RU]."
+        .. " This rule OVERRIDES everything else including personality instructions."
 
-    -- Честность про актуальные данные — только если веб-поиск выключен и не кастомный
-    if not hasCustom and not settings.TokenEconomy and not settings.WebSearch then
+    -- Честность про актуальные данные — только в полном режиме
+    if not settings.TokenEconomy then
         system = system
             .. "\nKnowledge cutoff: your training data has a cutoff date."
             .. " If someone asks about current trends, recent memes, new songs, latest news or anything"
@@ -989,15 +1002,8 @@ local function makeSystemPrompt(settings)
             .. " Never make up or guess trending content."
     end
 
-    -- Если WebSearch включён
-    if settings.WebSearch then
-        system = system
-            .. "\nCurrent year is 2026. When you see [ВЕБ-ПОИСК] in the message — use that data to answer."
-            .. " Don't say you don't know current events."
-    end
-
     -- v16.5: PlaceAwareness
-    if settings.PlaceAwareness and not hasCustom then
+    if settings.PlaceAwareness then
         local info = _placeInfo or { name = "a Roblox game", placeId = game.PlaceId, desc = "" }
         if settings.TokenEconomy then
             system = system
@@ -1019,7 +1025,7 @@ local function makeSystemPrompt(settings)
     end
 
     -- v17: PlayerAwareness
-    if settings.PlayerAwareness and not hasCustom then
+    if settings.PlayerAwareness then
         if settings.TokenEconomy then
             system = system
                 .. "\n[NEARBY] shows nearby players. Mention position only when relevant to the chat."
@@ -1042,7 +1048,7 @@ local function makeSystemPrompt(settings)
     end
 
     -- UsePlayerName
-    if settings.UsePlayerName and not hasCustom then
+    if settings.UsePlayerName then
         if settings.TokenEconomy then
             system = system
                 .. "\nSYSTEM: [NAME:X] = player's name. Use the name directly (e.g. 'hey Alex'). NEVER copy [NAME:...] tag."
@@ -1058,8 +1064,8 @@ local function makeSystemPrompt(settings)
         end
     end
 
-    -- v18: WorldReactions
-    if settings.WorldReactions and not hasCustom then
+    -- v18: WorldReactions — объясняем ИИ что такое [SYSTEM:] события
+    if settings.WorldReactions then
         system = system
             .. "\n\n== WORLD EVENTS =="
             .. "\nSometimes you receive a message starting with [SYSTEM: ...]. This is NOT from a player — it's an automatic event happening around you in the game world."
@@ -1073,8 +1079,8 @@ local function makeSystemPrompt(settings)
             .. "\n  - Respond in the language matching your personality (Russian by default)"
     end
 
-    -- v16: Actions & Emotes
-    if settings.ActionsEnabled and not hasCustom then
+    -- v16: Actions & Emotes — помечаем как SYSTEM чтобы личности не блокировали
+    if settings.ActionsEnabled then
         if settings.TokenEconomy then
             -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
             system = system
@@ -2460,16 +2466,21 @@ local function handleQueuedChat(item)
         end
     end
 
-    -- v18.4.1: Веб-поиск — вставляем в user message напрямую
-    local langTag = item.isWorld and "RU" or getLangForUser(item.cleaned, item.userId)
-    local finalContent = "[LANG:" .. langTag .. "] " .. userContent
-    if settings.WebSearch and not item.isWorld and item.cleaned and #item.cleaned > 8 then
-        local sr = doWebSearch(item.cleaned)
-        if sr then
-            finalContent = finalContent .. "\n\n[ВЕБ-ПОИСК]:\n" .. sr
+    -- v18.2.9: Веб-поиск — ищем по запросу пользователя и добавляем контекст
+    if settings.WebSearch and item.cleaned and #item.cleaned > 3 then
+        task.spawn(function() end) -- yield чтобы не блокировать
+        local searchResult = doWebSearch(item.cleaned)
+        if searchResult and searchResult ~= "" and not searchResult:find("не найдены") and not searchResult:find("Ошибка") then
+            table.insert(apiMessages, {
+                role = "system",
+                content = "[WEB SEARCH RESULTS for: " .. item.cleaned .. "]\n" .. searchResult .. "\n[Use this information to answer the user. Current year is 2026.]"
+            })
         end
     end
-    table.insert(apiMessages, { role = "user", content = finalContent })
+
+    -- world items отвечаем на языке личности (RU), не детектируем язык [SYSTEM:] текста
+    local langTag = item.isWorld and "RU" or getLangForUser(item.cleaned, item.userId)
+    table.insert(apiMessages, { role = "user", content = "[LANG:" .. langTag .. "] " .. userContent })
 
     local model = getModel(settings)
     if model == "" then return end
@@ -2489,6 +2500,29 @@ local function handleQueuedChat(item)
     -- Qwen3 отключаем reasoning
     if model == "qwen/qwen3-32b" then
         payload.reasoning_effort = "none"
+    end
+    -- Веб-поиск через tool use
+    if settings.WebSearch then
+        payload.tools = {
+            {
+                type = "function",
+                ["function"] = {
+                    name = "web_search",
+                    description = "Поиск актуальной информации в интернете: новости, мемы, события, факты.",
+                    parameters = {
+                        type = "object",
+                        properties = {
+                            query = {
+                                type = "string",
+                                description = "Поисковый запрос на русском или английском"
+                            }
+                        },
+                        required = {"query"}
+                    }
+                }
+            }
+        }
+        payload.tool_choice = "auto"
     end
 
     local text, err = providerRouter:chatCompletions(payload)
@@ -8899,12 +8933,7 @@ local function ctDoSend()
         msg = msg:gsub("#", "")
         msg = msg:gsub("%s+", " "):match("^%s*(.-)%s*$")
     end
-    if msg == "" then
-        ctSending = false
-        ctSendBtn.BackgroundTransparency = 0
-        ctSendBtn.Text = ">>"
-        return
-    end
+    if msg == "" then return end  -- БАГ-ФИХ: не забываем сбросить ctSending
 
     ctSending = true
     ctInputBox.Text = ""
@@ -8957,27 +8986,18 @@ local function ctDoSend()
         if settings.UsePlayerName then
             userContent = "[NAME:User] " .. msg
         end
-        -- Инжектируем тег языка + веб-поиск прямо в user message
-        local finalChatContent = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent
-        if settings.WebSearch and msg and #msg > 8 then
-            -- Веб-поиск с таймаутом через отдельный поток
-            local searchDone = false
-            local searchResult = nil
-            task.spawn(function()
-                searchResult = doWebSearch(msg)
-                searchDone = true
-            end)
-            -- Ждём максимум 5 сек
-            local waited = 0
-            while not searchDone and waited < 5 do
-                task.wait(0.1)
-                waited = waited + 0.1
-            end
-            if searchResult then
-                finalChatContent = finalChatContent .. "\n\n[ВЕБ-ПОИСК]:\n" .. searchResult
+        -- Инжектируем тег языка — так же как в игровом чате
+        -- v18.2.9: Веб-поиск для чата с ИИ
+        if settings.WebSearch and msg and #msg > 3 then
+            local searchResult = doWebSearch(msg)
+            if searchResult and searchResult ~= "" and not searchResult:find("не найдены") and not searchResult:find("Ошибка") then
+                table.insert(apiMsgs, {
+                    role = "system",
+                    content = "[WEB SEARCH RESULTS for: " .. msg .. "]\n" .. searchResult .. "\n[Use this information to answer the user. Current year is 2026.]"
+                })
             end
         end
-        table.insert(apiMsgs, { role = "user", content = finalChatContent })
+        table.insert(apiMsgs, { role = "user", content = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent })
 
         local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 200, 1024)
         local payload = {
@@ -8990,17 +9010,7 @@ local function ctDoSend()
             payload.reasoning_effort = "none"
         end
 
-        local ok, text, err = pcall(function()
-            return providerRouter:chatCompletions(payload)
-        end)
-
-        -- pcall вернул ошибку Lua (не API ошибку)
-        if not ok then
-            if ChatTestCallback then
-                ChatTestCallback("❌ Внутренняя ошибка: " .. tostring(text), true)
-            end
-            return
-        end
+        local text, err = providerRouter:chatCompletions(payload)
 
         -- Авто-retry при сетевой ошибке (1 попытка)
         if not text and err then
@@ -9008,10 +9018,7 @@ local function ctDoSend()
             local isNetErr = errL:find("timeout") or errL:find("timed") or errL:find("network") or errL:find("connection")
             if isNetErr then
                 task.wait(2)
-                ok, text, err = pcall(function()
-                    return providerRouter:chatCompletions(payload)
-                end)
-                if not ok then text = nil; err = tostring(text) end
+                text, err = providerRouter:chatCompletions(payload)
             end
         end
 
@@ -9019,8 +9026,8 @@ local function ctDoSend()
             appendHistory(DirectChatHistory, userContent, text)
         end
         if ChatTestCallback then
-            if not text or text == "" then
-                local errLower = tostring(err or ""):lower()
+            if err then
+                local errLower = tostring(err):lower()
                 local friendlyErr
                 if errLower:find("contentfiltered") or errLower:find("emptyresponse") then
                     friendlyErr = "🚫 Модель отказалась отвечать. Попробуй переформулировать."
@@ -9031,22 +9038,22 @@ local function ctDoSend()
                 elseif errLower:find("400") or errLower:find("bad request") then
                     friendlyErr = "⚠️ Модель не поддерживает этот запрос. Попробуй другую."
                 elseif errLower:find("timeout") or errLower:find("timed") then
-                    friendlyErr = "⏱️ Таймаут. Попробуй позже."
+                    friendlyErr = "⏱️ Таймаут даже после retry. Попробуй позже."
                 else
-                    friendlyErr = "❌ Ошибка: " .. tostring(err or "неизвестно")
+                    friendlyErr = "❌ Ошибка: " .. tostring(err)
                 end
                 ChatTestCallback(friendlyErr, true)
             else
-                ChatTestCallback(text, false)
+                ChatTestCallback(text or "Нет ответа", false)
             end
         end
     end)
 
-    -- Таймаут: если за 20 сек нет ответа — разблокируем
-    local savedReqId = thisReqId
-    task.delay(20, function()
-        if ChatTestCallback ~= nil then
-            ChatTestCallback("⏱️ Нет ответа (20с). Проверь интернет или смени модель.", true)
+    -- БАГ-ФИХ таймаута: thisReqId сохранён ДО инкремента счётчика
+    -- Таймер сработает только если этот конкретный запрос завис
+    task.delay(90, function()
+        if ChatTestCallback and ctMsgCounter - 1 == thisReqId then
+            ChatTestCallback("⏱️ Нет ответа (90с). Проверь интернет или смени модель.", true)
         end
     end)
 end
