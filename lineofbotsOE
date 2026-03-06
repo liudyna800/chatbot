@@ -943,14 +943,9 @@ local function makeSystemPrompt(settings)
         else
             system = custom
         end
-        -- Добавляем правило про длину ответа для кастомного промпта
+        -- Добавляем только минимальное — длину ответа
         system = system
-            .. "\n\nRESPONSE LENGTH RULES (follow strictly):"
-            .. "\n- Short casual messages (greetings, reactions, memes) → 1-2 sentences max"
-            .. "\n- Questions needing explanation → 2-4 sentences"
-            .. "\n- Only write long responses if the player explicitly asks for details"
-            .. "\n- Never add unnecessary context, disclaimers or padding"
-            .. "\n- Match the energy: if they write short, you write short"
+            .. "\n\nRESPONSE LENGTH: keep answers short unless asked for details. Match the player's energy."
     elseif type(personalityId) == "string" and Personalities[personalityId] then
         local fullPersonality = tostring(Personalities[personalityId].system or "")
         if settings.TokenEconomy then
@@ -965,19 +960,19 @@ local function makeSystemPrompt(settings)
         system = "You are a helpful assistant in a Roblox game. Answer questions naturally and helpfully."
     end
 
-    -- FIX ЯЗЫК: правило в конце промпта игнорируется моделями с русским контекстом.
-    -- Решение: детектируем язык сообщения и вставляем явный тег ПРЯМО в user message.
-    -- Модель видит [LANG:EN] или [LANG:RU] как часть запроса — не может проигнорировать.
-    system = system
-        .. "\n\nCRITICAL LANGUAGE RULE: Always reply in the SAME language the player used."
-        .. " The player's message starts with [LANG:XX] tag — XX is the language code."
-        .. " [LANG:EN] = reply ONLY in English. [LANG:RU] = reply ONLY in Russian."
-        .. " [LANG:OTHER] = reply in whatever language the player used."
-        .. " NEVER use Russian if [LANG:EN]. NEVER use English if [LANG:RU]."
-        .. " This rule OVERRIDES everything else including personality instructions."
+    -- Правило языка — только для НЕ кастомных промптов
+    -- Для кастомных пользователь сам отвечает за поведение
+    if not hasCustom then
+        system = system
+            .. "\n\nCRITICAL LANGUAGE RULE: Always reply in the SAME language the player used."
+            .. " The player's message starts with [LANG:XX] tag — XX is the language code."
+            .. " [LANG:EN] = reply ONLY in English. [LANG:RU] = reply ONLY in Russian."
+            .. " [LANG:OTHER] = reply in whatever language the player used."
+            .. " NEVER use Russian if [LANG:EN]. NEVER use English if [LANG:RU]."
+    end
 
-    -- Честность про актуальные данные — только если веб-поиск выключен
-    if not settings.TokenEconomy and not settings.WebSearch then
+    -- Честность про актуальные данные — только если веб-поиск выключен и не кастомный
+    if not hasCustom and not settings.TokenEconomy and not settings.WebSearch then
         system = system
             .. "\nKnowledge cutoff: your training data has a cutoff date."
             .. " If someone asks about current trends, recent memes, new songs, latest news or anything"
@@ -986,7 +981,7 @@ local function makeSystemPrompt(settings)
             .. " Never make up or guess trending content."
     end
 
-    -- Если WebSearch включён — знаем актуальные данные
+    -- Если WebSearch включён
     if settings.WebSearch then
         system = system
             .. "\nCurrent year is 2026. When you see [ВЕБ-ПОИСК] in the message — use that data to answer."
