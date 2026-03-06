@@ -484,7 +484,13 @@ end
 -- HTTP Client for direct API calls
 -- HTTP Client for direct API calls (Executor Compatible)
 local function postJson(url, headers, bodyTable)
-    local body = HttpService:JSONEncode(bodyTable)
+    local body
+    local encOk, encErr = pcall(function()
+        body = HttpService:JSONEncode(bodyTable)
+    end)
+    if not encOk then
+        return nil, 0, "JSONEncodeFailed", tostring(encErr), {}
+    end
     
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     
@@ -943,6 +949,8 @@ local function makeSystemPrompt(settings)
         else
             system = custom
         end
+        -- Убираем символы которые ломают JSON
+        system = system:gsub("[\0\1\2\3\4\5\6\7\8\11\12\14\15\16\17\18\19\20\21\22\23\24\25\26\27\28\29\30\31]", "")
         -- Добавляем только минимальное — длину ответа
         system = system
             .. "\n\nRESPONSE LENGTH: keep answers short unless asked for details. Match the player's energy."
@@ -989,7 +997,7 @@ local function makeSystemPrompt(settings)
     end
 
     -- v16.5: PlaceAwareness
-    if settings.PlaceAwareness then
+    if settings.PlaceAwareness and not hasCustom then
         local info = _placeInfo or { name = "a Roblox game", placeId = game.PlaceId, desc = "" }
         if settings.TokenEconomy then
             system = system
@@ -1011,7 +1019,7 @@ local function makeSystemPrompt(settings)
     end
 
     -- v17: PlayerAwareness
-    if settings.PlayerAwareness then
+    if settings.PlayerAwareness and not hasCustom then
         if settings.TokenEconomy then
             system = system
                 .. "\n[NEARBY] shows nearby players. Mention position only when relevant to the chat."
@@ -1034,7 +1042,7 @@ local function makeSystemPrompt(settings)
     end
 
     -- UsePlayerName
-    if settings.UsePlayerName then
+    if settings.UsePlayerName and not hasCustom then
         if settings.TokenEconomy then
             system = system
                 .. "\nSYSTEM: [NAME:X] = player's name. Use the name directly (e.g. 'hey Alex'). NEVER copy [NAME:...] tag."
@@ -1050,8 +1058,8 @@ local function makeSystemPrompt(settings)
         end
     end
 
-    -- v18: WorldReactions — объясняем ИИ что такое [SYSTEM:] события
-    if settings.WorldReactions then
+    -- v18: WorldReactions
+    if settings.WorldReactions and not hasCustom then
         system = system
             .. "\n\n== WORLD EVENTS =="
             .. "\nSometimes you receive a message starting with [SYSTEM: ...]. This is NOT from a player — it's an automatic event happening around you in the game world."
@@ -1065,8 +1073,8 @@ local function makeSystemPrompt(settings)
             .. "\n  - Respond in the language matching your personality (Russian by default)"
     end
 
-    -- v16: Actions & Emotes — помечаем как SYSTEM чтобы личности не блокировали
-    if settings.ActionsEnabled then
+    -- v16: Actions & Emotes
+    if settings.ActionsEnabled and not hasCustom then
         if settings.TokenEconomy then
             -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
             system = system
