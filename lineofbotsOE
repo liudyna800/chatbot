@@ -4100,11 +4100,11 @@ local function createInterface()
 
     local hasTouch    = uis.TouchEnabled
     local hasKeyboard = uis.KeyboardEnabled
-    -- Телефон: touch, нет клавиатуры, экран уже 900px
-    local isPhone  = hasTouch and not hasKeyboard and viewportSize.X < 900
-    -- Планшет: touch, нет клавиатуры, экран шире
-    local isTablet = hasTouch and not hasKeyboard and viewportSize.X >= 900
-    local isMobile = isPhone or isTablet
+    -- Мобильное устройство = есть touch, нет клавиатуры (телефон или планшет)
+    -- Не используем размер экрана — телефоны типа Samsung A35 имеют 1080px+
+    local isMobile = hasTouch and not hasKeyboard
+    local isPhone  = isMobile  -- для совместимости
+    local isTablet = false
 
     if isPhone or isTablet then
         winW = 700
@@ -4171,39 +4171,44 @@ local function createInterface()
     end)
 
 
-    local window = Instance.new("CanvasGroup")
-    -- Масштаб: окно должно занимать не более 88% ширины и 80% высоты экрана
+    -- Масштаб: вычисляем сколько нужно уменьшить чтобы влезло на экран
     local guiScale = 1.0
     if isMobile then
-        local maxW = viewportSize.X * 0.88
-        local maxH = viewportSize.Y * 0.80
-        local scaleByW = maxW / winW
-        local scaleByH = maxH / winH
+        local scaleByW = (viewportSize.X * 0.88) / winW
+        local scaleByH = (viewportSize.Y * 0.80) / winH
         guiScale = math.min(scaleByW, scaleByH, 1.0)
+        guiScale = math.max(guiScale, 0.40)
     end
     local scaledW = math.floor(winW * guiScale)
     local scaledH = math.floor(winH * guiScale)
-    window.Size = UDim2.new(0, scaledW, 0, scaledH)
+
+    -- windowHolder — обычный Frame, UIScale работает только на Frame, не на CanvasGroup
+    local windowHolder = Instance.new("Frame")
+    windowHolder.BackgroundTransparency = 1
+    windowHolder.BorderSizePixel = 0
+    windowHolder.Size = UDim2.new(0, scaledW, 0, scaledH)
     do
         local margin = 16
         local vp = viewportSize
         local x = math.clamp(math.floor((vp.X - scaledW) * 0.5), margin, math.max(margin, vp.X - scaledW - margin))
         local y = math.clamp(math.floor((vp.Y - scaledH) * 0.5 + 10), margin, math.max(margin, vp.Y - scaledH - margin))
-        window.Position = UDim2.fromOffset(x, y)
+        windowHolder.Position = UDim2.fromOffset(x, y)
     end
+    windowHolder.Parent = gui
+    local uiScale = Instance.new("UIScale")
+    uiScale.Scale = guiScale
+    uiScale.Parent = windowHolder
+    makeDraggable(windowHolder)
 
+    local window = Instance.new("CanvasGroup")
+    window.Size = UDim2.new(0, winW, 0, winH)
+    window.Position = UDim2.fromOffset(0, 0)
     window.BackgroundColor3 = THEME.Window
     window.BackgroundTransparency = THEME.WindowTransparency or 0.05
     window.ClipsDescendants = false
-    window.Parent = gui
+    window.Parent = windowHolder
     makeCorner(window, 18)
     local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
-    makeDraggable(window)
-
-    -- UIScale масштабирует всё содержимое пропорционально
-    local uiScale = Instance.new("UIScale")
-    uiScale.Scale = guiScale
-    uiScale.Parent = window
 
     -- Sidebar
     local sidebarWidth = 182
@@ -9271,4 +9276,15 @@ end)
     end)
 end
 
+-- DEBUG: печатаем viewport и device info в консоль
+do
+    local uis2 = game:GetService("UserInputService")
+    local cam2 = workspace.CurrentCamera
+    local vp2 = cam2 and cam2.ViewportSize or Vector2.new(0,0)
+    print(string.format("[LineOfBots] viewport=%.0fx%.0f touch=%s keyboard=%s",
+        vp2.X, vp2.Y,
+        tostring(uis2.TouchEnabled),
+        tostring(uis2.KeyboardEnabled)
+    ))
+end
 createInterface()
