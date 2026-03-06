@@ -4093,21 +4093,28 @@ local function createInterface()
     local winW = tonumber(ClientSettings.UI and ClientSettings.UI.WindowWidth) or 700
     local winH = tonumber(ClientSettings.UI and ClientSettings.UI.WindowHeight) or 460
     
-    -- Mobile detection
+    -- Device detection
     local uis = game:GetService("UserInputService")
-    local isMobile = uis.TouchEnabled and not uis.KeyboardEnabled
     local cam = workspace.CurrentCamera
     local viewportSize = cam and cam.ViewportSize or Vector2.new(1920, 1080)
-    
-    -- On mobile, use responsive sizing
-    if isMobile then
-        -- Mobile: Use 95% of screen width, maintain aspect ratio
-        local maxW = math.floor(viewportSize.X * 0.95)
-        local maxH = math.floor(viewportSize.Y * 0.85)
-        winW = math.min(maxW, 700)
-        winH = math.min(maxH, math.floor(winW * 0.65)) -- 65% aspect ratio
+
+    -- Phone: touch, no keyboard, экран < 900px по ширине
+    local hasTouch    = uis.TouchEnabled
+    local hasKeyboard = uis.KeyboardEnabled
+    local isPhone  = hasTouch and not hasKeyboard and viewportSize.X < 900
+    local isTablet = hasTouch and not hasKeyboard and viewportSize.X >= 900
+    local isMobile = isPhone or isTablet -- для обратной совместимости
+
+    if isPhone then
+        -- Телефон: весь экран без отступов
+        winW = math.floor(viewportSize.X)
+        winH = math.floor(viewportSize.Y)
+    elseif isTablet then
+        -- Планшет: 95% экрана
+        winW = math.min(math.floor(viewportSize.X * 0.95), 900)
+        winH = math.min(math.floor(viewportSize.Y * 0.88), 620)
     else
-        -- Desktop: Clamp window size to presets
+        -- ПК: сохранённые пресеты
         local presets = {
             { w = 650, h = 450 },
             { w = 700, h = 460 },
@@ -4139,6 +4146,11 @@ local function createInterface()
     pcall(function()
         gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     end)
+    if isPhone then
+        -- Полный экран без отступа под топбаром Roblox
+        pcall(function() gui.IgnoreGuiInset = true end)
+        pcall(function() gui.ScreenInsets = Enum.ScreenInsets.None end)
+    end
     gui.Parent = player:WaitForChild("PlayerGui")
     CurrentGui = gui
     NotifyHost = nil
@@ -4169,49 +4181,72 @@ local function createInterface()
 
 
     local window = Instance.new("CanvasGroup")
-    window.Size = UDim2.new(0, winW, 0, winH)
-    do
-        local function computeWindowPosition()
-            local margin = 24
-            local yOffset = 10
-            local cam = workspace.CurrentCamera
-            local vp = cam and cam.ViewportSize
-            if vp then
-                local x = math.floor((vp.X - winW) * 0.5)
-                local y = math.floor((vp.Y - winH) * 0.5 + yOffset)
-                x = math.clamp(x, margin, math.max(margin, vp.X - winW - margin))
-                y = math.clamp(y, margin, math.max(margin, vp.Y - winH - margin))
-                return UDim2.fromOffset(x, y)
+    if isPhone then
+        -- Телефон: весь экран, прилипает к краям
+        window.Size     = UDim2.new(1, 0, 1, 0)
+        window.Position = UDim2.new(0, 0, 0, 0)
+    else
+        window.Size = UDim2.new(0, winW, 0, winH)
+        do
+            local function computeWindowPosition()
+                local margin = 24
+                local yOffset = 10
+                local cam2 = workspace.CurrentCamera
+                local vp = cam2 and cam2.ViewportSize
+                if vp then
+                    local x = math.floor((vp.X - winW) * 0.5)
+                    local y = math.floor((vp.Y - winH) * 0.5 + yOffset)
+                    x = math.clamp(x, margin, math.max(margin, vp.X - winW - margin))
+                    y = math.clamp(y, margin, math.max(margin, vp.Y - winH - margin))
+                    return UDim2.fromOffset(x, y)
+                end
+                return UDim2.new(0.5, -math.floor(winW * 0.5), 0.5, -math.floor(winH * 0.5) + yOffset)
             end
-            return UDim2.new(0.5, -math.floor(winW * 0.5), 0.5, -math.floor(winH * 0.5) + yOffset)
+            window.Position = computeWindowPosition()
         end
-        window.Position = computeWindowPosition()
     end
     window.BackgroundColor3 = THEME.Window
     window.BackgroundTransparency = THEME.WindowTransparency or 0.05
     window.ClipsDescendants = false
     window.Parent = gui
-    makeCorner(window, 18)
-    local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
-    makeDraggable(window)
+    if not isPhone then
+        makeCorner(window, 18)
+    end
+    local windowStroke = not isPhone and makeStroke(window, 1.5, THEME.Accent, 0.4) or nil
+    if not isPhone then
+        makeDraggable(window)
+    end
 
     -- Sidebar
-    local sidebarWidth = isMobile and 140 or 182
+    local PHONE_NAVBAR_H = 56
+    local sidebarWidth = isPhone and 0 or (isTablet and 150 or 182)
     local sidebar = Instance.new("Frame")
-    sidebar.Size = UDim2.new(0, sidebarWidth, 1, 0)
+    if isPhone then
+        sidebar.Size = UDim2.new(1, 0, 0, PHONE_NAVBAR_H)
+        sidebar.AnchorPoint = Vector2.new(0, 1)
+        sidebar.Position = UDim2.new(0, 0, 1, 0)
+    else
+        sidebar.Size = UDim2.new(0, sidebarWidth, 1, 0)
+    end
     sidebar.BackgroundColor3 = THEME.Sidebar
     sidebar.BackgroundTransparency = THEME.SidebarTransparency or 0.20
     sidebar.BorderSizePixel = 0
     sidebar.Parent = window
-    makeCorner(sidebar, 18)
+    if not isPhone then makeCorner(sidebar, 18) end
 
     -- Тонкий разделитель (статичный, не перекрывает)
     local sidebarDivider = Instance.new("Frame")
     sidebarDivider.BackgroundColor3 = THEME.Stroke
     sidebarDivider.BackgroundTransparency = THEME.StrokeTransparency
     sidebarDivider.BorderSizePixel = 0
-    sidebarDivider.Position = UDim2.new(1, -1, 0.05, 0)
-    sidebarDivider.Size = UDim2.new(0, 1, 0.9, 0)
+    if isPhone then
+        -- На телефоне: горизонтальный разделитель сверху нижней панели
+        sidebarDivider.Position = UDim2.new(0, 0, 0, 0)
+        sidebarDivider.Size = UDim2.new(1, 0, 0, 1)
+    else
+        sidebarDivider.Position = UDim2.new(1, -1, 0.05, 0)
+        sidebarDivider.Size = UDim2.new(0, 1, 0.9, 0)
+    end
     sidebarDivider.Parent = sidebar
 
     -- Центральный aurora loop — один на всё окно, меняет только stroke рамки
@@ -4231,11 +4266,12 @@ local function createInterface()
         windowStroke.Transparency = 0.35
     end))
 
--- Заголовок сайдбара
+-- Заголовок сайдбара (только на ПК/планшете)
 local sidebarLogoArea = Instance.new("Frame")
 sidebarLogoArea.Size = UDim2.new(1, 0, 0, 62)
 sidebarLogoArea.BackgroundTransparency = 1
 sidebarLogoArea.Position = UDim2.new(0, 0, 0, 0)
+sidebarLogoArea.Visible = not isPhone
 sidebarLogoArea.Parent = sidebar
 
 -- Цветной блок-акцент слева от заголовка
@@ -4277,20 +4313,34 @@ titleDivider.Position = UDim2.new(0, 12, 0, 60)
 titleDivider.BackgroundColor3 = THEME.Stroke
 titleDivider.BackgroundTransparency = THEME.StrokeTransparency
 titleDivider.BorderSizePixel = 0
+titleDivider.Visible = not isPhone
 titleDivider.Parent = sidebar
 
 local tabContainer = Instance.new("Frame")
 tabContainer.BackgroundTransparency = 1
-tabContainer.Position = UDim2.new(0, 6, 0, 70)
-tabContainer.Size = UDim2.new(1, -12, 0, 248)  -- фиксированная высота: 6кнопок×38 + 5gap×4 = 248px
+if isPhone then
+    -- На телефоне: иконки в ряд по всей ширине
+    tabContainer.Position = UDim2.new(0, 0, 0, 4)
+    tabContainer.Size = UDim2.new(1, 0, 1, -8)
+else
+    tabContainer.Position = UDim2.new(0, 6, 0, 70)
+    tabContainer.Size = UDim2.new(1, -12, 0, 248)
+end
 tabContainer.Parent = sidebar
 
 local tabLayout = Instance.new("UIListLayout")
-tabLayout.Padding = UDim.new(0, 4)
+if isPhone then
+    tabLayout.FillDirection = Enum.FillDirection.Horizontal
+    tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    tabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    tabLayout.Padding = UDim.new(0, 2)
+else
+    tabLayout.Padding = UDim.new(0, 4)
+end
 tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 tabLayout.Parent = tabContainer
 
--- ── Статус-блок снизу сайдбара (всегда виден на всех вкладках) ──
+-- ── Статус-блок снизу сайдбара (только на ПК/планшете) ──
 local sidebarStatus = Instance.new("Frame")
 sidebarStatus.BackgroundColor3 = THEME.Card
 sidebarStatus.BackgroundTransparency = THEME.CardTransparency or 0.55
@@ -4299,6 +4349,7 @@ sidebarStatus.AnchorPoint = Vector2.new(0, 1)
 sidebarStatus.Position = UDim2.new(0, 6, 1, -10)
 sidebarStatus.Size = UDim2.new(1, -12, 0, 116)
 sidebarStatus.ClipsDescendants = true
+sidebarStatus.Visible = not isPhone
 sidebarStatus.Parent = sidebar
 makeCorner(sidebarStatus, 18)
 makeStroke(sidebarStatus, 1, Color3.fromRGB(255,255,255), 0.82)
@@ -4449,12 +4500,17 @@ end
 
     local contentArea = Instance.new("Frame")
     contentArea.BackgroundTransparency = 1
-    contentArea.Position = UDim2.new(0, sidebarWidth, 0, 0)
-    contentArea.Size = UDim2.new(1, -sidebarWidth - contentAreaRightMargin, 1, 0)
+    if isPhone then
+        contentArea.Position = UDim2.new(0, 0, 0, 0)
+        contentArea.Size = UDim2.new(1, 0, 1, -PHONE_NAVBAR_H)
+    else
+        contentArea.Position = UDim2.new(0, sidebarWidth, 0, 0)
+        contentArea.Size = UDim2.new(1, -sidebarWidth - contentAreaRightMargin, 1, 0)
+    end
     contentArea.ClipsDescendants = false
     contentArea.Parent = window
 
-    local contentPadValue = isMobile and 12 or 16
+    local contentPadValue = isPhone and 8 or (isTablet and 12 or 16)
     local contentPad = Instance.new("UIPadding")
     contentPad.PaddingTop    = UDim.new(0, contentPadValue)
     contentPad.PaddingBottom = UDim.new(0, contentPadValue)
@@ -4622,20 +4678,31 @@ end
 local function makeTabButton(name, iconId)
     local btn = Instance.new("TextButton")
     btn.Text = ""
-    btn.Size = UDim2.new(1, 0, 0, 38)
+    if isPhone then
+        -- Телефон: квадратная иконка-кнопка в нижней панели
+        btn.Size = UDim2.new(0, 48, 1, 0)
+    else
+        btn.Size = UDim2.new(1, 0, 0, 38)
+    end
     btn.BackgroundTransparency = 1
     btn.BackgroundColor3 = THEME.SidebarSelected
     btn.ClipsDescendants = true
     btn.Parent = tabContainer
-    makeCorner(btn, 18)
+    makeCorner(btn, isPhone and 12 or 18)
 
-    -- Акцентная полоска (переливается когда активна)
+    -- Акцентная полоска (на телефоне — снизу, иначе — слева)
     local strip = Instance.new("Frame")
     strip.Name = "AccentStrip"
     strip.BackgroundColor3 = THEME.Accent
     strip.BorderSizePixel = 0
-    strip.Size = UDim2.new(0, 3, 0, 22)
-    strip.Position = UDim2.new(0, 4, 0.5, -11)
+    if isPhone then
+        strip.Size = UDim2.new(0.6, 0, 0, 3)
+        strip.AnchorPoint = Vector2.new(0.5, 1)
+        strip.Position = UDim2.new(0.5, 0, 1, -2)
+    else
+        strip.Size = UDim2.new(0, 3, 0, 22)
+        strip.Position = UDim2.new(0, 4, 0.5, -11)
+    end
     strip.Visible = false
     strip.Parent = btn
     makeCorner(strip, 2)
@@ -4665,14 +4732,30 @@ local function makeTabButton(name, iconId)
     i.BackgroundTransparency = 1
     i.Image = iconId
     i.ImageColor3 = THEME.IconTint
-    i.Size = UDim2.new(0, 20, 0, 20)
-    i.Position = UDim2.new(0, 16, 0.5, -10)
+    if isPhone then
+        -- Центрируем иконку в квадратной кнопке
+        i.Size = UDim2.new(0, 22, 0, 22)
+        i.AnchorPoint = Vector2.new(0.5, 0.5)
+        i.Position = UDim2.new(0.5, 0, 0.5, -2)
+    else
+        i.Size = UDim2.new(0, 20, 0, 20)
+        i.Position = UDim2.new(0, 16, 0.5, -10)
+    end
     i.Parent = container
 
-    local l = makeTextLabel(container, name, 14, "semibold")
+    local l = makeTextLabel(container, isPhone and "" or name, 14, "semibold")
     l.Name = "Label"
-    l.Size = UDim2.new(1, -50, 1, 0)
-    l.Position = UDim2.new(0, 46, 0, 0)
+    if isPhone then
+        -- Маленький текст под иконкой на телефоне
+        l.Text = name:sub(1,3) -- первые 3 символа как аббревиатура
+        l.Size = UDim2.new(1, 0, 0, 11)
+        l.Position = UDim2.new(0, 0, 1, -13)
+        l.TextSize = 9
+        l.TextXAlignment = Enum.TextXAlignment.Center
+    else
+        l.Size = UDim2.new(1, -50, 1, 0)
+        l.Position = UDim2.new(0, 46, 0, 0)
+    end
     l.TextColor3 = THEME.TextDim
 
     btn.MouseEnter:Connect(function()
@@ -9118,7 +9201,7 @@ task.spawn(function()
     end
 end)
 
--- Кнопка свернуть на шапке окна — квадратная, красивее
+-- Кнопка свернуть — только на ПК и планшете
 local minimizeBtn = Instance.new("TextButton")
 minimizeBtn.Size = UDim2.new(0, 36, 0, 26)
 minimizeBtn.Position = UDim2.new(1, -44, 0, 7)
@@ -9130,6 +9213,7 @@ minimizeBtn.TextSize = 16
 minimizeBtn.TextColor3 = THEME.TextDim
 minimizeBtn.AutoButtonColor = false
 minimizeBtn.ZIndex = 5
+minimizeBtn.Visible = not isPhone
 minimizeBtn.Parent = window
 makeCorner(minimizeBtn, 8)
 makeStroke(minimizeBtn, 1, THEME.Stroke, 0.6)
