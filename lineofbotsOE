@@ -4106,14 +4106,10 @@ local function createInterface()
     local isTablet = hasTouch and not hasKeyboard and viewportSize.X >= 900
     local isMobile = isPhone or isTablet
 
-    if isPhone then
-        -- Телефон: то же соотношение сторон что на ПК (700×460), просто влезает в экран
-        winW = math.min(700, math.floor(viewportSize.X * 0.96))
-        winH = math.floor(winW * (460 / 700))
-    elseif isTablet then
-        -- Планшет: стандартный ПК размер, просто немного меньше если экран мал
-        winW = math.min(700, math.floor(viewportSize.X * 0.88))
-        winH = math.floor(winW * (460 / 700))
+    if isPhone or isTablet then
+        -- Мобильные: фиксированный стандартный размер как на ПК
+        winW = 700
+        winH = 460
     else
         -- ПК: сохранённые пресеты
         local presets = {
@@ -4204,7 +4200,7 @@ local function createInterface()
     makeDraggable(window)
 
     -- Sidebar
-    local sidebarWidth = isMobile and 148 or 182
+    local sidebarWidth = 182
     local sidebar = Instance.new("Frame")
     sidebar.Size = UDim2.new(0, sidebarWidth, 1, 0)
     sidebar.BackgroundColor3 = THEME.Sidebar
