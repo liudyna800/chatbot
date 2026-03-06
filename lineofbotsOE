@@ -4107,7 +4107,6 @@ local function createInterface()
     local isMobile = isPhone or isTablet
 
     if isPhone or isTablet then
-        -- Мобильные: фиксированный стандартный размер как на ПК
         winW = 700
         winH = 460
     else
@@ -4173,24 +4172,26 @@ local function createInterface()
 
 
     local window = Instance.new("CanvasGroup")
-    window.Size = UDim2.new(0, winW, 0, winH)
-    do
-        local function computeWindowPosition()
-            local margin = 24
-            local yOffset = 10
-            local cam2 = workspace.CurrentCamera
-            local vp = cam2 and cam2.ViewportSize
-            if vp then
-                local x = math.floor((vp.X - winW) * 0.5)
-                local y = math.floor((vp.Y - winH) * 0.5 + yOffset)
-                x = math.clamp(x, margin, math.max(margin, vp.X - winW - margin))
-                y = math.clamp(y, margin, math.max(margin, vp.Y - winH - margin))
-                return UDim2.fromOffset(x, y)
-            end
-            return UDim2.new(0.5, -math.floor(winW * 0.5), 0.5, -math.floor(winH * 0.5) + yOffset)
-        end
-        window.Position = computeWindowPosition()
+    -- Масштаб: окно должно занимать не более 88% ширины и 80% высоты экрана
+    local guiScale = 1.0
+    if isMobile then
+        local maxW = viewportSize.X * 0.88
+        local maxH = viewportSize.Y * 0.80
+        local scaleByW = maxW / winW
+        local scaleByH = maxH / winH
+        guiScale = math.min(scaleByW, scaleByH, 1.0)
     end
+    local scaledW = math.floor(winW * guiScale)
+    local scaledH = math.floor(winH * guiScale)
+    window.Size = UDim2.new(0, scaledW, 0, scaledH)
+    do
+        local margin = 16
+        local vp = viewportSize
+        local x = math.clamp(math.floor((vp.X - scaledW) * 0.5), margin, math.max(margin, vp.X - scaledW - margin))
+        local y = math.clamp(math.floor((vp.Y - scaledH) * 0.5 + 10), margin, math.max(margin, vp.Y - scaledH - margin))
+        window.Position = UDim2.fromOffset(x, y)
+    end
+
     window.BackgroundColor3 = THEME.Window
     window.BackgroundTransparency = THEME.WindowTransparency or 0.05
     window.ClipsDescendants = false
@@ -4198,6 +4199,11 @@ local function createInterface()
     makeCorner(window, 18)
     local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
     makeDraggable(window)
+
+    -- UIScale масштабирует всё содержимое пропорционально
+    local uiScale = Instance.new("UIScale")
+    uiScale.Scale = guiScale
+    uiScale.Parent = window
 
     -- Sidebar
     local sidebarWidth = 182
