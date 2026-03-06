@@ -8952,9 +8952,21 @@ local function ctDoSend()
         -- Инжектируем тег языка + веб-поиск прямо в user message
         local finalChatContent = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent
         if settings.WebSearch and msg and #msg > 8 then
-            local sr = doWebSearch(msg)
-            if sr then
-                finalChatContent = finalChatContent .. "\n\n[ВЕБ-ПОИСК]:\n" .. sr
+            -- Веб-поиск с таймаутом через отдельный поток
+            local searchDone = false
+            local searchResult = nil
+            task.spawn(function()
+                searchResult = doWebSearch(msg)
+                searchDone = true
+            end)
+            -- Ждём максимум 5 сек
+            local waited = 0
+            while not searchDone and waited < 5 do
+                task.wait(0.1)
+                waited = waited + 0.1
+            end
+            if searchResult then
+                finalChatContent = finalChatContent .. "\n\n[ВЕБ-ПОИСК]:\n" .. searchResult
             end
         end
         table.insert(apiMsgs, { role = "user", content = finalChatContent })
@@ -8970,7 +8982,17 @@ local function ctDoSend()
             payload.reasoning_effort = "none"
         end
 
-        local text, err = providerRouter:chatCompletions(payload)
+        local ok, text, err = pcall(function()
+            return providerRouter:chatCompletions(payload)
+        end)
+
+        -- pcall вернул ошибку Lua (не API ошибку)
+        if not ok then
+            if ChatTestCallback then
+                ChatTestCallback("❌ Внутренняя ошибка: " .. tostring(text), true)
+            end
+            return
+        end
 
         -- Авто-retry при сетевой ошибке (1 попытка)
         if not text and err then
@@ -8978,7 +9000,10 @@ local function ctDoSend()
             local isNetErr = errL:find("timeout") or errL:find("timed") or errL:find("network") or errL:find("connection")
             if isNetErr then
                 task.wait(2)
-                text, err = providerRouter:chatCompletions(payload)
+                ok, text, err = pcall(function()
+                    return providerRouter:chatCompletions(payload)
+                end)
+                if not ok then text = nil; err = tostring(text) end
             end
         end
 
@@ -8986,8 +9011,8 @@ local function ctDoSend()
             appendHistory(DirectChatHistory, userContent, text)
         end
         if ChatTestCallback then
-            if err then
-                local errLower = tostring(err):lower()
+            if not text or text == "" then
+                local errLower = tostring(err or ""):lower()
                 local friendlyErr
                 if errLower:find("contentfiltered") or errLower:find("emptyresponse") then
                     friendlyErr = "🚫 Модель отказалась отвечать. Попробуй переформулировать."
@@ -8998,13 +9023,13 @@ local function ctDoSend()
                 elseif errLower:find("400") or errLower:find("bad request") then
                     friendlyErr = "⚠️ Модель не поддерживает этот запрос. Попробуй другую."
                 elseif errLower:find("timeout") or errLower:find("timed") then
-                    friendlyErr = "⏱️ Таймаут даже после retry. Попробуй позже."
+                    friendlyErr = "⏱️ Таймаут. Попробуй позже."
                 else
-                    friendlyErr = "❌ Ошибка: " .. tostring(err)
+                    friendlyErr = "❌ Ошибка: " .. tostring(err or "неизвестно")
                 end
                 ChatTestCallback(friendlyErr, true)
             else
-                ChatTestCallback(text or "Нет ответа", false)
+                ChatTestCallback(text, false)
             end
         end
     end)
