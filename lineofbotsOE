@@ -992,8 +992,20 @@ local function makeSystemPrompt(settings)
         .. " NEVER use Russian if [LANG:EN]. NEVER use English if [LANG:RU]."
         .. " This rule OVERRIDES everything else including personality instructions."
 
-    -- Честность про актуальные данные — только в полном режиме
-    if not settings.TokenEconomy then
+    -- Актуальность данных: если WebSearch включён — ИИ знает текущий год и использует поиск
+    if settings.WebSearch then
+        if not settings.TokenEconomy then
+            system = system
+                .. "\n\nCURRENT DATE AWARENESS: Today is 2026. You have access to real-time web search."
+                .. " When web search results are provided in the context — treat them as GROUND TRUTH."
+                .. " Use them to answer questions about memes, news, trends, events, songs, games."
+                .. " Always prioritize search results over your training knowledge for current topics."
+                .. " If search gave results — answer confidently without saying 'I don't know'."
+        else
+            system = system
+                .. "\nYear: 2026. Use provided search results as facts."
+        end
+    elseif not settings.TokenEconomy then
         system = system
             .. "\nKnowledge cutoff: your training data has a cutoff date."
             .. " If someone asks about current trends, recent memes, new songs, latest news or anything"
@@ -2473,7 +2485,7 @@ local function handleQueuedChat(item)
         if searchResult and searchResult ~= "" and not searchResult:find("не найдены") and not searchResult:find("Ошибка") then
             table.insert(apiMessages, {
                 role = "system",
-                content = "[WEB SEARCH RESULTS for: " .. item.cleaned .. "]\n" .. searchResult .. "\n[Use this information to answer the user. Current year is 2026.]"
+                content = "[WEB SEARCH RESULTS for: " .. item.cleaned .. "]\n" .. searchResult .. "\n[INSTRUCTION: This is live data from 2026. Use these results as your PRIMARY source. Answer confidently based on this. Do NOT say you lack current info.]"
             })
         end
     end
@@ -9008,7 +9020,7 @@ local function ctDoSend()
             if searchResult and searchResult ~= "" and not searchResult:find("не найдены") and not searchResult:find("Ошибка") then
                 table.insert(apiMsgs, {
                     role = "system",
-                    content = "[WEB SEARCH RESULTS for: " .. msg .. "]\n" .. searchResult .. "\n[Use this information to answer the user. Current year is 2026.]"
+                    content = "[WEB SEARCH RESULTS for: " .. msg .. "]\n" .. searchResult .. "\n[INSTRUCTION: This is live data from 2026. Use these results as your PRIMARY source. Answer confidently based on this. Do NOT say you lack current info.]"
                 })
             end
         end
