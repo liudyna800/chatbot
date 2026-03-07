@@ -6555,7 +6555,7 @@ mod3_layout.Padding = UDim.new(0, 12)
 mod3_layout.Parent = mod3_list
 
 mod3_layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    mod3_list.CanvasSize = UDim2.new(0, 0, 0, mod3_layout.AbsoluteContentSize.Y + 12)
+    mod3_list.CanvasSize = UDim2.new(0, 0, 0, (mod3_layout.AbsoluteContentSize.Y + 12) / _guiScale)
 end)
 
 -- Shared scrim for the timeout menu (kept out of rowWrap so it doesn't affect list layout).
@@ -7957,7 +7957,7 @@ mod2_listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 mod2_listLayout.Padding = UDim.new(0, 8)
 mod2_listLayout.Parent = mod2_listScroll
 mod2_listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    mod2_listScroll.CanvasSize = UDim2.new(0, 0, 0, mod2_listLayout.AbsoluteContentSize.Y + 12)
+    mod2_listScroll.CanvasSize = UDim2.new(0, 0, 0, (mod2_listLayout.AbsoluteContentSize.Y + 12) / _guiScale)
 end)
 
 local mod2_footer = Instance.new("Frame")
@@ -8441,7 +8441,7 @@ local function makeModCard(parent, title, subtitle)
     list.SortOrder = Enum.SortOrder.LayoutOrder
     list.Parent = scroll
     list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        scroll.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y + 12)
+        scroll.CanvasSize = UDim2.new(0, 0, 0, (list.AbsoluteContentSize.Y + 12) / _guiScale)
     end)
 
     return {
@@ -8792,8 +8792,8 @@ ctLogPad.PaddingRight = UDim.new(0, 12)
 ctLogPad.Parent = ctLog
 
 ctLogLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    ctLog.CanvasSize = UDim2.new(0, 0, 0, ctLogLayout.AbsoluteContentSize.Y + 28)
-    ctLog.CanvasPosition = Vector2.new(0, math.max(0, ctLogLayout.AbsoluteContentSize.Y - ctLog.AbsoluteSize.Y + 28))
+    ctLog.CanvasSize = UDim2.new(0, 0, 0, (ctLogLayout.AbsoluteContentSize.Y + 28) / _guiScale)
+    ctLog.CanvasPosition = Vector2.new(0, math.max(0, (ctLogLayout.AbsoluteContentSize.Y + 28) / _guiScale - ctLog.AbsoluteSize.Y / _guiScale))
 end)
 
 local ctMsgCounter = 0
