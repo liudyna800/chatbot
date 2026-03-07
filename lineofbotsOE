@@ -2553,7 +2553,7 @@ local function handleQueuedChat(item)
                 }
             }
         }
-        payload.tool_choice = "auto"
+        -- tool_choice убран — ломает большинство моделей Groq
     end
 
     local text, err = providerRouter:chatCompletions(payload)
@@ -9208,18 +9208,18 @@ local _savedWinBgT  = THEME.WindowTransparency or 0.1
 local function minimizeWindow()
     if isMinimized then return end
     isMinimized = true
-    _savedWinSize = window.Size
-    _savedWinPos  = window.Position
-    _savedWinBgT  = window.BackgroundTransparency
+    _savedWinBgT = window.BackgroundTransparency
+    -- Сохраняем позицию windowHolder (не window) чтобы не было смещения при восстановлении
+    local _savedHolderPos = windowHolder.Position
 
-    -- Анимация сворачивания к точке
     tween(window, TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
         Size = UDim2.new(0, 0, 0, 0),
         BackgroundTransparency = 1,
     })
     task.delay(0.28, function()
-        window.Visible = false
-        window.Size = _savedWinSize
+        -- Скрываем windowHolder целиком — он перехватывает клики даже невидимый
+        windowHolder.Visible = false
+        window.Size = UDim2.new(0, winW, 0, winH)
         window.BackgroundTransparency = _savedWinBgT
         -- Показываем круг
         circleBtn.Visible = true
@@ -9227,25 +9227,26 @@ local function minimizeWindow()
         tween(circleBtn, TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
             Size = UDim2.new(0, CIRCLE_SIZE, 0, CIRCLE_SIZE),
         })
+        -- Восстанавливаем позицию holder на случай если сдвинулся
+        windowHolder.Position = _savedHolderPos
     end)
 end
 
 local function restoreWindow()
     if not isMinimized then return end
     isMinimized = false
-    -- Скрыть круг
     tween(circleBtn, TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
         Size = UDim2.new(0, 0, 0, 0),
     })
     task.delay(0.2, function()
         circleBtn.Visible = false
         circleBtn.Size = UDim2.new(0, CIRCLE_SIZE, 0, CIRCLE_SIZE)
-        -- Показать окно
-        window.Visible = true
+        -- Показываем windowHolder и анимируем window внутри него
+        windowHolder.Visible = true
         window.Size = UDim2.new(0, 0, 0, 0)
         window.BackgroundTransparency = 1
         tween(window, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-            Size = _savedWinSize,
+            Size = UDim2.new(0, winW, 0, winH),
             BackgroundTransparency = _savedWinBgT,
         })
     end)
