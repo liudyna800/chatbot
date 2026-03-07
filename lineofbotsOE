@@ -962,6 +962,7 @@ local function makeSystemPrompt(settings)
     local personalityId = settings.PersonalityId
     local custom = settings.CustomSystemPrompt
     local hasCustom = type(custom) == "string" and custom:gsub("%s+", "") ~= ""
+    local hasPersonality = false
     if hasCustom then
         -- Кастомный промпт после header — модель уже знает про теги
         system = system .. custom
@@ -972,17 +973,19 @@ local function makeSystemPrompt(settings)
             system = system .. "\n\n-- Base context --\n" .. short
         end
     elseif type(personalityId) == "string" and Personalities[personalityId] then
+        hasPersonality = true
         local fullPersonality = tostring(Personalities[personalityId].system or "")
         if settings.TokenEconomy then
             local short = fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 300)
-            system = short
+            system = system .. short
         else
-            system = fullPersonality
+            system = system .. fullPersonality
         end
     end
 
-    if system == "" and not hasCustom then
-        system = "You are a helpful assistant in a Roblox game. Answer questions naturally and helpfully."
+    -- Если личность не добавилась — добавляем базовый текст
+    if not hasPersonality and not hasCustom then
+        system = system .. "You are a helpful assistant in a Roblox game. Answer questions naturally and helpfully."
     end
 
     -- FIX ЯЗЫК: правило в конце промпта игнорируется моделями с русским контекстом.
@@ -1104,6 +1107,7 @@ local function makeSystemPrompt(settings)
             -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
             system = system
                 .. "\n\nDO_TAGS(start of reply,1 per msg,silent):"
+                .. "\n[DO:ragdoll]=упади/ragdoll/падай [DO:unragdoll]=встань/inragdoll"
                 .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop"
                 .. "\n[DO:jump]=прыгни/jump [DO:jump2]=2x [DO:jump3]=3x [DO:jump5]=5x [DO:jump10]=10x"
                 .. "\n[DO:spin]=крутись/spin(3с) [DO:spin5]=5с [DO:spin10]=10с"
@@ -2725,7 +2729,6 @@ end
 -- v18: WORLD REACTIONS монитор — здесь runChatQueue уже объявлена
 task.delay(5, function()
     local prevAir  = {}
-    local prevDead = {}
     while true do
         task.wait(0.5)
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then
@@ -2741,33 +2744,7 @@ task.delay(5, function()
             local char = p.Character
             local uid  = p.UserId
 
-            -- Смерть: char существует но root уже уничтожен — проверяем ДО root check
-            local humForDeath = char and char:FindFirstChildOfClass("Humanoid")
-            if humForDeath and humForDeath.Health <= 0 and not prevDead[uid] then
-                prevDead[uid] = true
-                if _canWorldReact(uid) then
-                    -- Проверяем был ли игрок в радиусе до смерти
-                    local deadRoot = char:FindFirstChild("HumanoidRootPart")
-                        or char:FindFirstChild("Torso")
-                    local inRadius = deadRoot and (deadRoot.Position - myPos).Magnitude <= radius
-                    if inRadius then
-                        local name = p.DisplayName or p.Name
-                        local msgs = {
-                            "[SYSTEM: "..name.." just died right in front of you. React naturally in 1 short sentence.]",
-                            "[SYSTEM: "..name.." died nearby. Acknowledge it briefly in 1 sentence.]",
-                            "[SYSTEM: "..name.." has been eliminated near you. Say something short about it.]",
-                        }
-                        enqueueChatItem(uid, {
-                            player=p, userId=uid, name=p.Name,
-                            displayName=name, cleaned=msgs[math.random(#msgs)],
-                            isWorld=true,
-                        })
-                        runChatQueue(uid)
-                    end
-                end
-            elseif humForDeath and humForDeath.Health > 0 then
-                prevDead[uid] = false  -- игрок возродился — сбрасываем флаг
-            end
+            -- (смерть обрабатывается через событие Humanoid.Died — см. ниже)
 
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if not root then continue end
@@ -2815,6 +2792,62 @@ task.delay(5, function()
         end
     end
 end)
+
+-- ── DEATH REACTIONS — event-based через Humanoid.Died ───────────────────
+-- Отслеживаем смерть каждого игрока через событие, не через polling
+local _deathConns = {}  -- userId → connection
+
+local function _watchPlayerDeath(p)
+    if not ClientSettings.WorldReactions then return end
+    local uid = p.UserId
+    -- Отключаем старый коннект если есть
+    if _deathConns[uid] then
+        pcall(function() _deathConns[uid]:Disconnect() end)
+        _deathConns[uid] = nil
+    end
+    local char = p.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+
+    _deathConns[uid] = hum.Died:Connect(function()
+        if not ClientSettings.WorldReactions or not ClientSettings.Enabled then return end
+        -- Проверяем радиус
+        local myChar = Players.LocalPlayer.Character
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        local deadRoot = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("Head")
+        if myRoot and deadRoot then
+            local radius = ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30
+            if (deadRoot.Position - myRoot.Position).Magnitude > radius then return end
+        end
+        if not _canWorldReact(uid) then return end
+        local name = p.DisplayName or p.Name
+        local msgs = {
+            "[SYSTEM: "..name.." just died right in front of you. React in 1 short sentence, stay in character.]",
+            "[SYSTEM: "..name.." died nearby. Say something brief about it, in character.]",
+            "[SYSTEM: "..name.." was eliminated near you. React briefly.]",
+        }
+        local fakeId = uid + 10000000
+        enqueueChatItem(fakeId, {
+            player=p, userId=fakeId, name=p.Name,
+            displayName=name, cleaned=msgs[math.random(#msgs)],
+            isWorld=true,
+        })
+        runChatQueue(fakeId)
+    end)
+end
+
+-- Подписываемся на всех игроков при старте и при появлении новых
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function() task.delay(1, function() _watchPlayerDeath(p) end) end)
+    if p.Character then _watchPlayerDeath(p) end
+end)
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= Players.LocalPlayer then
+        p.CharacterAdded:Connect(function() task.delay(1, function() _watchPlayerDeath(p) end) end)
+        if p.Character then _watchPlayerDeath(p) end
+    end
+end
 
 -- v17.5: Антиспам — один словарь на весь модуль
 local _lastMsgPerUser = {}
