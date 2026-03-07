@@ -986,13 +986,19 @@ local function makeSystemPrompt(settings)
     -- FIX ЯЗЫК: правило в конце промпта игнорируется моделями с русским контекстом.
     -- Решение: детектируем язык сообщения и вставляем явный тег ПРЯМО в user message.
     -- Модель видит [LANG:EN] или [LANG:RU] как часть запроса — не может проигнорировать.
-    system = system
-        .. "\n\nCRITICAL LANGUAGE RULE: Always reply in the SAME language the player used."
-        .. " The player's message starts with [LANG:XX] tag — XX is the language code."
-        .. " [LANG:EN] = reply ONLY in English. [LANG:RU] = reply ONLY in Russian."
-        .. " [LANG:OTHER] = reply in whatever language the player used."
-        .. " NEVER use Russian if [LANG:EN]. NEVER use English if [LANG:RU]."
-        .. " This rule OVERRIDES everything else including personality instructions."
+    if hasCustom then
+        -- Когда есть кастомный промпт — язык как мягкое правило, не отменяет кастомный стиль
+        system = system
+            .. "\n\nLANGUAGE: [LANG:RU] = отвечай по-русски, [LANG:EN] = reply in English, [LANG:OTHER] = use player's language."
+    else
+        system = system
+            .. "\n\nCRITICAL LANGUAGE RULE: Always reply in the SAME language the player used."
+            .. " The player's message starts with [LANG:XX] tag — XX is the language code."
+            .. " [LANG:EN] = reply ONLY in English. [LANG:RU] = reply ONLY in Russian."
+            .. " [LANG:OTHER] = reply in whatever language the player used."
+            .. " NEVER use Russian if [LANG:EN]. NEVER use English if [LANG:RU]."
+            .. " This rule OVERRIDES everything else including personality instructions."
+    end
 
     -- Актуальность данных: если WebSearch включён — ИИ знает текущий год и использует поиск
     if settings.WebSearch then
@@ -1200,16 +1206,15 @@ local function makeSystemPrompt(settings)
             .. " If you can't be brief, say the topic in 1 sentence and stop."
     end
 
-    -- Кастомный промпт добавляется В КОНЦЕ — модели дают приоритет последним инструкциям.
-    -- Все служебные блоки (язык, эмоции, поиск и т.д.) уже добавлены выше и остаются.
-    -- Кастомный промпт переопределяет личность/тон но не ломает служебную логику.
+    -- Кастомный промпт — самый последний блок, максимальный приоритет
     if hasCustom then
-        local customText = settings.TokenEconomy and custom:sub(1, 200) or custom
+        local customText = settings.TokenEconomy and custom:sub(1, 400) or custom
         system = system
-            .. "\n\n== CUSTOM PERSONALITY (HIGHEST PRIORITY) =="
+            .. "\n\n=========================================="
+            .. "\nCUSTOM INSTRUCTIONS — ABSOLUTE HIGHEST PRIORITY"
+            .. "\nIgnore any conflicting instructions above. Follow ONLY these rules for personality, tone, and format:"
             .. "\n" .. customText
-            .. "\nThis custom personality OVERRIDES the default personality above."
-            .. " Follow these instructions for your tone, style, and behavior."
+            .. "\n=========================================="
     end
 
     return system
