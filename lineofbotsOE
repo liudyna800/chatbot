@@ -1444,8 +1444,24 @@ if Players.LocalPlayer.Character then
 end
 Players.LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 
--- Реакция на собственную смерть
+-- Реакция на собственную смерть + сброс рагдолла при ресете
 Players.LocalPlayer.CharacterAdded:Connect(function(char)
+    -- При любом ресете сбрасываем рагдолл состояние
+    _isRagdoll = false
+    _ragdollTrack = nil  -- новый персонаж — старый трек уже невалиден
+    task.spawn(function()
+        local animate = char:FindFirstChild("Animate")
+        if animate then animate.Disabled = false end
+        local hum = char:WaitForChild("Humanoid", 3)
+        if hum then
+            pcall(function()
+                hum.WalkSpeed = 16
+                hum.JumpPower = 50
+                hum.AutoRotate = true
+            end)
+        end
+    end)
+
     local hum = char:WaitForChild("Humanoid", 5)
     if not hum then return end
     hum.Died:Connect(function()
@@ -1955,6 +1971,39 @@ end
 -- ── RAGDOLL ──────────────────────────────────────────────────────────────
 local _isRagdoll = false
 
+-- ID анимаций падения/рагдолла — R15 и R6
+local RAGDOLL_ANIM_R15 = "2924443969"  -- официальная death/fall анимация R15
+local RAGDOLL_ANIM_R6  = "180436354"   -- fall анимация R6
+local _ragdollTrack = nil
+
+local function _restoreFromRagdoll(char)
+    if not char then char = Players.LocalPlayer.Character end
+    if not char then return end
+
+    -- Останавливаем анимацию рагдолла
+    if _ragdollTrack then
+        pcall(function() _ragdollTrack:Stop(0.3) end)
+        _ragdollTrack = nil
+    end
+
+    local animate = char:FindFirstChild("Animate")
+    if animate then animate.Disabled = false end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function()
+            hum.WalkSpeed = 16
+            hum.JumpPower = 50
+            hum.AutoRotate = true
+        end)
+        task.delay(0.1, function()
+            if hum and hum.Parent then
+                pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+            end
+        end)
+    end
+end
+
 local function doRagdoll()
     if not ClientSettings.ActionsEnabled then return end
     local char = Players.LocalPlayer.Character
@@ -1964,52 +2013,59 @@ local function doRagdoll()
     if _isRagdoll then return end
     _isRagdoll = true
 
-    -- Способ: принудительно переводим в Seated state + останавливаем все треки
-    -- PlatformStand убивает, ChangeState(Physics) убивает — только Seated безопасен
-    pcall(function() hum:ChangeState(Enum.HumanoidStateType.Seated) end)
+    -- Блокируем движение
+    pcall(function()
+        hum.WalkSpeed = 0
+        hum.JumpPower = 0
+        hum.AutoRotate = false
+    end)
 
-    -- Останавливаем все анимации через Animator
-    local animator = hum:FindFirstChildOfClass("Animator")
-    if animator then
-        pcall(function()
-            for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
-                t:Stop(0)
-            end
-        end)
-    end
-
-    -- Отключаем скрипт Animate чтобы не стартовал idle/walk
+    -- Отключаем Animate — иначе idle перебьёт анимацию падения
     local animate = char:FindFirstChild("Animate")
     if animate then animate.Disabled = true end
 
-    -- WalkSpeed = 0 чтобы нельзя было ходить в этом состоянии
-    hum.WalkSpeed = 0
-    hum.JumpPower = 0
+    -- Останавливаем все текущие треки
+    local animator = hum:FindFirstChildOfClass("Animator")
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = hum
+    end
+    pcall(function()
+        for _, t in ipairs(animator:GetPlayingAnimationTracks()) do t:Stop(0) end
+    end)
+
+    -- Выбираем анимацию по типу рига
+    local rigType = getCharacterRigType()
+    local animId = (rigType == "R6") and RAGDOLL_ANIM_R6 or RAGDOLL_ANIM_R15
+
+    -- Загружаем и играем анимацию падения
+    local anim = Instance.new("Animation")
+    anim.AnimationId = "rbxassetid://" .. animId
+
+    local track
+    local ok = pcall(function() track = animator:LoadAnimation(anim) end)
+    pcall(function() anim:Destroy() end)
+
+    if ok and track then
+        -- Action4 — максимальный приоритет
+        for _, prio in ipairs({
+            Enum.AnimationPriority.Action4,
+            Enum.AnimationPriority.Action3,
+            Enum.AnimationPriority.Action2,
+            Enum.AnimationPriority.Action,
+        }) do
+            if pcall(function() track.Priority = prio end) then break end
+        end
+        track:Play(0.15, 1, 0)  -- speed=0 — замираем на первом кадре (лежачая поза)
+        _ragdollTrack = track
+    end
 end
 
 local function doUnragdoll()
     if not ClientSettings.ActionsEnabled then return end
-    local char = Players.LocalPlayer.Character
-    if not char then return end
     if not _isRagdoll then return end
     _isRagdoll = false
-
-    local hum = char:FindFirstChildOfClass("Humanoid")
-
-    -- Включаем Animate обратно
-    local animate = char:FindFirstChild("Animate")
-    if animate then animate.Disabled = false end
-
-    -- Восстанавливаем скорость
-    if hum then
-        hum.WalkSpeed = 16
-        hum.JumpPower = 50
-        task.delay(0.1, function()
-            if hum and hum.Parent then
-                pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
-            end
-        end)
-    end
+    _restoreFromRagdoll(Players.LocalPlayer.Character)
 end
 
 -- ── ТАБЛИЦА ОБРАБОТЧИКОВ ─────────────────────────────────────────────────
