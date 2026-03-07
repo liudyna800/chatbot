@@ -1188,6 +1188,7 @@ local function makeSystemPrompt(settings)
                 .. "\nпривет→[DO:wave]хей   подойди→[DO:goto]иду"
                 .. "\nпрыгни→[DO:jump]ok   прыгни 2 раза→[DO:jump2]ok   прыгни 5 раз→[DO:jump5]ok   прыгни 10 раз→[DO:jump10]ok"
                 .. "\nкрутись→[DO:spin]ок   крутись 10 сек→[DO:spin10]ок"
+                .. "\nупади/рагдолл/ragdoll→[DO:ragdoll]ок   встань/inragdoll/unragdoll→[DO:unragdoll]встаю"
                 .. "\nidk→[DO:shrug]хз   sorry→[DO:sorry]всё ок"
         end
     end
@@ -1934,28 +1935,27 @@ local function doRagdoll()
     if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
+    if _isRagdoll then return end  -- уже рагдолл
     _isRagdoll = true
+
+    -- Отключаем Animate скрипт чтобы анимации не мешали физике
+    local animate = char:FindFirstChild("Animate")
+    if animate then animate.Disabled = true end
+
+    -- Переводим гуманоида в чисто физический режим
     hum:ChangeState(Enum.HumanoidStateType.Physics)
-    -- Отключаем моторы суставов чтобы тело обмякло
+
+    -- Отключаем все Motor6D — тело обмякает
     for _, m in ipairs(char:GetDescendants()) do
         if m:IsA("Motor6D") then
             m.Enabled = false
         end
     end
-    -- Добавляем шарниры (BallSocketConstraint) для физики
-    for _, m in ipairs(char:GetDescendants()) do
-        if m:IsA("Motor6D") and not m.Enabled then
-            local a0 = Instance.new("Attachment")
-            local a1 = Instance.new("Attachment")
-            a0.CFrame = m.C0
-            a1.CFrame = m.C1
-            a0.Parent = m.Part0
-            a1.Parent = m.Part1
-            local bs = Instance.new("BallSocketConstraint")
-            bs.Attachment0 = a0
-            bs.Attachment1 = a1
-            bs.Name = "_RagdollConstraint"
-            bs.Parent = m.Part0
+
+    -- Все части тела — свободная физика
+    for _, p in ipairs(char:GetDescendants()) do
+        if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" then
+            p.CanCollide = true
         end
     end
 end
@@ -1964,18 +1964,20 @@ local function doUnragdoll()
     if not ClientSettings.ActionsEnabled then return end
     local char = Players.LocalPlayer.Character
     if not char then return end
+    if not _isRagdoll then return end
     _isRagdoll = false
-    -- Убираем шарниры
-    for _, v in ipairs(char:GetDescendants()) do
-        if v.Name == "_RagdollConstraint" then v:Destroy() end
-        if v.Name == "_RagdollAtt" then v:Destroy() end
-    end
-    -- Включаем моторы обратно
+
+    -- Включаем Motor6D обратно
     for _, m in ipairs(char:GetDescendants()) do
         if m:IsA("Motor6D") then
             m.Enabled = true
         end
     end
+
+    -- Включаем Animate обратно
+    local animate = char:FindFirstChild("Animate")
+    if animate then animate.Disabled = false end
+
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
         hum:ChangeState(Enum.HumanoidStateType.GettingUp)
@@ -2716,7 +2718,8 @@ end
 
 -- v18: WORLD REACTIONS монитор — здесь runChatQueue уже объявлена
 task.delay(5, function()
-    local prevAir = {}
+    local prevAir  = {}
+    local prevDead = {}
     while true do
         task.wait(0.5)
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then
@@ -2730,10 +2733,39 @@ task.delay(5, function()
         for _, p in ipairs(Players:GetPlayers()) do
             if p == Players.LocalPlayer then continue end
             local char = p.Character
+            local uid  = p.UserId
+
+            -- Смерть: char существует но root уже уничтожен — проверяем ДО root check
+            local humForDeath = char and char:FindFirstChildOfClass("Humanoid")
+            if humForDeath and humForDeath.Health <= 0 and not prevDead[uid] then
+                prevDead[uid] = true
+                if _canWorldReact(uid) then
+                    -- Проверяем был ли игрок в радиусе до смерти
+                    local deadRoot = char:FindFirstChild("HumanoidRootPart")
+                        or char:FindFirstChild("Torso")
+                    local inRadius = deadRoot and (deadRoot.Position - myPos).Magnitude <= radius
+                    if inRadius then
+                        local name = p.DisplayName or p.Name
+                        local msgs = {
+                            "[SYSTEM: "..name.." just died right in front of you. React naturally in 1 short sentence.]",
+                            "[SYSTEM: "..name.." died nearby. Acknowledge it briefly in 1 sentence.]",
+                            "[SYSTEM: "..name.." has been eliminated near you. Say something short about it.]",
+                        }
+                        enqueueChatItem(uid, {
+                            player=p, userId=uid, name=p.Name,
+                            displayName=name, cleaned=msgs[math.random(#msgs)],
+                            isWorld=true,
+                        })
+                        runChatQueue(uid)
+                    end
+                end
+            elseif humForDeath and humForDeath.Health > 0 then
+                prevDead[uid] = false  -- игрок возродился — сбрасываем флаг
+            end
+
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if not root then continue end
             if (root.Position - myPos).Magnitude > radius then continue end
-            local uid     = p.UserId
             local reacted = false
             -- Прыжок
             local hum      = char:FindFirstChildOfClass("Humanoid")
@@ -2755,25 +2787,6 @@ task.delay(5, function()
                 runChatQueue(uid)
             end
             prevAir[uid] = inAir
-            -- Смерть
-            if not reacted then
-                local humDead = hum and hum.Health <= 0
-                if humDead and _canWorldReact(uid) then
-                    reacted = true
-                    local name = p.DisplayName or p.Name
-                    local msgs = {
-                        "[SYSTEM: "..name.." just died right in front of you. React naturally in 1 short sentence.]",
-                        "[SYSTEM: "..name.." died nearby. Acknowledge it briefly in 1 sentence.]",
-                        "[SYSTEM: "..name.." has been eliminated near you. Say something short about it.]",
-                    }
-                    enqueueChatItem(uid, {
-                        player=p, userId=uid, name=p.Name,
-                        displayName=name, cleaned=msgs[math.random(#msgs)],
-                        isWorld=true,
-                    })
-                    runChatQueue(uid)
-                end
-            end
             -- Взгляд
             if not reacted then
                 local toUs = myRoot.Position - root.Position
