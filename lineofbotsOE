@@ -2,6 +2,25 @@ print("LOB VERSION: v18.2.8 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 local LOB_KEY_FILE = "lob_apikey.txt"
+local LOB_SETTINGS_FILE = "lob_settings.txt"
+local function saveSettings()
+    pcall(function()
+        if writefile then
+            local data = "AutoReply=" .. tostring(ClientSettings and ClientSettings.AutoReply or false)
+            writefile(LOB_SETTINGS_FILE, data)
+        end
+    end)
+end
+local function loadSettings()
+    pcall(function()
+        if not readfile then return end
+        local ok, data = pcall(readfile, LOB_SETTINGS_FILE)
+        if not ok or not data then return end
+        if data:find("AutoReply=true") then
+            if ClientSettings then ClientSettings.AutoReply = true end
+        end
+    end)
+end
 local function saveApiKey(key)
     pcall(function()
         if writefile then writefile(LOB_KEY_FILE, tostring(key or "")) end
@@ -135,13 +154,14 @@ local ClientSettings = {
     WebSearch = false,       -- v18.2: использовать compound-beta для веб-поиска
 }
 
--- Загружаем сохранённый API ключ при старте
+-- Загружаем сохранённый API ключ и настройки при старте
 do
     local saved = loadApiKey()
     if saved and saved:sub(1,4) == "gsk_" and #saved > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.groq = saved
     end
+    loadSettings()
 end
 
 local ClientSecrets = {
@@ -2839,6 +2859,7 @@ end
 
 -- Подписываемся на всех игроков при старте и при появлении новых
 Players.PlayerAdded:Connect(function(p)
+    if p == Players.LocalPlayer then return end
     p.CharacterAdded:Connect(function() task.delay(1, function() _watchPlayerDeath(p) end) end)
     if p.Character then _watchPlayerDeath(p) end
 end)
@@ -5669,6 +5690,7 @@ autoReplyToggle = makeToggleRow(
     ClientSettings.AutoReply,
     function(state)
         ClientSettings.AutoReply = state
+        saveSettings()
         updateChatListening()
     end
 )
