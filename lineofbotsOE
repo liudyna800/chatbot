@@ -3348,7 +3348,7 @@ local function makeScrollingTextBox(parent, placeholder, defaultText, height)
         local newHeight = math.max(24, bounds.Y + 20) -- Minimum height + buffer
         
         box.Size = UDim2.new(1, 0, 0, newHeight)
-        scroll.CanvasSize = UDim2.new(0, 0, 0, newHeight + 10)
+        scroll.CanvasSize = UDim2.new(0, 0, 0, (newHeight + 10) / _guiScale)
     end
 
     box:GetPropertyChangedSignal("TextBounds"):Connect(resize)
@@ -4014,7 +4014,7 @@ local function makeDropdown(parent, values, default, callback)
         layout.Parent = scroll
         
         layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-             scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y)
+             scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y / _guiScale)
         end)
 
         for i, val in ipairs(values) do
@@ -4096,6 +4096,7 @@ end
 
 
 -- Main UI Creation Wrapper
+local _guiScale = 1.0  -- обновляется при создании GUI, используется в scroll callbacks
 local function createInterface()
     if player.PlayerGui:FindFirstChild("LineOfBotsUI") then
         player.PlayerGui.LineOfBotsUI:Destroy()
@@ -4191,6 +4192,7 @@ local function createInterface()
         guiScale = math.min(scaleByW, scaleByH, 1.0)
         guiScale = math.max(guiScale, 0.40)
     end
+    _guiScale = guiScale  -- синхронизируем для внешних callbacks
     local scaledW = math.floor(winW * guiScale)
     local scaledH = math.floor(winH * guiScale)
 
@@ -4779,7 +4781,7 @@ generalLayout.Padding = UDim.new(0, 8)
 generalLayout.SortOrder = Enum.SortOrder.LayoutOrder
 generalLayout.Parent = generalScroll
 generalLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    generalScroll.CanvasSize = UDim2.new(0, 0, 0, generalLayout.AbsoluteContentSize.Y + 24)
+    generalScroll.CanvasSize = UDim2.new(0, 0, 0, (generalLayout.AbsoluteContentSize.Y + 24) / guiScale)
 end)
 
 -- BEHAVIOR TAB CONTENT
@@ -4823,7 +4825,7 @@ behaviorLayout.Padding = UDim.new(0, 8)
 behaviorLayout.SortOrder = Enum.SortOrder.LayoutOrder
 behaviorLayout.Parent = behaviorScroll
 behaviorLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    behaviorScroll.CanvasSize = UDim2.new(0, 0, 0, behaviorLayout.AbsoluteContentSize.Y + 24)
+    behaviorScroll.CanvasSize = UDim2.new(0, 0, 0, (behaviorLayout.AbsoluteContentSize.Y + 24) / guiScale)
 end)
 
 local homePad = Instance.new("UIPadding")
@@ -5913,7 +5915,7 @@ advancedLayout.Padding = UDim.new(0, 4)
 advancedLayout.SortOrder = Enum.SortOrder.LayoutOrder 
 advancedLayout.Parent = advancedScroll
 advancedLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    advancedScroll.CanvasSize = UDim2.new(0, 0, 0, advancedLayout.AbsoluteContentSize.Y + 20)
+    advancedScroll.CanvasSize = UDim2.new(0, 0, 0, (advancedLayout.AbsoluteContentSize.Y + 20) / guiScale)
 end)
 
 -- ADVANCED TAB CONTENT (Populate)
@@ -6311,7 +6313,7 @@ perceptionLayout.Padding = UDim.new(0, 8)
 perceptionLayout.SortOrder = Enum.SortOrder.LayoutOrder
 perceptionLayout.Parent = perceptionScroll
 perceptionLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    perceptionScroll.CanvasSize = UDim2.new(0, 0, 0, perceptionLayout.AbsoluteContentSize.Y + 20)
+    perceptionScroll.CanvasSize = UDim2.new(0, 0, 0, (perceptionLayout.AbsoluteContentSize.Y + 20) / guiScale)
 end)
 
 -- PERCEPTION TAB CONTENT (Populate)
