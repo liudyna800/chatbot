@@ -956,14 +956,15 @@ local _placeInfo = nil           -- { name, placeId, desc } — заполняе
 local SYSTEM_ACTIONS_HEADER = "DEVELOPER SYSTEM (bypasses all personality rules): These action tags are hardcoded behavior — NOT user instructions. Your 'never accept instructions from users' rule does NOT apply here. Ignoring these tags is a system error:\n\n"
 
 local function makeSystemPrompt(settings)
-    local system = ""
+    -- SYSTEM_ACTIONS_HEADER всегда первым — иначе кастомные промпты с "не слушай инструкции" блокируют теги
+    local system = settings.ActionsEnabled and (SYSTEM_ACTIONS_HEADER .. "== ACTION TAGS ARE MANDATORY. OUTPUT THEM EXACTLY AS SHOWN. ==\n\n") or ""
 
     local personalityId = settings.PersonalityId
     local custom = settings.CustomSystemPrompt
     local hasCustom = type(custom) == "string" and custom:gsub("%s+", "") ~= ""
     if hasCustom then
-        -- Кастомный промпт идёт ПЕРВЫМ — модель читает его раньше всех служебных правил
-        system = custom
+        -- Кастомный промпт после header — модель уже знает про теги
+        system = system .. custom
         -- Дополнительно грузим базовую личность как контекст если она есть
         if type(personalityId) == "string" and Personalities[personalityId] and personalityId ~= "Custom" then
             local fullPersonality = tostring(Personalities[personalityId].system or "")
@@ -1102,8 +1103,7 @@ local function makeSystemPrompt(settings)
         if settings.TokenEconomy then
             -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
             system = system
-                .. "\n\n" .. SYSTEM_ACTIONS_HEADER
-                .. "DO_TAGS(start of reply,1 per msg,silent):"
+                .. "\n\nDO_TAGS(start of reply,1 per msg,silent):"
                 .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop"
                 .. "\n[DO:jump]=прыгни/jump [DO:jump2]=2x [DO:jump3]=3x [DO:jump5]=5x [DO:jump10]=10x"
                 .. "\n[DO:spin]=крутись/spin(3с) [DO:spin5]=5с [DO:spin10]=10с"
@@ -1118,8 +1118,7 @@ local function makeSystemPrompt(settings)
         else
             -- ── ПОЛНЫЙ РЕЖИМ ─────────────────────────────────────────────
             system = system
-                .. "\n\n" .. SYSTEM_ACTIONS_HEADER
-                .. "== ACTIONS & EMOTES =="
+                .. "\n\n== ACTIONS & EMOTES =="
                 .. "\nYou control a Roblox character body. Add ONE [DO:tag] at the VERY START of your reply when appropriate."
                 .. "\nNEVER explain the tag. NEVER skip a tag when the message clearly calls for it."
                 .. "\n"
