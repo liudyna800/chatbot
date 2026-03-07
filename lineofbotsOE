@@ -4211,10 +4211,12 @@ local function createInterface()
         local y = math.clamp(math.floor((vp.Y - scaledH) * 0.5 + 10), margin, math.max(margin, vp.Y - scaledH - margin))
         windowHolder.Position = UDim2.fromOffset(x, y)
     end
+    windowHolder.Active = true  -- нужно чтобы Frame принимал InputBegan для drag
     windowHolder.Parent = gui
     local uiScale = Instance.new("UIScale")
     uiScale.Scale = guiScale
     uiScale.Parent = windowHolder
+    makeDraggable(windowHolder)  -- drag перемещает windowHolder целиком
 
     local window = Instance.new("CanvasGroup")
     window.Size = UDim2.new(0, winW, 0, winH)
@@ -4225,31 +4227,7 @@ local function createInterface()
     window.Parent = windowHolder
     makeCorner(window, 18)
     local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
-    -- Drag на window — тогда windowHolder двигается вслед
-    do
-        local dragging, dragStart, startPos
-        window.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                dragging = true
-                dragStart = input.Position
-                startPos = windowHolder.Position
-                input.Changed:Connect(function()
-                    if input.UserInputState == Enum.UserInputState.End then
-                        dragging = false
-                    end
-                end)
-            end
-        end)
-        game:GetService("UserInputService").InputChanged:Connect(function(input)
-            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-                local delta = input.Position - dragStart
-                windowHolder.Position = UDim2.new(
-                    startPos.X.Scale, startPos.X.Offset + delta.X,
-                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
-                )
-            end
-        end)
-    end
+
 
     -- Sidebar
     local sidebarWidth = 182
