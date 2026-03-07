@@ -3181,8 +3181,15 @@ end
 
 local function makeDraggable(frame)
     local dragging, dragInput, dragStart, startPos
+    local dragThreshold = 10 -- пикселей движения до начала drag
+    local dragConfirmed = false
 
     local function update(input)
+        if not dragConfirmed then
+            local d = (input.Position - dragStart)
+            if math.abs(d.X) < dragThreshold and math.abs(d.Y) < dragThreshold then return end
+            dragConfirmed = true
+        end
         local delta = input.Position - dragStart
         frame.Position = UDim2.new(
             startPos.X.Scale,
@@ -3192,15 +3199,26 @@ local function makeDraggable(frame)
         )
     end
 
-    frame.InputBegan:Connect(function(input)
+    frame.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            -- Проверяем что клик именно на frame, а не на дочерний интерактивный элемент
+            local guiObjects = game:GetService("GuiService"):GetGuiObjectsAtPosition(input.Position.X, input.Position.Y)
+            local topmost = guiObjects[1]
+            -- Начинаем drag только если кликнули на сам frame или его неинтерактивный фон
+            if topmost and topmost ~= frame and topmost:IsDescendantOf(frame) then
+                local isInteractive = topmost:IsA("TextButton") or topmost:IsA("ImageButton") or topmost:IsA("TextBox") or topmost:IsA("ScrollingFrame")
+                if isInteractive then return end
+            end
             dragging = true
+            dragConfirmed = false
             dragStart = input.Position
             startPos = frame.Position
 
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
+                    dragConfirmed = false
                 end
             end)
         end
@@ -3954,6 +3972,7 @@ local function makeDropdown(parent, values, default, callback)
                 end)
         end
         if overlay then overlay:Destroy() overlay = nil end
+        mainBtn.ZIndex = 1
         tween(arrow, TWEEN_FAST, { Rotation = 0 })
     end
 
@@ -3973,6 +3992,8 @@ local function makeDropdown(parent, values, default, callback)
         overlay.ZIndex = 250
         overlay.Parent = sg
         overlay.MouseButton1Click:Connect(close)
+        -- mainBtn должен быть выше overlay чтобы повторный клик закрывал dropdown
+        mainBtn.ZIndex = 260
 
         local itemHeight = 36
         local maxVisibleItems = 4 -- Compact dropdown
