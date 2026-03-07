@@ -3975,7 +3975,8 @@ local function makeDropdown(parent, values, default, callback)
 
         local itemHeight = 36
         local maxVisibleItems = 4 -- Compact dropdown
-        local listHeight = math.min(#values, maxVisibleItems) * itemHeight
+        -- listHeight в экранных пикселях (dropdownList живёт в ScreenGui без UIScale)
+        local listHeight = math.min(#values, maxVisibleItems) * math.floor(itemHeight * _guiScale)
         
         dropdownList = Instance.new("Frame")
         dropdownList.Name = "DropdownList"
@@ -4014,7 +4015,7 @@ local function makeDropdown(parent, values, default, callback)
         layout.Parent = scroll
         
         layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-             scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y / _guiScale)
+             scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y)
         end)
 
         for i, val in ipairs(values) do
@@ -5718,6 +5719,14 @@ do
         ClientSettings.Models.groq = val
     end)
 end
+
+-- Принудительно обновляем CanvasSize после того как AutomaticSize карточек сработает
+task.defer(function()
+    generalScroll.CanvasSize = UDim2.new(0, 0, 0, (generalLayout.AbsoluteContentSize.Y + 24) / guiScale)
+end)
+task.delay(0.1, function()
+    generalScroll.CanvasSize = UDim2.new(0, 0, 0, (generalLayout.AbsoluteContentSize.Y + 24) / guiScale)
+end)
 
 -- BEHAVIOR TAB CONTENT (Populate)
 
@@ -9269,6 +9278,14 @@ end)
     end
 
     switchTab("Основное")
+
+    -- Обновляем все CanvasSize после того как AutomaticSize карточек сработает
+    task.delay(0.15, function()
+        generalScroll.CanvasSize   = UDim2.new(0, 0, 0, (generalLayout.AbsoluteContentSize.Y + 24) / guiScale)
+        behaviorScroll.CanvasSize  = UDim2.new(0, 0, 0, (behaviorLayout.AbsoluteContentSize.Y + 24) / guiScale)
+        advancedScroll.CanvasSize  = UDim2.new(0, 0, 0, (advancedLayout.AbsoluteContentSize.Y + 20) / guiScale)
+        perceptionScroll.CanvasSize = UDim2.new(0, 0, 0, (perceptionLayout.AbsoluteContentSize.Y + 20) / guiScale)
+    end)
 
     -- Автопроверка API при старте если ключ сохранён
     task.spawn(function()
