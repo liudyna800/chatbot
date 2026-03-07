@@ -3181,15 +3181,8 @@ end
 
 local function makeDraggable(frame)
     local dragging, dragInput, dragStart, startPos
-    local dragThreshold = 10 -- пикселей движения до начала drag
-    local dragConfirmed = false
 
     local function update(input)
-        if not dragConfirmed then
-            local d = (input.Position - dragStart)
-            if math.abs(d.X) < dragThreshold and math.abs(d.Y) < dragThreshold then return end
-            dragConfirmed = true
-        end
         local delta = input.Position - dragStart
         frame.Position = UDim2.new(
             startPos.X.Scale,
@@ -3199,26 +3192,15 @@ local function makeDraggable(frame)
         )
     end
 
-    frame.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
+    frame.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            -- Проверяем что клик именно на frame, а не на дочерний интерактивный элемент
-            local guiObjects = game:GetService("GuiService"):GetGuiObjectsAtPosition(input.Position.X, input.Position.Y)
-            local topmost = guiObjects[1]
-            -- Начинаем drag только если кликнули на сам frame или его неинтерактивный фон
-            if topmost and topmost ~= frame and topmost:IsDescendantOf(frame) then
-                local isInteractive = topmost:IsA("TextButton") or topmost:IsA("ImageButton") or topmost:IsA("TextBox") or topmost:IsA("ScrollingFrame")
-                if isInteractive then return end
-            end
             dragging = true
-            dragConfirmed = false
             dragStart = input.Position
             startPos = frame.Position
 
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
-                    dragConfirmed = false
                 end
             end)
         end
@@ -4233,7 +4215,6 @@ local function createInterface()
     local uiScale = Instance.new("UIScale")
     uiScale.Scale = guiScale
     uiScale.Parent = windowHolder
-    makeDraggable(windowHolder)
 
     local window = Instance.new("CanvasGroup")
     window.Size = UDim2.new(0, winW, 0, winH)
@@ -4244,6 +4225,31 @@ local function createInterface()
     window.Parent = windowHolder
     makeCorner(window, 18)
     local windowStroke = makeStroke(window, 1.5, THEME.Accent, 0.4)
+    -- Drag на window — тогда windowHolder двигается вслед
+    do
+        local dragging, dragStart, startPos
+        window.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                dragStart = input.Position
+                startPos = windowHolder.Position
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then
+                        dragging = false
+                    end
+                end)
+            end
+        end)
+        game:GetService("UserInputService").InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                local delta = input.Position - dragStart
+                windowHolder.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + delta.X,
+                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                )
+            end
+        end)
+    end
 
     -- Sidebar
     local sidebarWidth = 182
