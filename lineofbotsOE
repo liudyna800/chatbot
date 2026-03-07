@@ -2427,7 +2427,11 @@ local function handleQueuedChat(item)
 
     -- Собираем сообщения для API
     local apiMessages = {}
-    table.insert(apiMessages, { role = "system", content = makeSystemPrompt(settings) })
+    local _sysPrompt = makeSystemPrompt(settings)
+    print("[LOB DEBUG] PersonalityId:", tostring(settings.PersonalityId))
+    print("[LOB DEBUG] CustomSystemPrompt:", tostring(settings.CustomSystemPrompt):sub(1, 80))
+    print("[LOB DEBUG] System prompt first 200 chars:", _sysPrompt:sub(1, 200))
+    table.insert(apiMessages, { role = "system", content = _sysPrompt })
 
     -- Добавляем историю — полностью, по настройке MAX_HISTORY
     -- TokenEconomy НЕ обрезает историю (память святая), только укорачивает промпт и max_tokens
