@@ -1964,25 +1964,27 @@ local function doRagdoll()
     if _isRagdoll then return end
     _isRagdoll = true
 
-    -- Отключаем Animate и гуманоид
+    -- Способ: принудительно переводим в Seated state + останавливаем все треки
+    -- PlatformStand убивает, ChangeState(Physics) убивает — только Seated безопасен
+    pcall(function() hum:ChangeState(Enum.HumanoidStateType.Seated) end)
+
+    -- Останавливаем все анимации через Animator
+    local animator = hum:FindFirstChildOfClass("Animator")
+    if animator then
+        pcall(function()
+            for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
+                t:Stop(0)
+            end
+        end)
+    end
+
+    -- Отключаем скрипт Animate чтобы не стартовал idle/walk
     local animate = char:FindFirstChild("Animate")
     if animate then animate.Disabled = true end
-    hum.PlatformStand = true  -- это отключает контроль гуманоида и даёт физике работать
 
-    -- Отключаем Motor6D — суставы обмякают
-    for _, m in ipairs(char:GetDescendants()) do
-        if m:IsA("Motor6D") then
-            m.Enabled = false
-        end
-    end
-
-    -- Даём всем частям тела коллизию чтобы они падали на пол
-    for _, p in ipairs(char:GetDescendants()) do
-        if p:IsA("BasePart") then
-            p.CanCollide = true
-            pcall(function() p:SetNetworkOwner(Players.LocalPlayer) end)
-        end
-    end
+    -- WalkSpeed = 0 чтобы нельзя было ходить в этом состоянии
+    hum.WalkSpeed = 0
+    hum.JumpPower = 0
 end
 
 local function doUnragdoll()
@@ -1992,23 +1994,19 @@ local function doUnragdoll()
     if not _isRagdoll then return end
     _isRagdoll = false
 
-    -- Включаем Motor6D
-    for _, m in ipairs(char:GetDescendants()) do
-        if m:IsA("Motor6D") then
-            m.Enabled = true
-        end
-    end
+    local hum = char:FindFirstChildOfClass("Humanoid")
 
-    -- Восстанавливаем Animate и контроль
+    -- Включаем Animate обратно
     local animate = char:FindFirstChild("Animate")
     if animate then animate.Disabled = false end
 
-    local hum = char:FindFirstChildOfClass("Humanoid")
+    -- Восстанавливаем скорость
     if hum then
-        hum.PlatformStand = false
+        hum.WalkSpeed = 16
+        hum.JumpPower = 50
         task.delay(0.1, function()
             if hum and hum.Parent then
-                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+                pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
             end
         end)
     end
@@ -2818,7 +2816,8 @@ end)
 local _deathConns = {}  -- userId → connection
 
 local function _watchPlayerDeath(p)
-    if not ClientSettings.WorldReactions then return end
+    -- Не проверяем WorldReactions здесь — проверяем в момент срабатывания
+    -- чтобы подписка всегда была активна
     local uid = p.UserId
     -- Отключаем старый коннект если есть
     if _deathConns[uid] then
@@ -2830,27 +2829,37 @@ local function _watchPlayerDeath(p)
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
 
+    -- Запоминаем последнюю позицию игрока заранее (до смерти)
+    local lastPos = nil
+    local hrpForPos = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+    if hrpForPos then
+        lastPos = hrpForPos.Position
+        -- Обновляем позицию пока жив
+        task.spawn(function()
+            while _deathConns[uid] and p.Character == char do
+                local r = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+                if r then lastPos = r.Position end
+                task.wait(0.5)
+            end
+        end)
+    end
+
     _deathConns[uid] = hum.Died:Connect(function()
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then return end
-        -- Проверяем радиус
+        -- Проверяем радиус по lastPos (т.к. char уже может быть уничтожен)
         local myChar = Players.LocalPlayer.Character
         local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        local deadRoot = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("Head")
-        if myRoot and deadRoot then
+        if myRoot and lastPos then
             local radius = ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30
-            if (deadRoot.Position - myRoot.Position).Magnitude > radius then return end
+            if (lastPos - myRoot.Position).Magnitude > radius then return end
         end
-        if not _canWorldReact(uid) then return end
+        -- cooldown не применяем для смерти — это важное событие
         local name = p.DisplayName or p.Name
-        local msgs = {
-            "[SYSTEM: "..name.." just died right in front of you. React in 1 short sentence, stay in character.]",
-            "[SYSTEM: "..name.." died nearby. Say something brief about it, in character.]",
-            "[SYSTEM: "..name.." was eliminated near you. React briefly.]",
-        }
+        local msg = "[SYSTEM: Игрок "..name.." только что умер рядом с тобой. Отреагируй коротко, 1 предложение, оставайся в образе.]"
         local fakeId = uid + 10000000
         enqueueChatItem(fakeId, {
             player=p, userId=fakeId, name=p.Name,
-            displayName=name, cleaned=msgs[math.random(#msgs)],
+            displayName=name, cleaned=msg,
             isWorld=true,
         })
         runChatQueue(fakeId)
