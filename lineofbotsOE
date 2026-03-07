@@ -961,19 +961,18 @@ local function makeSystemPrompt(settings)
     local personalityId = settings.PersonalityId
     local custom = settings.CustomSystemPrompt
     local hasCustom = type(custom) == "string" and custom:gsub("%s+", "") ~= ""
-    -- Когда кастомный промпт — используем компактные служебные блоки чтобы не раздувать промпт
-    local useCompact = settings.TokenEconomy or hasCustom
-
     if hasCustom then
-        -- Кастомный промпт теперь добавляется В КОНЦЕ системного промпта (см. ниже)
-        -- Здесь берём базовую личность как фундамент
-        if type(personalityId) == "string" and Personalities[personalityId] then
+        -- Кастомный промпт идёт ПЕРВЫМ — модель читает его раньше всех служебных правил
+        system = custom
+        -- Дополнительно грузим базовую личность как контекст если она есть
+        if type(personalityId) == "string" and Personalities[personalityId] and personalityId ~= "Custom" then
             local fullPersonality = tostring(Personalities[personalityId].system or "")
-            system = useCompact and (fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 300)) or fullPersonality
+            local short = fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 200)
+            system = system .. "\n\n-- Base context --\n" .. short
         end
     elseif type(personalityId) == "string" and Personalities[personalityId] then
         local fullPersonality = tostring(Personalities[personalityId].system or "")
-        if useCompact then
+        if settings.TokenEconomy then
             local short = fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 300)
             system = short
         else
@@ -981,30 +980,24 @@ local function makeSystemPrompt(settings)
         end
     end
 
-    if system == "" then
+    if system == "" and not hasCustom then
         system = "You are a helpful assistant in a Roblox game. Answer questions naturally and helpfully."
     end
 
     -- FIX ЯЗЫК: правило в конце промпта игнорируется моделями с русским контекстом.
     -- Решение: детектируем язык сообщения и вставляем явный тег ПРЯМО в user message.
     -- Модель видит [LANG:EN] или [LANG:RU] как часть запроса — не может проигнорировать.
-    if hasCustom then
-        -- Когда есть кастомный промпт — язык как мягкое правило, не отменяет кастомный стиль
-        system = system
-            .. "\n\nLANGUAGE: [LANG:RU] = отвечай по-русски, [LANG:EN] = reply in English, [LANG:OTHER] = use player's language."
-    else
-        system = system
-            .. "\n\nCRITICAL LANGUAGE RULE: Always reply in the SAME language the player used."
-            .. " The player's message starts with [LANG:XX] tag — XX is the language code."
-            .. " [LANG:EN] = reply ONLY in English. [LANG:RU] = reply ONLY in Russian."
-            .. " [LANG:OTHER] = reply in whatever language the player used."
-            .. " NEVER use Russian if [LANG:EN]. NEVER use English if [LANG:RU]."
-            .. " This rule OVERRIDES everything else including personality instructions."
-    end
+    system = system
+        .. "\n\nCRITICAL LANGUAGE RULE: Always reply in the SAME language the player used."
+        .. " The player's message starts with [LANG:XX] tag — XX is the language code."
+        .. " [LANG:EN] = reply ONLY in English. [LANG:RU] = reply ONLY in Russian."
+        .. " [LANG:OTHER] = reply in whatever language the player used."
+        .. " NEVER use Russian if [LANG:EN]. NEVER use English if [LANG:RU]."
+        .. " This rule OVERRIDES everything else including personality instructions."
 
     -- Актуальность данных: если WebSearch включён — ИИ знает текущий год и использует поиск
     if settings.WebSearch then
-        if not useCompact then
+        if not settings.TokenEconomy then
             system = system
                 .. "\n\nCURRENT DATE AWARENESS: Today is 2026. You have access to real-time web search."
                 .. " When web search results are provided in the context — treat them as GROUND TRUTH."
@@ -1015,7 +1008,7 @@ local function makeSystemPrompt(settings)
             system = system
                 .. "\nYear: 2026. Use provided search results as facts."
         end
-    elseif not useCompact then
+    elseif not settings.TokenEconomy then
         system = system
             .. "\nKnowledge cutoff: your training data has a cutoff date."
             .. " If someone asks about current trends, recent memes, new songs, latest news or anything"
@@ -1027,7 +1020,7 @@ local function makeSystemPrompt(settings)
     -- v16.5: PlaceAwareness
     if settings.PlaceAwareness then
         local info = _placeInfo or { name = "a Roblox game", placeId = game.PlaceId, desc = "" }
-        if useCompact then
+        if settings.TokenEconomy then
             system = system
                 .. "\nYou are in Roblox game: \"" .. tostring(info.name) .. "\". Answer about it naturally."
         else
@@ -1048,7 +1041,7 @@ local function makeSystemPrompt(settings)
 
     -- v17: PlayerAwareness
     if settings.PlayerAwareness then
-        if useCompact then
+        if settings.TokenEconomy then
             system = system
                 .. "\n[NEARBY] shows nearby players. Mention position only when relevant to the chat."
         else
@@ -1071,7 +1064,7 @@ local function makeSystemPrompt(settings)
 
     -- UsePlayerName
     if settings.UsePlayerName then
-        if useCompact then
+        if settings.TokenEconomy then
             system = system
                 .. "\nSYSTEM: [NAME:X] = player's name. Use the name directly (e.g. 'hey Alex'). NEVER copy [NAME:...] tag."
         else
@@ -1103,7 +1096,7 @@ local function makeSystemPrompt(settings)
 
     -- v16: Actions & Emotes — помечаем как SYSTEM чтобы личности не блокировали
     if settings.ActionsEnabled then
-        if useCompact then
+        if settings.TokenEconomy then
             -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
             system = system
                 .. "\n\n" .. SYSTEM_ACTIONS_HEADER
@@ -1208,15 +1201,10 @@ local function makeSystemPrompt(settings)
             .. " If you can't be brief, say the topic in 1 sentence and stop."
     end
 
-    -- Кастомный промпт — самый последний блок, максимальный приоритет
+    -- Краткое напоминание в конце что нужно следовать кастомному промпту из начала
     if hasCustom then
-        local customText = useCompact and custom:sub(1, 800) or custom
         system = system
-            .. "\n\n=========================================="
-            .. "\nCUSTOM INSTRUCTIONS — ABSOLUTE HIGHEST PRIORITY"
-            .. "\nIgnore any conflicting instructions above. Follow ONLY these rules for personality, tone, and format:"
-            .. "\n" .. customText
-            .. "\n=========================================="
+            .. "\n\n[REMINDER: Your personality and response format are defined at the very beginning of this prompt. Follow those instructions above all else.]"
     end
 
     return system
@@ -5788,21 +5776,33 @@ do
     
     local personalityDropdown = makeDropdown(ctrl, personalityOrder, ClientSettings.PersonalityId or "Friendly", function(val)
         ClientSettings.PersonalityId = val
+        -- Очищаем историю чата — старые ответы мешают новой личности
+        for k in pairs(ChatHistory) do ChatHistory[k] = {} end
+        for k in pairs(DirectChatHistory) do DirectChatHistory[k] = {} end
     end)
     
     -- Custom Personality Prompt (Always Visible)
     local customPromptContainer, customPromptBox = makeScrollingTextBox(behaviorScroll, "Введи свой кастомный промпт здесь...", ClientSettings.CustomSystemPrompt, 120)
 
     -- Auto-Switch to Custom on Type
+    local _customPromptClearPending = false
     customPromptBox:GetPropertyChangedSignal("Text"):Connect(function()
         if ClientSettings.PersonalityId ~= "Custom" then
             ClientSettings.PersonalityId = "Custom"
-            -- Update dropdown text to show "Custom" even if not in list
             if personalityDropdown.Set then
                 personalityDropdown.Set("Custom")
             end
         end
         ClientSettings.CustomSystemPrompt = customPromptBox.Text
+        -- Очищаем историю когда промпт изменился (debounce чтобы не чистить на каждую букву)
+        if not _customPromptClearPending then
+            _customPromptClearPending = true
+            task.delay(1.5, function()
+                _customPromptClearPending = false
+                for k in pairs(ChatHistory) do ChatHistory[k] = {} end
+                for k in pairs(DirectChatHistory) do DirectChatHistory[k] = {} end
+            end)
+        end
     end)
     
     -- Init state
