@@ -5914,18 +5914,21 @@ makeToggleRow(
 -- Preview Models — могут быть отключены без предупреждения
 local groqModels = {
     -- ── PRODUCTION (стабильные) ───────────────────────────────────────────
-    "llama-3.1-8b-instant",              -- Meta Llama 3.1 8B  | 560 t/s | быстрый чат
-    "llama-3.3-70b-versatile",           -- Meta Llama 3.3 70B | 280 t/s | умный
-    "openai/gpt-oss-20b",               -- GPT OSS 20B        | 1000 t/s | самый быстрый
-    "openai/gpt-oss-120b",              -- GPT OSS 120B       | 500 t/s  | топ качество
+    "llama-3.1-8b-instant",                        -- Llama 3.1 8B        | 560 t/s  | быстрый
+    "llama-3.3-70b-versatile",                     -- Llama 3.3 70B       | 280 t/s  | умный
+    "openai/gpt-oss-20b",                          -- GPT OSS 20B         | 1000 t/s | быстрейший
+    "openai/gpt-oss-120b",                         -- GPT OSS 120B        | 500 t/s  | топ
+    -- ── DEEPSEEK (reasoning модели) ──────────────────────────────────────
+    "deepseek-r1-distill-llama-70b",               -- DeepSeek R1 Llama   | 70B reasoning
+    "deepseek-r1-distill-qwen-32b",                -- DeepSeek R1 Qwen    | 32B reasoning
     -- ── PREVIEW (свежие модели) ───────────────────────────────────────────
-    "meta-llama/llama-4-scout-17b-16e-instruct",  -- Llama 4 Scout 17B | 750 t/s | новый
-    "meta-llama/llama-4-maverick-17b-128e-instruct", -- Llama 4 Maverick | топ reasoning
-    "moonshotai/kimi-k2-instruct-0905",  -- Kimi K2            | 200 t/s  | умный диалог
-    "qwen/qwen3-32b",                    -- Qwen3 32B          | 400 t/s  | хорош в логике
+    "meta-llama/llama-4-scout-17b-16e-instruct",   -- Llama 4 Scout 17B   | 750 t/s  | новый
+    "meta-llama/llama-4-maverick-17b-128e-instruct", -- Llama 4 Maverick  | reasoning
+    "moonshotai/kimi-k2-instruct-0905",            -- Kimi K2             | 200 t/s  | диалог
+    "qwen/qwen3-32b",                              -- Qwen3 32B           | 400 t/s  | логика
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
-    "compound-beta",                     -- Compound           | веб-поиск + код + браузер
-    "compound-beta-mini",                -- Compound Mini      | веб-поиск | быстрее
+    "compound-beta",                               -- Compound            | веб + код + браузер
+    "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
 }
 
 --[[ 
