@@ -1087,10 +1087,13 @@ local function makeSystemPrompt(settings)
             .. "\nExamples:"
             .. "\n  [SYSTEM: Alex just jumped near you. React naturally in 1 short sentence.]"
             .. "\n  [SYSTEM: Bob is staring right at you. Acknowledge them in 1 short sentence.]"
+            .. "\n  [SYSTEM: Alex just died right in front of you. React naturally in 1 short sentence.]"
+            .. "\n  [SYSTEM: You just died. React to your own death in 1 short sentence, stay in character.]"
             .. "\nRULES for [SYSTEM:] events:"
             .. "\n  - React naturally and briefly — 1 sentence max"
             .. "\n  - Stay in character"
             .. "\n  - NEVER print '[SYSTEM:' in your reply"
+            .. "\n  - For death events: react with emotion — surprise, sadness, humor — whatever fits your personality"
             .. "\n  - Respond in the language matching your personality (Russian by default)"
     end
 
@@ -1935,27 +1938,26 @@ local function doRagdoll()
     if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
-    if _isRagdoll then return end  -- уже рагдолл
+    if _isRagdoll then return end
     _isRagdoll = true
 
-    -- Отключаем Animate скрипт чтобы анимации не мешали физике
+    -- Отключаем Animate и гуманоид
     local animate = char:FindFirstChild("Animate")
     if animate then animate.Disabled = true end
+    hum.PlatformStand = true  -- это отключает контроль гуманоида и даёт физике работать
 
-    -- Переводим гуманоида в чисто физический режим
-    hum:ChangeState(Enum.HumanoidStateType.Physics)
-
-    -- Отключаем все Motor6D — тело обмякает
+    -- Отключаем Motor6D — суставы обмякают
     for _, m in ipairs(char:GetDescendants()) do
         if m:IsA("Motor6D") then
             m.Enabled = false
         end
     end
 
-    -- Все части тела — свободная физика
+    -- Даём всем частям тела коллизию чтобы они падали на пол
     for _, p in ipairs(char:GetDescendants()) do
-        if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" then
+        if p:IsA("BasePart") then
             p.CanCollide = true
+            pcall(function() p:SetNetworkOwner(Players.LocalPlayer) end)
         end
     end
 end
@@ -1967,20 +1969,25 @@ local function doUnragdoll()
     if not _isRagdoll then return end
     _isRagdoll = false
 
-    -- Включаем Motor6D обратно
+    -- Включаем Motor6D
     for _, m in ipairs(char:GetDescendants()) do
         if m:IsA("Motor6D") then
             m.Enabled = true
         end
     end
 
-    -- Включаем Animate обратно
+    -- Восстанавливаем Animate и контроль
     local animate = char:FindFirstChild("Animate")
     if animate then animate.Disabled = false end
 
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
-        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+        hum.PlatformStand = false
+        task.delay(0.1, function()
+            if hum and hum.Parent then
+                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end
+        end)
     end
 end
 
