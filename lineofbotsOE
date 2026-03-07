@@ -963,10 +963,11 @@ local function makeSystemPrompt(settings)
     local hasCustom = type(custom) == "string" and custom:gsub("%s+", "") ~= ""
 
     if hasCustom then
-        if settings.TokenEconomy then
-            system = custom:sub(1, 200)
-        else
-            system = custom
+        -- Кастомный промпт теперь добавляется В КОНЦЕ системного промпта (см. ниже)
+        -- Здесь берём базовую личность как фундамент
+        if type(personalityId) == "string" and Personalities[personalityId] then
+            local fullPersonality = tostring(Personalities[personalityId].system or "")
+            system = settings.TokenEconomy and (fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 300)) or fullPersonality
         end
     elseif type(personalityId) == "string" and Personalities[personalityId] then
         local fullPersonality = tostring(Personalities[personalityId].system or "")
@@ -1197,6 +1198,18 @@ local function makeSystemPrompt(settings)
             .. " NEVER paste article text, lists of facts, or long summaries."
             .. " Example: asked 'мемы тиктока 2026' → reply '2-3 названия мемов, коротко'. NOT a wall of text."
             .. " If you can't be brief, say the topic in 1 sentence and stop."
+    end
+
+    -- Кастомный промпт добавляется В КОНЦЕ — модели дают приоритет последним инструкциям.
+    -- Все служебные блоки (язык, эмоции, поиск и т.д.) уже добавлены выше и остаются.
+    -- Кастомный промпт переопределяет личность/тон но не ломает служебную логику.
+    if hasCustom then
+        local customText = settings.TokenEconomy and custom:sub(1, 200) or custom
+        system = system
+            .. "\n\n== CUSTOM PERSONALITY (HIGHEST PRIORITY) =="
+            .. "\n" .. customText
+            .. "\nThis custom personality OVERRIDES the default personality above."
+            .. " Follow these instructions for your tone, style, and behavior."
     end
 
     return system
