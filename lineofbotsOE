@@ -17,6 +17,7 @@ end
 
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
+local _guiScale = 1.0  -- масштаб GUI, обновляется в createInterface
 local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 local StarterGui = game:GetService("StarterGui")
@@ -3975,8 +3976,7 @@ local function makeDropdown(parent, values, default, callback)
 
         local itemHeight = 36
         local maxVisibleItems = 4 -- Compact dropdown
-        -- listHeight в экранных пикселях (dropdownList живёт в ScreenGui без UIScale)
-        local listHeight = math.min(#values, maxVisibleItems) * math.floor(itemHeight * _guiScale)
+        local listHeight = math.min(#values, maxVisibleItems) * itemHeight
         
         dropdownList = Instance.new("Frame")
         dropdownList.Name = "DropdownList"
@@ -4015,7 +4015,7 @@ local function makeDropdown(parent, values, default, callback)
         layout.Parent = scroll
         
         layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-             scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y)
+             scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y / _guiScale)
         end)
 
         for i, val in ipairs(values) do
@@ -4097,7 +4097,6 @@ end
 
 
 -- Main UI Creation Wrapper
-local _guiScale = 1.0  -- обновляется при создании GUI, используется в scroll callbacks
 local function createInterface()
     if player.PlayerGui:FindFirstChild("LineOfBotsUI") then
         player.PlayerGui.LineOfBotsUI:Destroy()
