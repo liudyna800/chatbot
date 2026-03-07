@@ -961,17 +961,19 @@ local function makeSystemPrompt(settings)
     local personalityId = settings.PersonalityId
     local custom = settings.CustomSystemPrompt
     local hasCustom = type(custom) == "string" and custom:gsub("%s+", "") ~= ""
+    -- Когда кастомный промпт — используем компактные служебные блоки чтобы не раздувать промпт
+    local useCompact = settings.TokenEconomy or hasCustom
 
     if hasCustom then
         -- Кастомный промпт теперь добавляется В КОНЦЕ системного промпта (см. ниже)
         -- Здесь берём базовую личность как фундамент
         if type(personalityId) == "string" and Personalities[personalityId] then
             local fullPersonality = tostring(Personalities[personalityId].system or "")
-            system = settings.TokenEconomy and (fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 300)) or fullPersonality
+            system = useCompact and (fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 300)) or fullPersonality
         end
     elseif type(personalityId) == "string" and Personalities[personalityId] then
         local fullPersonality = tostring(Personalities[personalityId].system or "")
-        if settings.TokenEconomy then
+        if useCompact then
             local short = fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 300)
             system = short
         else
@@ -1002,7 +1004,7 @@ local function makeSystemPrompt(settings)
 
     -- Актуальность данных: если WebSearch включён — ИИ знает текущий год и использует поиск
     if settings.WebSearch then
-        if not settings.TokenEconomy then
+        if not useCompact then
             system = system
                 .. "\n\nCURRENT DATE AWARENESS: Today is 2026. You have access to real-time web search."
                 .. " When web search results are provided in the context — treat them as GROUND TRUTH."
@@ -1013,7 +1015,7 @@ local function makeSystemPrompt(settings)
             system = system
                 .. "\nYear: 2026. Use provided search results as facts."
         end
-    elseif not settings.TokenEconomy then
+    elseif not useCompact then
         system = system
             .. "\nKnowledge cutoff: your training data has a cutoff date."
             .. " If someone asks about current trends, recent memes, new songs, latest news or anything"
@@ -1025,7 +1027,7 @@ local function makeSystemPrompt(settings)
     -- v16.5: PlaceAwareness
     if settings.PlaceAwareness then
         local info = _placeInfo or { name = "a Roblox game", placeId = game.PlaceId, desc = "" }
-        if settings.TokenEconomy then
+        if useCompact then
             system = system
                 .. "\nYou are in Roblox game: \"" .. tostring(info.name) .. "\". Answer about it naturally."
         else
@@ -1046,7 +1048,7 @@ local function makeSystemPrompt(settings)
 
     -- v17: PlayerAwareness
     if settings.PlayerAwareness then
-        if settings.TokenEconomy then
+        if useCompact then
             system = system
                 .. "\n[NEARBY] shows nearby players. Mention position only when relevant to the chat."
         else
@@ -1069,7 +1071,7 @@ local function makeSystemPrompt(settings)
 
     -- UsePlayerName
     if settings.UsePlayerName then
-        if settings.TokenEconomy then
+        if useCompact then
             system = system
                 .. "\nSYSTEM: [NAME:X] = player's name. Use the name directly (e.g. 'hey Alex'). NEVER copy [NAME:...] tag."
         else
@@ -1101,7 +1103,7 @@ local function makeSystemPrompt(settings)
 
     -- v16: Actions & Emotes — помечаем как SYSTEM чтобы личности не блокировали
     if settings.ActionsEnabled then
-        if settings.TokenEconomy then
+        if useCompact then
             -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
             system = system
                 .. "\n\n" .. SYSTEM_ACTIONS_HEADER
@@ -1208,7 +1210,7 @@ local function makeSystemPrompt(settings)
 
     -- Кастомный промпт — самый последний блок, максимальный приоритет
     if hasCustom then
-        local customText = settings.TokenEconomy and custom:sub(1, 400) or custom
+        local customText = useCompact and custom:sub(1, 800) or custom
         system = system
             .. "\n\n=========================================="
             .. "\nCUSTOM INSTRUCTIONS — ABSOLUTE HIGHEST PRIORITY"
@@ -2556,8 +2558,24 @@ local function handleQueuedChat(item)
         -- tool_choice убран — ломает большинство моделей Groq
     end
 
-    local text, err = providerRouter:chatCompletions(payload)
-    -- v18: при rate limit (429) — ждём 5 сек и повторяем один раз, не отключаем бота
+    -- Таймаут 20 секунд — если модель не ответила, не ждём вечно
+    local text, err
+    do
+        local done = false
+        task.spawn(function()
+            text, err = providerRouter:chatCompletions(payload)
+            done = true
+        end)
+        local waited = 0
+        while not done and waited < 20 do
+            task.wait(0.5)
+            waited = waited + 0.5
+        end
+        if not done then
+            return  -- таймаут — просто пропускаем, бот не отключается
+        end
+    end
+    -- v18: при rate limit (429) — ждём 5 сек и повторяем один раз
     if (not text or text == "") and err and tostring(err):find("429") then
         task.wait(5)
         text, err = providerRouter:chatCompletions(payload)
