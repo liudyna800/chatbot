@@ -1,7 +1,8 @@
-print("LOB VERSION: v18.2.8 LOADED")
+print("LOB VERSION: v18.5.33 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
-local LOB_KEY_FILE = "lob_apikey.txt"
+local LOB_KEY_FILE    = "lob_apikey.txt"
+local LOB_GEMINI_FILE = "lob_geminikey.txt"
 local LOB_SETTINGS_FILE = "lob_settings.txt"
 local function saveSettings()
     pcall(function()
@@ -22,15 +23,17 @@ local function loadSettings()
     end)
 end
 local function saveApiKey(key)
-    pcall(function()
-        if writefile then writefile(LOB_KEY_FILE, tostring(key or "")) end
-    end)
+    pcall(function() if writefile then writefile(LOB_KEY_FILE, tostring(key or "")) end end)
 end
 local function loadApiKey()
-    local ok, result = pcall(function()
-        if readfile then return readfile(LOB_KEY_FILE) end
-        return ""
-    end)
+    local ok, result = pcall(function() if readfile then return readfile(LOB_KEY_FILE) end return "" end)
+    return (ok and type(result)=="string") and result or ""
+end
+local function saveGeminiKey(key)
+    pcall(function() if writefile then writefile(LOB_GEMINI_FILE, tostring(key or "")) end end)
+end
+local function loadGeminiKey()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_GEMINI_FILE) end return "" end)
     return (ok and type(result)=="string") and result or ""
 end
 
@@ -100,8 +103,8 @@ local ClientSettings = {
     Theme = "LineOfBots",
     ApiKeys = {
         groq = "",
+        gemini = "",
     },
-    ApiKeySlot = "Api One",
     UI = {
         WindowWidth = 750,
         WindowHeight = 500,
@@ -162,6 +165,11 @@ do
         ClientSettings.ApiKeys.groq = saved
     end
     loadSettings()
+    local savedGemini = loadGeminiKey()
+    if savedGemini and #savedGemini > 8 then
+        ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
+        ClientSettings.ApiKeys.gemini = savedGemini
+    end
 end
 
 local ClientSecrets = {
@@ -549,18 +557,10 @@ function GroqProvider.new()
 end
 
 local function getGroqApiKey()
-    local override = ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq
-    if type(override) == "string" then
-        override = override:gsub("%s+", "")
-        if override ~= "" then
-            return override
-        end
-    end
-    local slot = ClientSettings.ApiKeySlot
-    if slot == "Api 2" then
-        return ClientSecrets.groq2
-    elseif slot == "Api 3" then
-        return ClientSecrets.groq3
+    local key = ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq
+    if type(key) == "string" then
+        key = key:gsub("%s+", "")
+        if key ~= "" then return key end
     end
     return ClientSecrets.groq
 end
@@ -814,16 +814,78 @@ end
 
 
 -- Provider Router (Groq only)
+-- ── GEMINI PROVIDER ──────────────────────────────────────────────────────
+local GeminiProvider = {}
+GeminiProvider.__index = GeminiProvider
+
+function GeminiProvider.new()
+    return setmetatable({}, GeminiProvider)
+end
+
+function GeminiProvider:chatCompletions(payload)
+    local apiKey = ClientSettings.ApiKeys and ClientSettings.ApiKeys.gemini
+    apiKey = type(apiKey) == "string" and apiKey:gsub("%s+","") or ""
+    if apiKey == "" then return nil, "MissingGeminiKey" end
+
+    local model = payload.model or "gemini-1.5-flash"
+    local url = "https://generativelanguage.googleapis.com/v1beta/models/"
+        .. model .. ":generateContent?key=" .. apiKey
+
+    -- Конвертируем OpenAI-формат messages в Gemini formат
+    local systemParts = {}
+    local contents = {}
+    for _, m in ipairs(payload.messages or {}) do
+        if m.role == "system" then
+            table.insert(systemParts, { text = tostring(m.content or "") })
+        elseif m.role == "user" then
+            table.insert(contents, { role = "user", parts = {{ text = tostring(m.content or "") }} })
+        elseif m.role == "assistant" then
+            table.insert(contents, { role = "model", parts = {{ text = tostring(m.content or "") }} })
+        end
+    end
+
+    local body = {
+        contents = contents,
+        generationConfig = {
+            maxOutputTokens = payload.max_tokens or 300,
+            temperature = payload.temperature or 0.8,
+        },
+    }
+    if #systemParts > 0 then
+        body.systemInstruction = { parts = systemParts }
+    end
+
+    local res, statusCode, statusMsg, rawBody = postJson(url, {
+        ["Content-Type"] = "application/json",
+    }, body)
+
+    if not res then
+        return nil, tostring(statusCode or "") .. ":" .. tostring(statusMsg or "") .. ":" .. tostring(rawBody or "")
+    end
+
+    -- Gemini response: candidates[1].content.parts[1].text
+    local cands = res.candidates
+    if not cands or not cands[1] then return nil, "NoGeminiCandidates" end
+    local parts = cands[1].content and cands[1].content.parts
+    if not parts or not parts[1] then return nil, "NoGeminiParts" end
+    return tostring(parts[1].text or ""), nil
+end
+
 local ProviderRouter = {}
 ProviderRouter.__index = ProviderRouter
 
 function ProviderRouter.new()
     local self = setmetatable({}, ProviderRouter)
-    self._groq = GroqProvider.new()
+    self._groq   = GroqProvider.new()
+    self._gemini = GeminiProvider.new()
     return self
 end
 
 function ProviderRouter:chatCompletions(payload)
+    local model = tostring(payload.model or "")
+    if model:find("^gemini") then
+        return self._gemini:chatCompletions(payload)
+    end
     return self._groq:chatCompletions(payload)
 end
 
@@ -1218,7 +1280,7 @@ local function makeSystemPrompt(settings)
     -- compound-beta / compound-beta-mini: веб-поиск даёт огромные ответы
     -- Добавляем жёсткое ограничение на длину для этих моделей
     local model = settings.Models and settings.Models.groq or ""
-    if model == "compound-beta" or model == "compound-beta-mini" then
+    if (model == "compound-beta" or model == "compound-beta-mini") and not model:find("^gemini") then
         system = system
             .. "\n\nCRITICAL OUTPUT RULE: You have web search. After searching, give ONLY a SHORT answer — 1-3 sentences max."
             .. " NEVER paste article text, lists of facts, or long summaries."
@@ -5802,6 +5864,8 @@ local groqModels = {
     "meta-llama/llama-4-maverick-17b-128e-instruct", -- Llama 4 Maverick  | reasoning
     "moonshotai/kimi-k2-instruct-0905",            -- Kimi K2             | 200 t/s  | диалог
     "qwen/qwen3-32b",                              -- Qwen3 32B           | 400 t/s  | логика
+    -- ── GEMINI (Google) ──────────────────────────────────────────────────
+    "gemini-1.5-flash",                            -- Gemini 1.5 Flash    | быстрый | Google
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
@@ -6238,13 +6302,6 @@ end)
 
 makeAdvancedHeader("API")
 do
-    local slotValues = { "Api One", "Api 2", "Api 3" }
-    local _, slotCtrl = makeRightControlRow(advancedScroll, "Слот API", "Выбери встроенный API ключ.", 200)
-    local slotDd = makeDropdown(slotCtrl, slotValues, ClientSettings.ApiKeySlot or "Api One", function(val)
-        ClientSettings.ApiKeySlot = val
-    end)
-    slotDd.Frame.Size = UDim2.new(1, 0, 1, 0)
-
     -- API Key Card with clean glass style
     local apiCard = Instance.new("Frame")
     apiCard.Name = "ApiKeyCard"
@@ -6432,17 +6489,174 @@ do
     apiBox.FocusLost:Connect(function()
         local raw = tostring(apiBox.Text or "")
         local clean = raw:gsub("%s+", "")
-        if not ClientSettings.ApiKeys then
-            ClientSettings.ApiKeys = {}
-        end
+        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.groq = clean
-        saveApiKey(clean) -- автосохранение на диск
+        saveApiKey(clean)
         apiBox.Text = clean
-        -- Сбрасываем статус при смене ключа
         tween(apiStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
         apiStatusLbl.Text = "не проверен"
         apiStatusLbl.TextColor3 = THEME.TextDim
         tween(apiCardStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.5 })
+    end)
+
+    -- ── GEMINI API KEY CARD ────────────────────────────────────────────────
+    local gemCard = Instance.new("Frame")
+    gemCard.Name = "GeminiKeyCard"
+    gemCard.BackgroundColor3 = THEME.Card
+    gemCard.BackgroundTransparency = 0
+    gemCard.BorderSizePixel = 0
+    gemCard.Size = UDim2.new(1, 0, 0, 160)
+    gemCard.Parent = advancedScroll
+    makeCorner(gemCard, 12)
+    local gemCardStroke = makeStroke(gemCard, 1, THEME.Stroke, 0.5)
+
+    local gemPad = Instance.new("UIPadding")
+    gemPad.PaddingTop    = UDim.new(0, 12)
+    gemPad.PaddingBottom = UDim.new(0, 12)
+    gemPad.PaddingLeft   = UDim.new(0, 14)
+    gemPad.PaddingRight  = UDim.new(0, 14)
+    gemPad.Parent = gemCard
+
+    local gemTitleRow = Instance.new("Frame")
+    gemTitleRow.BackgroundTransparency = 1
+    gemTitleRow.Size = UDim2.new(1, 0, 0, 18)
+    gemTitleRow.Parent = gemCard
+
+    local gemTitle = makeTextLabel(gemTitleRow, "Gemini API Ключ", 14, "bold")
+    gemTitle.Size = UDim2.new(1, -90, 1, 0)
+    gemTitle.TextColor3 = THEME.Text
+
+    local gemStatusDot = Instance.new("Frame")
+    gemStatusDot.Size = UDim2.new(0, 8, 0, 8)
+    gemStatusDot.AnchorPoint = Vector2.new(1, 0.5)
+    gemStatusDot.Position = UDim2.new(1, -52, 0.5, 0)
+    gemStatusDot.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    gemStatusDot.BorderSizePixel = 0
+    gemStatusDot.Parent = gemTitleRow
+    makeCorner(gemStatusDot, 999)
+
+    local gemStatusLbl = makeTextLabel(gemTitleRow, "не проверен", 11, "medium")
+    gemStatusLbl.Size = UDim2.new(0, 70, 1, 0)
+    gemStatusLbl.Position = UDim2.new(1, -70, 0, 0)
+    gemStatusLbl.TextColor3 = THEME.TextDim
+    gemStatusLbl.TextXAlignment = Enum.TextXAlignment.Right
+
+    local gemDesc = makeTextLabel(gemCard, "aistudio.google.com → API Keys", 11, "medium")
+    gemDesc.Size = UDim2.new(1, 0, 0, 14)
+    gemDesc.Position = UDim2.new(0, 0, 0, 21)
+    gemDesc.TextColor3 = THEME.TextDim
+
+    local gemInputFrame = Instance.new("Frame")
+    gemInputFrame.BackgroundColor3 = THEME.InputBg or THEME.Button
+    gemInputFrame.BackgroundTransparency = 0.25
+    gemInputFrame.BorderSizePixel = 0
+    gemInputFrame.Size = UDim2.new(1, 0, 0, 32)
+    gemInputFrame.Position = UDim2.new(0, 0, 0, 40)
+    gemInputFrame.Parent = gemCard
+    makeCorner(gemInputFrame, 8)
+    makeStroke(gemInputFrame, 1, THEME.Stroke, 0.6)
+
+    local gemBox = Instance.new("TextBox")
+    gemBox.BackgroundTransparency = 1
+    gemBox.Size = UDim2.new(1, -16, 1, 0)
+    gemBox.Position = UDim2.new(0, 8, 0, 0)
+    gemBox.Font = Enum.Font.GothamMedium
+    gemBox.TextSize = 13
+    gemBox.TextColor3 = THEME.Text
+    gemBox.PlaceholderText = "Вставь Gemini API ключ (AIza...)"
+    gemBox.PlaceholderColor3 = THEME.TextDim
+    gemBox.TextXAlignment = Enum.TextXAlignment.Left
+    gemBox.ClearTextOnFocus = false
+    gemBox.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.gemini) or ""
+    gemBox.Parent = gemInputFrame
+
+    local gemLimitLbl = makeTextLabel(gemCard, "Gemini 1.5 Flash — 15 запросов/мин, 1M токен/мин (бесплатно)", 11, "medium")
+    gemLimitLbl.Size = UDim2.new(1, 0, 0, 28)
+    gemLimitLbl.Position = UDim2.new(0, 0, 0, 78)
+    gemLimitLbl.TextColor3 = THEME.TextDim
+    gemLimitLbl.TextWrapped = true
+
+    local gemCheckBtn = Instance.new("TextButton")
+    gemCheckBtn.Size = UDim2.new(1, 0, 0, 28)
+    gemCheckBtn.Position = UDim2.new(0, 0, 0, 112)
+    gemCheckBtn.BackgroundColor3 = Color3.fromRGB(66, 133, 244) -- Google blue
+    gemCheckBtn.BackgroundTransparency = 0.15
+    gemCheckBtn.Text = "Проверить ключ"
+    gemCheckBtn.Font = Enum.Font.GothamBold
+    gemCheckBtn.TextSize = 13
+    gemCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    gemCheckBtn.AutoButtonColor = false
+    gemCheckBtn.Parent = gemCard
+    makeCorner(gemCheckBtn, 8)
+
+    gemCheckBtn.MouseEnter:Connect(function()
+        tween(gemCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0 })
+    end)
+    gemCheckBtn.MouseLeave:Connect(function()
+        tween(gemCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0.15 })
+    end)
+
+    local function setGemStatus(ok, text)
+        local col = ok and Color3.fromRGB(50, 200, 80) or Color3.fromRGB(220, 60, 60)
+        tween(gemStatusDot, TWEEN_MED, { BackgroundColor3 = col })
+        gemStatusLbl.Text = text
+        gemStatusLbl.TextColor3 = col
+        tween(gemCardStroke, TWEEN_MED, { Color = col, Transparency = ok and 0.3 or 0.4 })
+    end
+
+    local function doGeminiCheck()
+        local raw = tostring(gemBox.Text or "")
+        local clean = raw:gsub("%s+", "")
+        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
+        ClientSettings.ApiKeys.gemini = clean
+        saveGeminiKey(clean)
+
+        gemCheckBtn.Text = "Проверяю..."
+        gemCheckBtn.BackgroundTransparency = 0.4
+        task.spawn(function()
+            gemCheckBtn.Text = "Проверить ключ"
+            gemCheckBtn.BackgroundTransparency = 0.15
+            if clean == "" then setGemStatus(false, "ключ не указан"); return end
+            local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+            if not req then setGemStatus(false, "ошибка executor"); return end
+            local testUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" .. clean
+            local ok2, res2 = pcall(req, {
+                Url = testUrl, Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode({
+                    contents = {{ role = "user", parts = {{ text = "hi" }} }},
+                    generationConfig = { maxOutputTokens = 1 },
+                }),
+            })
+            if not ok2 then setGemStatus(false, "ошибка сети"); return end
+            local s = res2.StatusCode or res2.statusCode or 0
+            if tonumber(s) == 400 then setGemStatus(false, "❌ неверный ключ"); return end
+            if tonumber(s) == 429 then setGemStatus(false, "⚠️ rate limit"); return end
+            if tonumber(s) ~= 200 then setGemStatus(false, "❌ ошибка " .. tostring(s)); return end
+            setGemStatus(true, "✓ работает")
+        end)
+    end
+
+    gemCheckBtn.MouseButton1Click:Connect(doGeminiCheck)
+
+    gemBox.FocusLost:Connect(function()
+        local raw = tostring(gemBox.Text or "")
+        local clean = raw:gsub("%s+", "")
+        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
+        ClientSettings.ApiKeys.gemini = clean
+        saveGeminiKey(clean)
+        gemBox.Text = clean
+        tween(gemStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
+        gemStatusLbl.Text = "не проверен"
+        gemStatusLbl.TextColor3 = THEME.TextDim
+        tween(gemCardStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.5 })
+    end)
+
+    -- Автопроверка если ключ уже сохранён
+    task.spawn(function()
+        task.wait(0.7)
+        local savedKey = ClientSettings.ApiKeys and ClientSettings.ApiKeys.gemini
+        if savedKey and #savedKey > 8 then doGeminiCheck() end
     end)
 end
 
