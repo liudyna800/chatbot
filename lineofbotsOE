@@ -1440,12 +1440,17 @@ if Players.LocalPlayer.Character then
 end
 Players.LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 
--- Реакция на собственную смерть + сброс рагдолла при ресете
+-- Реакция на собственную смерть + сброс состояний при ресете
 Players.LocalPlayer.CharacterAdded:Connect(function(char)
-    -- При любом ресете сбрасываем рагдолл состояние
+    -- Сбрасываем все флаги состояния при респавне
+    _isJumping = false
+    _isSpinning = false
+    _isFollowing = false
+    _isGoing = false
+    if _jumpTimeoutThread then pcall(task.cancel, _jumpTimeoutThread) _jumpTimeoutThread = nil end
+    if _spinThread then pcall(task.cancel, _spinThread) _spinThread = nil end
+    if _followThread then pcall(task.cancel, _followThread) _followThread = nil end
     task.spawn(function()
-        local animate = char:FindFirstChild("Animate")
-        if animate then animate.Disabled = false end
         local hum = char:WaitForChild("Humanoid", 3)
         if hum then
             pcall(function()
@@ -2961,41 +2966,8 @@ local function processChatMessage(player, rawMessage)
     end
     
     -- [FOLLOWING COMMANDS] - Check BEFORE rate limiting to ensure reliability
-    if settings.FollowingEnabled then
-        local cleanedForCmd = normalizeOneLine(stripTrigger(settings, message))
-        local lowerMsg = cleanedForCmd:lower()
-        Logger:Add("debug", "[FollowCmd] Checking: " .. lowerMsg)
-        local stopKeywords = {"stop following", "stay here", "don't follow", "dont follow", "don't follow anymore", "dont follow anymore", "stop", "unfollow"}
-        local followKeywords = {"follow me", "pls follow", "follow"}
-        
-        -- Priority 1: STOP (Check this first so "don't follow" isn't caught as "follow")
-        local isStop = false
-        for _, kw in ipairs(stopKeywords) do
-            if lowerMsg:find(kw) then
-                isStop = true
-                break
-            end
-        end
-
-        if isStop then
-            stopFollow(player)
-            return
-        end
-
-        -- Priority 2: FOLLOW
-        local isFollow = false
-        for _, kw in ipairs(followKeywords) do
-            if lowerMsg:find(kw) then
-                isFollow = true
-                break
-            end
-        end
-
-        if isFollow then
-            requestFollow(player)
-            return -- Don't process as AI message if it's a command
-        end
-    end
+    -- FollowingEnabled: не перехватываем сообщения — ИИ сам решает через [DO:follow]/[DO:stop]
+    -- (Убрали return-перехват чтобы сообщения всегда доходили до ИИ)
     
     rateLimiter:setCooldown(tonumber(settings.CooldownSecondsPerUser) or 0)
     if not rateLimiter:allow(player.UserId) then
