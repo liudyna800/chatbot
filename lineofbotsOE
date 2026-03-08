@@ -1,4 +1,4 @@
-print("LOB VERSION: v18.2.8 LOADED")
+print("LOB VERSION: v18.5.35 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 local LOB_KEY_FILE    = "lob_apikey.txt"
