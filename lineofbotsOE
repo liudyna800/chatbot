@@ -1127,7 +1127,6 @@ local function makeSystemPrompt(settings)
             -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
             system = system
                 .. "\n\nDO_TAGS(start of reply,1 per msg,silent):"
-                .. "\n[DO:ragdoll]=упади/ragdoll/падай [DO:unragdoll]=встань/inragdoll"
                 .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop"
                 .. "\n[DO:jump]=прыгни/jump [DO:jump2]=2x [DO:jump3]=3x [DO:jump5]=5x [DO:jump10]=10x"
                 .. "\n[DO:spin]=крутись/spin(3с) [DO:spin5]=5с [DO:spin10]=10с"
@@ -1147,7 +1146,6 @@ local function makeSystemPrompt(settings)
                 .. "\nNEVER explain the tag. NEVER skip a tag when the message clearly calls for it."
                 .. "\n"
                 .. "\nMOVEMENT:"
-                .. "\n[DO:ragdoll]=упади/ragdoll [DO:unragdoll]=встань/unragdoll"
                 .. "\n[DO:goto]   подойди/come here/иди сюда/иди ко мне — ONE-TIME walk, then stop"
                 .. "\n[DO:follow] иди за мной/follow me/следуй — follow CONTINUOUSLY"
                 .. "\n[DO:stop]   стой/stop/stay — stop moving"
@@ -1202,7 +1200,6 @@ local function makeSystemPrompt(settings)
                 .. "\nпосмейся→[DO:laugh]  порадуйся→[DO:cheer]  потанцуй→[DO:dance]"
                 .. "\nскажи да→[DO:agree]  скажи нет→[DO:disagree]  закатай глаза→[DO:eyeroll]"
                 .. "\nпомашь→[DO:wave]  сядь→[DO:sit]  покажи→[DO:point]"
-                .. "\n[DO:ragdoll]=упади [DO:unragdoll]=встань"
                 .. "\nпрыгни→[DO:jump]  прыгни 2→[DO:jump2]  прыгни 3→[DO:jump3]  прыгни 4→[DO:jump4]"
                 .. "\nпрыгни 5→[DO:jump5]  прыгни 6→[DO:jump6]  прыгни 7→[DO:jump7]"
                 .. "\nпрыгни 8→[DO:jump8]  прыгни 9→[DO:jump9]  прыгни 10→[DO:jump10]"
@@ -1214,7 +1211,6 @@ local function makeSystemPrompt(settings)
                 .. "\nпривет→[DO:wave]хей   подойди→[DO:goto]иду"
                 .. "\nпрыгни→[DO:jump]ok   прыгни 2 раза→[DO:jump2]ok   прыгни 5 раз→[DO:jump5]ok   прыгни 10 раз→[DO:jump10]ok"
                 .. "\nкрутись→[DO:spin]ок   крутись 10 сек→[DO:spin10]ок"
-                .. "\nупади/рагдолл/ragdoll→[DO:ragdoll]ок   встань/inragdoll/unragdoll→[DO:unragdoll]встаю"
                 .. "\nidk→[DO:shrug]хз   sorry→[DO:sorry]всё ок"
         end
     end
@@ -1447,8 +1443,6 @@ Players.LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 -- Реакция на собственную смерть + сброс рагдолла при ресете
 Players.LocalPlayer.CharacterAdded:Connect(function(char)
     -- При любом ресете сбрасываем рагдолл состояние
-    _isRagdoll = false
-    _ragdollTrack = nil  -- новый персонаж — старый трек уже невалиден
     task.spawn(function()
         local animate = char:FindFirstChild("Animate")
         if animate then animate.Disabled = false end
@@ -1467,8 +1461,6 @@ Players.LocalPlayer.CharacterAdded:Connect(function(char)
     hum.Died:Connect(function()
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then return end
         task.delay(0.5, function()
-            -- Сбрасываем рагдолл если был
-            _isRagdoll = false
             local msgs = {
                 "[SYSTEM: You just died. React to your own death in 1 short sentence, stay in character.]",
                 "[SYSTEM: You were eliminated. Say something short about dying, in character.]",
@@ -1969,104 +1961,8 @@ local function doSpin(seconds)
 end
 
 -- ── RAGDOLL ──────────────────────────────────────────────────────────────
-local _isRagdoll = false
 
--- ID анимаций падения/рагдолла — R15 и R6
-local RAGDOLL_ANIM_R15 = "2924443969"  -- официальная death/fall анимация R15
-local RAGDOLL_ANIM_R6  = "180436354"   -- fall анимация R6
-local _ragdollTrack = nil
-
-local function _restoreFromRagdoll(char)
-    if not char then char = Players.LocalPlayer.Character end
-    if not char then return end
-
-    -- Останавливаем анимацию рагдолла
-    if _ragdollTrack then
-        pcall(function() _ragdollTrack:Stop(0.3) end)
-        _ragdollTrack = nil
-    end
-
-    local animate = char:FindFirstChild("Animate")
-    if animate then animate.Disabled = false end
-
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum then
-        pcall(function()
-            hum.WalkSpeed = 16
-            hum.JumpPower = 50
-            hum.AutoRotate = true
-        end)
-        task.delay(0.1, function()
-            if hum and hum.Parent then
-                pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
-            end
-        end)
-    end
-end
-
-local function doRagdoll()
-    if not ClientSettings.ActionsEnabled then return end
-    local char = Players.LocalPlayer.Character
-    if not char then return end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    if _isRagdoll then return end
-    _isRagdoll = true
-
-    -- Блокируем движение
-    pcall(function()
-        hum.WalkSpeed = 0
-        hum.JumpPower = 0
-        hum.AutoRotate = false
-    end)
-
-    -- Отключаем Animate — иначе idle перебьёт анимацию падения
-    local animate = char:FindFirstChild("Animate")
-    if animate then animate.Disabled = true end
-
-    -- Останавливаем все текущие треки
-    local animator = hum:FindFirstChildOfClass("Animator")
-    if not animator then
-        animator = Instance.new("Animator")
-        animator.Parent = hum
-    end
-    pcall(function()
-        for _, t in ipairs(animator:GetPlayingAnimationTracks()) do t:Stop(0) end
-    end)
-
-    -- Выбираем анимацию по типу рига
-    local rigType = getCharacterRigType()
-    local animId = (rigType == "R6") and RAGDOLL_ANIM_R6 or RAGDOLL_ANIM_R15
-
-    -- Загружаем и играем анимацию падения
-    local anim = Instance.new("Animation")
-    anim.AnimationId = "rbxassetid://" .. animId
-
-    local track
-    local ok = pcall(function() track = animator:LoadAnimation(anim) end)
-    pcall(function() anim:Destroy() end)
-
-    if ok and track then
-        -- Action4 — максимальный приоритет
-        for _, prio in ipairs({
-            Enum.AnimationPriority.Action4,
-            Enum.AnimationPriority.Action3,
-            Enum.AnimationPriority.Action2,
-            Enum.AnimationPriority.Action,
-        }) do
-            if pcall(function() track.Priority = prio end) then break end
-        end
-        track:Play(0.15, 1, 0)  -- speed=0 — замираем на первом кадре (лежачая поза)
-        _ragdollTrack = track
-    end
-end
-
-local function doUnragdoll()
-    if not ClientSettings.ActionsEnabled then return end
-    if not _isRagdoll then return end
-    _isRagdoll = false
-    _restoreFromRagdoll(Players.LocalPlayer.Character)
-end
+-- ragdoll removed
 
 -- ── ТАБЛИЦА ОБРАБОТЧИКОВ ─────────────────────────────────────────────────
 -- Каждый тег [DO:xxx] → своя функция
@@ -2139,9 +2035,7 @@ local ACTION_HANDLERS = {
     point    = function(_) playEmote("point",  3) end,  -- ВСТРОЕН
     sit      = function(_) playEmote("sit",   nil) end, -- ВСТРОЕН, бесконечно
     -- ── Рагдолл ───────────────────────────────────────────────────────────
-    ragdoll   = function(_) doRagdoll()   end,
-    unragdoll = function(_) doUnragdoll() end,
-    inragdoll = function(_) doUnragdoll() end,  -- алиас
+
 }
 
 -- ── ПАРСЕР И ИСПОЛНИТЕЛЬ ТЕГОВ ───────────────────────────────────────────
@@ -2760,7 +2654,13 @@ local function handleQueuedChat(item)
     -- v16: парсим тег [DO:xxx] из ответа ИИ
     -- parseActionTag возвращает (actionName, cleanText) — оба нужны
     local actionName, cleanText = parseActionTag(text)
-    cleanText = executeAction(actionName, item.player, cleanText, item.cleaned)
+    -- Не выполняем actions от isWorld событий если AutoReply выключен
+    if not item.isWorld or settings.AutoReply then
+        cleanText = executeAction(actionName, item.player, cleanText, item.cleaned)
+    else
+        -- Просто убираем тег из текста без выполнения
+        cleanText = cleanText or text
+    end
 
     -- Сохраняем в историю только если память включена
     -- ВАЖНО: сохраняем userContent (с [NAME:X] если UsePlayerName включён) — 
@@ -2844,10 +2744,11 @@ task.delay(5, function()
                 runChatQueue(uid)
             end
             prevAir[uid] = inAir
-            -- Взгляд
+            -- Взгляд — только если игрок в радиусе реакции
             if not reacted then
                 local toUs = myRoot.Position - root.Position
-                if toUs.Magnitude > 1 and _canWorldReact(uid) then
+                local stareDist = toUs.Magnitude
+                if stareDist > 1 and stareDist <= radius and _canWorldReact(uid) then
                     if root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 then
                         local name = p.DisplayName or p.Name
                         local msgs = {
