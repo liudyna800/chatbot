@@ -870,11 +870,7 @@ function GeminiProvider:chatCompletions(payload)
     -- Объединяем все system тексты в один systemInstruction
     if #systemTexts > 0 then
         body.systemInstruction = {
-            parts = {{ text = table.concat(systemTexts, "
-
----
-
-") }}
+            parts = {{ text = table.concat(systemTexts, "\n\n---\n\n") }}
         }
     end
 
