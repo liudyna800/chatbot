@@ -827,7 +827,7 @@ function GeminiProvider:chatCompletions(payload)
     apiKey = type(apiKey) == "string" and apiKey:gsub("%s+","") or ""
     if apiKey == "" then return nil, "MissingGeminiKey" end
 
-    local model = payload.model or "gemini-2.5-flash"
+    local model = payload.model or "gemini-2.0-flash"
     local url = "https://generativelanguage.googleapis.com/v1beta/models/"
         .. model .. ":generateContent?key=" .. apiKey
 
@@ -5865,7 +5865,8 @@ local groqModels = {
     "moonshotai/kimi-k2-instruct-0905",            -- Kimi K2             | 200 t/s  | диалог
     "qwen/qwen3-32b",                              -- Qwen3 32B           | 400 t/s  | логика
     -- ── GEMINI (Google) ──────────────────────────────────────────────────
-    "gemini-2.5-flash",                            -- Gemini 2.5 Flash    | быстрый | Google
+    "gemini-2.0-flash",                            -- Gemini 2.0 Flash    | быстрый | Google
+    "gemini-2.5-flash",                            -- Gemini 2.5 Flash    | умнее, reasoning | Google
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
@@ -6619,7 +6620,10 @@ do
             if clean == "" then setGemStatus(false, "ключ не указан"); return end
             local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
             if not req then setGemStatus(false, "ошибка executor"); return end
-            local testUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" .. clean
+            -- Тестируем с выбранной моделью или дефолтом
+                local testModel = (ClientSettings.Models and ClientSettings.Models.groq) or "gemini-2.5-flash"
+                if not testModel:find("^gemini") then testModel = "gemini-2.5-flash" end
+                local testUrl = "https://generativelanguage.googleapis.com/v1beta/models/" .. testModel .. ":generateContent?key=" .. clean
             local ok2, res2 = pcall(req, {
                 Url = testUrl, Method = "POST",
                 Headers = { ["Content-Type"] = "application/json" },
@@ -6629,10 +6633,35 @@ do
                 }),
             })
             if not ok2 then setGemStatus(false, "ошибка сети"); return end
-            local s = res2.StatusCode or res2.statusCode or 0
-            if tonumber(s) == 400 then setGemStatus(false, "❌ неверный ключ"); return end
-            if tonumber(s) == 429 then setGemStatus(false, "⚠️ rate limit"); return end
-            if tonumber(s) ~= 200 then setGemStatus(false, "❌ ошибка " .. tostring(s)); return end
+            local s = tonumber(res2.StatusCode or res2.statusCode or 0)
+            if s == 400 then
+                -- Пробуем извлечь сообщение из тела
+                local msg = "неверный ключ"
+                pcall(function()
+                    local b = HttpService:JSONDecode(res2.Body or res2.body or "{}")
+                    if b.error and b.error.message then msg = b.error.message:sub(1,40) end
+                end)
+                setGemStatus(false, "❌ " .. msg); return
+            end
+            if s == 401 then setGemStatus(false, "❌ неверный ключ"); return end
+            if s == 403 then setGemStatus(false, "❌ нет доступа к API"); return end
+            if s == 404 then
+                local msg = "модель не найдена"
+                pcall(function()
+                    local b = HttpService:JSONDecode(res2.Body or res2.body or "{}")
+                    if b.error and b.error.message then msg = b.error.message:sub(1,50) end
+                end)
+                setGemStatus(false, "❌ 404: " .. msg); return
+            end
+            if s == 429 then setGemStatus(false, "⚠️ rate limit"); return end
+            if s ~= 200 then
+                local msg = ""
+                pcall(function()
+                    local b = HttpService:JSONDecode(res2.Body or res2.body or "{}")
+                    if b.error and b.error.message then msg = ": " .. b.error.message:sub(1,40) end
+                end)
+                setGemStatus(false, "❌ " .. s .. msg); return
+            end
             setGemStatus(true, "✓ работает")
         end)
     end
