@@ -173,7 +173,9 @@ do
 end
 
 local ClientSecrets = {
-    groq = "",  -- встроенный фоллбэк (если нет своего ключа)
+    groq = "",
+    groq2 = "",
+    groq3 = "",
 }
 
 local CurrentGui = nil
@@ -490,11 +492,8 @@ local function extractShortName(nick)
     local prefix = nick:match("^([A-Za-z]+)")
     if prefix and #prefix >= 2 then return prefix:sub(1, 14) end
 
-    -- 3. Фолбэк для кириллицы: ищем последовательности UTF-8 кириллических байт
-    -- Lua %a НЕ включает кириллицу — нужен raw byte match
-    local cyrillic = nick:match("([8-9][
-8-91]+[8-9]?[
-8-91]*)")
+    -- 3. Фолбэк для кириллицы: берём первое кириллическое слово
+    local cyrillic = nick:match("([%a]+)")  -- Lua %a включает кирилицу в UTF-8
     if cyrillic and #cyrillic >= 2 then return cyrillic:sub(1, 14) end
 
     -- 4. Последний фолбэк: просто обрезаем ник до 14 символов
@@ -832,30 +831,23 @@ function GeminiProvider:chatCompletions(payload)
     local url = "https://generativelanguage.googleapis.com/v1beta/models/"
         .. model .. ":generateContent?key=" .. apiKey
 
-    -- Конвертируем OpenAI-формат messages в Gemini формат
-    -- ВАЖНО: Gemini принимает systemInstruction как ОДИН объект, не массив.
-    -- Все system messages объединяем в один текст через разделитель.
-    local systemTexts = {}
+    -- Конвертируем OpenAI-формат в Gemini
+    -- Все system сообщения объединяем в один systemInstruction (Gemini требует один объект)
+    local systemParts = {}
     local contents = {}
 
     for _, m in ipairs(payload.messages or {}) do
-        local role = m.role
-        local text = tostring(m.content or "")
-        if role == "system" then
-            -- Собираем все system сообщения — промпт + PlayerAwareness + WebSearch
-            table.insert(systemTexts, text)
-        elseif role == "user" then
-            table.insert(contents, { role = "user",  parts = {{ text = text }} })
-        elseif role == "assistant" then
-            table.insert(contents, { role = "model", parts = {{ text = text }} })
+        if m.role == "system" then
+            table.insert(systemParts, tostring(m.content or ""))
+        elseif m.role == "user" then
+            table.insert(contents, { role = "user",  parts = {{ text = tostring(m.content or "") }} })
+        elseif m.role == "assistant" then
+            table.insert(contents, { role = "model", parts = {{ text = tostring(m.content or "") }} })
         end
     end
 
-    -- Gemini требует alternating user/model — не может начинаться с model
-    -- Если contents пустой или начинается с model — добавляем dummy user
-    if #contents == 0 then
-        table.insert(contents, { role = "user", parts = {{ text = "(start)" }} })
-    elseif contents[1].role == "model" then
+    -- Gemini: contents не может быть пустым и должен начинаться с user
+    if #contents == 0 or contents[1].role == "model" then
         table.insert(contents, 1, { role = "user", parts = {{ text = "(start)" }} })
     end
 
@@ -867,20 +859,19 @@ function GeminiProvider:chatCompletions(payload)
         },
     }
 
-    -- Объединяем все system тексты в один systemInstruction
-    if #systemTexts > 0 then
-        body.systemInstruction = {
-            parts = {{ text = table.concat(systemTexts, "\n\n---\n\n") }}
-        }
+    -- Объединяем все system тексты в один текстовый блок
+    if #systemParts > 0 then
+        local combined = table.concat(systemParts, "\n\n")
+        body.systemInstruction = { parts = {{ text = combined }} }
     end
 
-    local res, statusCode, statusMsg, rawBody, _rh = postJson(url, {
+    local res, statusCode, statusMsg, rawBody = postJson(url, {
         ["Content-Type"] = "application/json",
     }, body)
 
     if not res then
-        -- Пробуем извлечь сообщение ошибки из тела
-        local errMsg = tostring(statusCode or "")
+        -- Пробуем извлечь детали ошибки из тела ответа
+        local errMsg = tostring(statusCode or "") .. ":" .. tostring(statusMsg or "")
         pcall(function()
             local b = HttpService:JSONDecode(tostring(rawBody or "{}"))
             if b.error and b.error.message then
@@ -890,7 +881,6 @@ function GeminiProvider:chatCompletions(payload)
         return nil, errMsg
     end
 
-    -- Gemini response: candidates[1].content.parts[1].text
     local cands = res.candidates
     if not cands or not cands[1] then return nil, "NoGeminiCandidates" end
     local parts = cands[1].content and cands[1].content.parts
@@ -2001,17 +1991,21 @@ local function doJump(count)
                 task.wait(0.05)
             end
 
-            -- Прыгаем: ChangeState + Jump=true с небольшой задержкой между ними
-            local h = getLocalHumanoid()
-            if h then
-                pcall(function() h:ChangeState(Enum.HumanoidStateType.Jumping) end)
-                task.wait(0.08)
-                pcall(function() if h and h.Parent then h.Jump = true end end)
-            end
+            -- Прыгаем — ChangeState надёжнее чем .Jump = true в executor
+            pcall(function()
+                local h = getLocalHumanoid()
+                if h then
+                    h:ChangeState(Enum.HumanoidStateType.Jumping)
+                    -- Фоллбэк: если ChangeState не сработал
+                    task.delay(0.05, function()
+                        if h and h.Parent then h.Jump = true end
+                    end)
+                end
+            end)
 
-            -- Ждём приземления перед следующим прыжком
+            -- Пауза между прыжками (не после последнего)
             if i < count then
-                task.wait(0.7)  -- достаточно для полного прыжка
+                task.wait(0.2)
             end
         end
         _clearJumpFlag()  -- нормальное завершение
@@ -2443,7 +2437,7 @@ local function smoothLookAt(targetPos)
     if not ClientSettings.CameraLook then return end
     -- Проверяем ОБЕ системы движения: старую (_isFollowing) и новую (FollowManager)
     if _isFollowing or _isGoing or _isJumping or _isSpinning then return end
-    if (_isFollowing or _isGoing) then return end  -- FollowManager check moved below (declared later)
+    if _isFollowing or _isGoing then return end  -- FollowManager declared later
 
     local root = getLocalRootPart()
     if not root then return end
@@ -2685,7 +2679,7 @@ local function handleQueuedChat(item)
     if model == "qwen/qwen3-32b" then
         payload.reasoning_effort = "none"
     end
-    -- Веб-поиск через tool use (только для Groq, Gemini не поддерживает этот формат)
+    -- Веб-поиск через tool use (только Groq, Gemini не поддерживает этот формат)
     if settings.WebSearch and not model:find("^gemini") then
         payload.tools = {
             {
@@ -2763,13 +2757,12 @@ local function handleQueuedChat(item)
     -- так ИИ в глобальной памяти помнит кто что говорил.
     -- [LANG:X] тег НЕ сохраняем (он нужен только для текущего запроса).
     if history then
-        -- Сохраняем без [LANG:...] и [NAME:...] тегов — они нужны только для текущего запроса
+        -- Убираем [LANG:...] тег из финального сохранения в историю
         local historyUserMsg = item.cleaned
         if settings.UsePlayerName and userContent ~= item.cleaned then
-            historyUserMsg = userContent:gsub("%[LANG:[^%]]*%]%s*", ""):gsub("%[NAME:[^%]]*%]%s*", "")
+            -- Берём userContent но без [LANG:...] тега если он туда попал
+            historyUserMsg = userContent:gsub("%[LANG:[^%]]*%]%s*", "")
         end
-        -- Финальная гарантия — убираем LANG/NAME теги из item.cleaned тоже (мало ли)
-        historyUserMsg = historyUserMsg:gsub("%[LANG:[^%]]*%]%s*", ""):gsub("%[NAME:[^%]]*%]%s*", "")
         appendHistory(history, historyUserMsg, cleanText)
     end
 
@@ -2841,12 +2834,12 @@ task.delay(5, function()
                 runChatQueue(uid)
             end
             prevAir[uid] = inAir
-            -- Взгляд — только если игрок в радиусе и смотрит на нас
+            -- Взгляд — только если игрок в радиусе реакции
             if not reacted then
                 local toUs = myRoot.Position - root.Position
                 local stareDist = toUs.Magnitude
-                if stareDist > 1 and stareDist <= radius then
-                    if root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 and _canWorldReact(uid) then
+                if stareDist > 1 and stareDist <= radius and _canWorldReact(uid) then
+                    if root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 then
                         local name = p.DisplayName or p.Name
                         local msgs = {
                             "[SYSTEM: "..name.." is staring right at you. Acknowledge them in 1 short sentence.]",
@@ -6678,7 +6671,7 @@ do
                 setGemStatus(false, "❌ 404: " .. msg); return
             end
             if s == 429 then
-                -- 429 на тест-запросе = ключ ВЕРНЫЙ, просто лимит бесплатного плана
+                -- 429 = ключ верный, просто лимит бесплатного тира
                 setGemStatus(true, "✓ ключ верный (rate limit)")
                 return
             end
