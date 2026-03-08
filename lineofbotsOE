@@ -1,4 +1,4 @@
-print("LOB VERSION: v18.2.8 LOADED")
+print("LOB VERSION: v18.5.39 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 local LOB_KEY_FILE    = "lob_apikey.txt"
@@ -1315,8 +1315,18 @@ local function makeSystemPrompt(settings)
 end
 
 local function getModel(settings)
-    if settings.Models and settings.Models.groq then
-        return settings.Models.groq
+    -- Явно выбранная модель имеет приоритет
+    local explicit = settings.Models and settings.Models.groq
+    if type(explicit) == "string" and explicit ~= "" then
+        return explicit
+    end
+    -- Фоллбэк на модель текущей личности
+    local pid = settings.PersonalityId
+    if type(pid) == "string" and Personalities[pid] and Personalities[pid].model then
+        local pm = Personalities[pid].model
+        -- Используем модель личности только если это Groq-модель (не gemini)
+        -- т.к. ProviderRouter роутит по имени модели
+        return pm
     end
     return "llama-3.1-8b-instant"
 end
@@ -1430,9 +1440,12 @@ local function splitTextIntoParts(text, maxLen)
 end
 
 local function sendBotMessage(text)
+    if type(text) ~= "string" or text == "" then return end
     -- Убираем служебные теги которые ИИ иногда копирует в ответ
     text = text:gsub("%[LANG:[^%]]*%]%s*", "")
     text = text:gsub("%[NAME:[^%]]*%]%s*", "")
+    text = text:gsub("%[DO:[^%]]*%]%s*", "")  -- убираем оставшиеся action теги
+    text = text:gsub("%[SYSTEM:[^%]]*%]%s*", "")  -- убираем [SYSTEM:...] если ИИ скопировал
     text = normalizeOneLine(text)
     if text == "" then return end
 
@@ -2003,9 +2016,9 @@ local function doJump(count)
                 end
             end)
 
-            -- Пауза между прыжками (не после последнего)
+            -- Ждём начала прыжка и пауза между прыжками
             if i < count then
-                task.wait(0.2)
+                task.wait(0.8)  -- достаточно для полного цикла прыжка
             end
         end
         _clearJumpFlag()  -- нормальное завершение
@@ -2646,7 +2659,6 @@ local function handleQueuedChat(item)
 
     -- v18.2.9: Веб-поиск — ищем по запросу пользователя и добавляем контекст
     if settings.WebSearch and item.cleaned and #item.cleaned > 3 then
-        task.spawn(function() end) -- yield чтобы не блокировать
         local searchResult = doWebSearch(item.cleaned)
         if searchResult and searchResult ~= "" and not searchResult:find("не найдены") and not searchResult:find("Ошибка") then
             table.insert(apiMessages, {
@@ -2679,8 +2691,11 @@ local function handleQueuedChat(item)
     if model == "qwen/qwen3-32b" then
         payload.reasoning_effort = "none"
     end
-    -- Веб-поиск через tool use (только Groq, Gemini не поддерживает этот формат)
-    if settings.WebSearch and not model:find("^gemini") then
+    -- Веб-поиск через tool use
+    -- compound-beta имеет встроенный поиск — не нужны tools
+    -- Gemini не поддерживает OpenAI tool format
+    local skipTools = model:find("^gemini") or model:find("compound%-beta")
+    if settings.WebSearch and not skipTools then
         payload.tools = {
             {
                 type = "function",
@@ -2726,6 +2741,9 @@ local function handleQueuedChat(item)
         text, err = providerRouter:chatCompletions(payload)
     end
     if err or not text or text == "" then
+        if ClientSettings.Debug then
+            print("[LOB] AI error: " .. tostring(err or "empty response"))
+        end
         return
     end
 
@@ -2766,7 +2784,9 @@ local function handleQueuedChat(item)
         appendHistory(history, historyUserMsg, cleanText)
     end
 
-    sendBotMessage(cleanText)
+    if cleanText and cleanText ~= "" then
+        sendBotMessage(cleanText)
+    end
 end
 
 local function runChatQueue(userId)
@@ -3087,15 +3107,18 @@ local function handleLegacyChat(message)
 end
 
 local function handleTextChatService(textChatMessage)
-    local textSource = textChatMessage and textChatMessage.TextSource
-    if not textSource then
-        return
-    end
+    if not textChatMessage then return end
+    local textSource = textChatMessage.TextSource
+    if not textSource then return end
+    -- Игнорируем собственные сообщения на ранней стадии
+    if textSource.UserId == Players.LocalPlayer.UserId then return end
     local chatPlayer = Players:GetPlayerByUserId(textSource.UserId)
-    if not chatPlayer then
-        return
-    end
-    processChatMessage(chatPlayer, textChatMessage.Text)
+    if not chatPlayer then return end
+    local msg = textChatMessage.Text
+    if type(msg) ~= "string" or msg == "" then return end
+    -- Фильтруем системные сообщения чата (начинаются с "/")
+    if msg:sub(1,1) == "/" then return end
+    processChatMessage(chatPlayer, msg)
 end
 
 -- Connect to chat services
@@ -5253,7 +5276,7 @@ local function makeToggleRow(parent, labelText, descText, initialState, onChange
     end)
 
     local state = initialState and true or false
-    hit.MouseButton1Click:Connect(function()
+    hit.Activated:Connect(function()
         state = not state
         if state then
             startAurora()
@@ -6487,7 +6510,7 @@ do
             if not ok2 then setApiStatus(false, "ошибка сети", "Нет соединения с Groq."); return end
             local s2 = res2.StatusCode or res2.statusCode or 0
             if tonumber(s2) == 401 then setApiStatus(false, "❌ неверный ключ", "Проверь на console.groq.com"); return end
-            if tonumber(s2) == 429 then setApiStatus(false, "⚠️ rate limit", "Ключ верный, лимит исчерпан."); return end
+            if tonumber(s2) == 429 then setApiStatus(true, "✓ ключ верный", "Rate limit — попробуй позже."); return end
             if tonumber(s2) ~= 200 then setApiStatus(false, "❌ ошибка " .. tostring(s2), "Неожиданный ответ."); return end
             parseRateLimitHeaders(res2.Headers or res2.headers or {})
             setApiStatus(true, "✓ работает", nil)
