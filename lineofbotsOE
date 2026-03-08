@@ -1127,7 +1127,7 @@ local function makeSystemPrompt(settings)
             -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
             system = system
                 .. "\n\nDO_TAGS(start of reply,1 per msg,silent):"
-                .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop"
+                .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop/прекрати/хватит/не иди"
                 .. "\n[DO:jump]=прыгни/jump [DO:jump2]=2x [DO:jump3]=3x [DO:jump5]=5x [DO:jump10]=10x"
                 .. "\n[DO:spin]=крутись/spin(3с) [DO:spin5]=5с [DO:spin10]=10с"
                 .. "\n[DO:dance]=танцуй/dance [DO:robot]=robot"
@@ -1148,7 +1148,7 @@ local function makeSystemPrompt(settings)
                 .. "\nMOVEMENT:"
                 .. "\n[DO:goto]   подойди/come here/иди сюда/иди ко мне — ONE-TIME walk, then stop"
                 .. "\n[DO:follow] иди за мной/follow me/следуй — follow CONTINUOUSLY"
-                .. "\n[DO:stop]   стой/stop/stay — stop moving"
+                .. "\n[DO:stop]   стой/stop/stay/прекрати/хватит/не иди/перестань — stop all movement"
                 .. "\n!! 'подойди'/'come here' = ALWAYS [DO:goto], never follow"
                 .. "\n"
                 .. "\nJUMPS — ВАЖНО: число прыжков ВСЕГДА кодируй в тег!"
@@ -1912,10 +1912,16 @@ local function doJump(count)
                 task.wait(0.05)
             end
 
-            -- Прыгаем
+            -- Прыгаем — ChangeState надёжнее чем .Jump = true в executor
             pcall(function()
                 local h = getLocalHumanoid()
-                if h then h.Jump = true end
+                if h then
+                    h:ChangeState(Enum.HumanoidStateType.Jumping)
+                    -- Фоллбэк: если ChangeState не сработал
+                    task.delay(0.05, function()
+                        if h and h.Parent then h.Jump = true end
+                    end)
+                end
             end)
 
             -- Пауза между прыжками (не после последнего)
