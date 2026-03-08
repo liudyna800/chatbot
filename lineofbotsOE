@@ -832,17 +832,31 @@ function GeminiProvider:chatCompletions(payload)
     local url = "https://generativelanguage.googleapis.com/v1beta/models/"
         .. model .. ":generateContent?key=" .. apiKey
 
-    -- Конвертируем OpenAI-формат messages в Gemini formат
-    local systemParts = {}
+    -- Конвертируем OpenAI-формат messages в Gemini формат
+    -- ВАЖНО: Gemini принимает systemInstruction как ОДИН объект, не массив.
+    -- Все system messages объединяем в один текст через разделитель.
+    local systemTexts = {}
     local contents = {}
+
     for _, m in ipairs(payload.messages or {}) do
-        if m.role == "system" then
-            table.insert(systemParts, { text = tostring(m.content or "") })
-        elseif m.role == "user" then
-            table.insert(contents, { role = "user", parts = {{ text = tostring(m.content or "") }} })
-        elseif m.role == "assistant" then
-            table.insert(contents, { role = "model", parts = {{ text = tostring(m.content or "") }} })
+        local role = m.role
+        local text = tostring(m.content or "")
+        if role == "system" then
+            -- Собираем все system сообщения — промпт + PlayerAwareness + WebSearch
+            table.insert(systemTexts, text)
+        elseif role == "user" then
+            table.insert(contents, { role = "user",  parts = {{ text = text }} })
+        elseif role == "assistant" then
+            table.insert(contents, { role = "model", parts = {{ text = text }} })
         end
+    end
+
+    -- Gemini требует alternating user/model — не может начинаться с model
+    -- Если contents пустой или начинается с model — добавляем dummy user
+    if #contents == 0 then
+        table.insert(contents, { role = "user", parts = {{ text = "(start)" }} })
+    elseif contents[1].role == "model" then
+        table.insert(contents, 1, { role = "user", parts = {{ text = "(start)" }} })
     end
 
     local body = {
@@ -852,8 +866,16 @@ function GeminiProvider:chatCompletions(payload)
             temperature = payload.temperature or 0.8,
         },
     }
-    if #systemParts > 0 then
-        body.systemInstruction = { parts = systemParts }
+
+    -- Объединяем все system тексты в один systemInstruction
+    if #systemTexts > 0 then
+        body.systemInstruction = {
+            parts = {{ text = table.concat(systemTexts, "
+
+---
+
+") }}
+        }
     end
 
     local res, statusCode, statusMsg, rawBody, _rh = postJson(url, {
@@ -6659,7 +6681,11 @@ do
                 end)
                 setGemStatus(false, "❌ 404: " .. msg); return
             end
-            if s == 429 then setGemStatus(false, "⚠️ rate limit"); return end
+            if s == 429 then
+                -- 429 на тест-запросе = ключ ВЕРНЫЙ, просто лимит бесплатного плана
+                setGemStatus(true, "✓ ключ верный (rate limit)")
+                return
+            end
             if s ~= 200 then
                 local msg = ""
                 pcall(function()
