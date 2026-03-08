@@ -1,4 +1,4 @@
-print("LOB VERSION: v18.5.35 LOADED")
+print("LOB VERSION: v18.2.8 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 local LOB_KEY_FILE    = "lob_apikey.txt"
@@ -173,9 +173,7 @@ do
 end
 
 local ClientSecrets = {
-    groq = "",
-    groq2 = "",
-    groq3 = "",
+    groq = "",  -- встроенный фоллбэк (если нет своего ключа)
 }
 
 local CurrentGui = nil
@@ -492,8 +490,11 @@ local function extractShortName(nick)
     local prefix = nick:match("^([A-Za-z]+)")
     if prefix and #prefix >= 2 then return prefix:sub(1, 14) end
 
-    -- 3. Фолбэк для кириллицы: берём первое кириллическое слово
-    local cyrillic = nick:match("([%a]+)")  -- Lua %a включает кирилицу в UTF-8
+    -- 3. Фолбэк для кириллицы: ищем последовательности UTF-8 кириллических байт
+    -- Lua %a НЕ включает кириллицу — нужен raw byte match
+    local cyrillic = nick:match("([8-9][
+8-91]+[8-9]?[
+8-91]*)")
     if cyrillic and #cyrillic >= 2 then return cyrillic:sub(1, 14) end
 
     -- 4. Последний фолбэк: просто обрезаем ник до 14 символов
@@ -855,12 +856,20 @@ function GeminiProvider:chatCompletions(payload)
         body.systemInstruction = { parts = systemParts }
     end
 
-    local res, statusCode, statusMsg, rawBody = postJson(url, {
+    local res, statusCode, statusMsg, rawBody, _rh = postJson(url, {
         ["Content-Type"] = "application/json",
     }, body)
 
     if not res then
-        return nil, tostring(statusCode or "") .. ":" .. tostring(statusMsg or "") .. ":" .. tostring(rawBody or "")
+        -- Пробуем извлечь сообщение ошибки из тела
+        local errMsg = tostring(statusCode or "")
+        pcall(function()
+            local b = HttpService:JSONDecode(tostring(rawBody or "{}"))
+            if b.error and b.error.message then
+                errMsg = errMsg .. ":" .. tostring(b.error.message):sub(1, 120)
+            end
+        end)
+        return nil, errMsg
     end
 
     -- Gemini response: candidates[1].content.parts[1].text
@@ -1974,21 +1983,17 @@ local function doJump(count)
                 task.wait(0.05)
             end
 
-            -- Прыгаем — ChangeState надёжнее чем .Jump = true в executor
-            pcall(function()
-                local h = getLocalHumanoid()
-                if h then
-                    h:ChangeState(Enum.HumanoidStateType.Jumping)
-                    -- Фоллбэк: если ChangeState не сработал
-                    task.delay(0.05, function()
-                        if h and h.Parent then h.Jump = true end
-                    end)
-                end
-            end)
+            -- Прыгаем: ChangeState + Jump=true с небольшой задержкой между ними
+            local h = getLocalHumanoid()
+            if h then
+                pcall(function() h:ChangeState(Enum.HumanoidStateType.Jumping) end)
+                task.wait(0.08)
+                pcall(function() if h and h.Parent then h.Jump = true end end)
+            end
 
-            -- Пауза между прыжками (не после последнего)
+            -- Ждём приземления перед следующим прыжком
             if i < count then
-                task.wait(0.2)
+                task.wait(0.7)  -- достаточно для полного прыжка
             end
         end
         _clearJumpFlag()  -- нормальное завершение
@@ -2420,7 +2425,7 @@ local function smoothLookAt(targetPos)
     if not ClientSettings.CameraLook then return end
     -- Проверяем ОБЕ системы движения: старую (_isFollowing) и новую (FollowManager)
     if _isFollowing or _isGoing or _isJumping or _isSpinning then return end
-    if FollowManager and FollowManager.Active then return end
+    if (_isFollowing or _isGoing) then return end  -- FollowManager check moved below (declared later)
 
     local root = getLocalRootPart()
     if not root then return end
@@ -2662,8 +2667,8 @@ local function handleQueuedChat(item)
     if model == "qwen/qwen3-32b" then
         payload.reasoning_effort = "none"
     end
-    -- Веб-поиск через tool use
-    if settings.WebSearch then
+    -- Веб-поиск через tool use (только для Groq, Gemini не поддерживает этот формат)
+    if settings.WebSearch and not model:find("^gemini") then
         payload.tools = {
             {
                 type = "function",
@@ -2740,12 +2745,13 @@ local function handleQueuedChat(item)
     -- так ИИ в глобальной памяти помнит кто что говорил.
     -- [LANG:X] тег НЕ сохраняем (он нужен только для текущего запроса).
     if history then
-        -- Убираем [LANG:...] тег из финального сохранения в историю
+        -- Сохраняем без [LANG:...] и [NAME:...] тегов — они нужны только для текущего запроса
         local historyUserMsg = item.cleaned
         if settings.UsePlayerName and userContent ~= item.cleaned then
-            -- Берём userContent но без [LANG:...] тега если он туда попал
-            historyUserMsg = userContent:gsub("%[LANG:[^%]]*%]%s*", "")
+            historyUserMsg = userContent:gsub("%[LANG:[^%]]*%]%s*", ""):gsub("%[NAME:[^%]]*%]%s*", "")
         end
+        -- Финальная гарантия — убираем LANG/NAME теги из item.cleaned тоже (мало ли)
+        historyUserMsg = historyUserMsg:gsub("%[LANG:[^%]]*%]%s*", ""):gsub("%[NAME:[^%]]*%]%s*", "")
         appendHistory(history, historyUserMsg, cleanText)
     end
 
@@ -2817,12 +2823,12 @@ task.delay(5, function()
                 runChatQueue(uid)
             end
             prevAir[uid] = inAir
-            -- Взгляд — только если игрок в радиусе реакции
+            -- Взгляд — только если игрок в радиусе и смотрит на нас
             if not reacted then
                 local toUs = myRoot.Position - root.Position
                 local stareDist = toUs.Magnitude
-                if stareDist > 1 and stareDist <= radius and _canWorldReact(uid) then
-                    if root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 then
+                if stareDist > 1 and stareDist <= radius then
+                    if root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 and _canWorldReact(uid) then
                         local name = p.DisplayName or p.Name
                         local msgs = {
                             "[SYSTEM: "..name.." is staring right at you. Acknowledge them in 1 short sentence.]",
