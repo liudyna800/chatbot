@@ -5918,9 +5918,6 @@ local groqModels = {
     "llama-3.3-70b-versatile",                     -- Llama 3.3 70B       | 280 t/s  | умный
     "openai/gpt-oss-20b",                          -- GPT OSS 20B         | 1000 t/s | быстрейший
     "openai/gpt-oss-120b",                         -- GPT OSS 120B        | 500 t/s  | топ
-    -- ── DEEPSEEK (reasoning модели) ──────────────────────────────────────
-    "deepseek-r1-distill-llama-70b",               -- DeepSeek R1 Llama   | 70B reasoning
-    "deepseek-r1-distill-qwen-32b",                -- DeepSeek R1 Qwen    | 32B reasoning
     -- ── PREVIEW (свежие модели) ───────────────────────────────────────────
     "meta-llama/llama-4-scout-17b-16e-instruct",   -- Llama 4 Scout 17B   | 750 t/s  | новый
     "meta-llama/llama-4-maverick-17b-128e-instruct", -- Llama 4 Maverick  | reasoning
