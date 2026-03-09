@@ -52,10 +52,11 @@ local LOB_GEMINI_FILE = "lob_geminikey.txt"
 local LOB_SETTINGS_FILE = "lob_settings.txt"
 local function saveSettings()
     pcall(function()
-        if writefile then
-            local data = "AutoReply=" .. tostring(ClientSettings and ClientSettings.AutoReply or false)
-            writefile(LOB_SETTINGS_FILE, data)
-        end
+        if not writefile then return end
+        local model = ClientSettings and ClientSettings.Models and ClientSettings.Models.groq or ""
+        local data = "AutoReply=" .. tostring(ClientSettings and ClientSettings.AutoReply or false)
+            .. "\nModel=" .. tostring(model)
+        writefile(LOB_SETTINGS_FILE, data)
     end)
 end
 local function loadSettings()
@@ -65,6 +66,12 @@ local function loadSettings()
         if not ok or not data then return end
         if data:find("AutoReply=true") then
             if ClientSettings then ClientSettings.AutoReply = true end
+        end
+        -- Восстанавливаем выбранную модель
+        local savedModel = data:match("Model=([^\n]+)")
+        if savedModel and savedModel ~= "" then
+            if not ClientSettings.Models then ClientSettings.Models = {} end
+            ClientSettings.Models.groq = savedModel
         end
     end)
 end
@@ -918,12 +925,21 @@ function GeminiProvider:chatCompletions(payload)
         table.insert(contents, { role = "user", parts = {{ text = "(continue)" }} })
     end
 
+    -- Gemini 3.x (preview) модели используют reasoning/thinking
+    -- thinkingConfig нужен чтобы контролировать глубину reasoning
+    -- "low" = минимум (быстро), без него модель может думать очень долго
+    local isGemini3 = model:find("^gemini%-3") ~= nil
+    local genConfig = {
+        maxOutputTokens = payload.max_tokens or 300,
+        temperature = payload.temperature or 0.8,
+    }
+    if isGemini3 then
+        genConfig.thinkingConfig = { thinkingBudget = 512 }  -- ограничиваем thinking для скорости
+    end
+
     local body = {
         contents = contents,
-        generationConfig = {
-            maxOutputTokens = payload.max_tokens or 300,
-            temperature = payload.temperature or 0.8,
-        },
+        generationConfig = genConfig,
         -- Снижаем safety filters для игрового контекста
         safetySettings = {
             { category = "HARM_CATEGORY_HARASSMENT",        threshold = "BLOCK_NONE" },
@@ -969,10 +985,18 @@ function GeminiProvider:chatCompletions(payload)
         return nil, "GeminiFiltered:" .. tostring(cand.finishReason)
     end
     local parts = cand.content and cand.content.parts
-    if not parts or not parts[1] then return nil, "NoGeminiParts" end
-    local text = tostring(parts[1].text or "")
-    if text == "" then return nil, "GeminiEmptyText" end
-    return text, nil
+    if not parts or #parts == 0 then return nil, "NoGeminiParts" end
+    -- Gemini 3.x возвращает mixed parts: {thought=true, text="..."} + {text="ответ"}
+    -- Собираем только реальный текст, пропускаем thought-блоки
+    local textParts = {}
+    for _, part in ipairs(parts) do
+        if type(part.text) == "string" and part.text ~= "" and not part.thought then
+            table.insert(textParts, part.text)
+        end
+    end
+    local finalText = table.concat(textParts, " ")
+    if finalText == "" then return nil, "GeminiEmptyText" end
+    return finalText, nil
 end
 
 -- §ROUTER
@@ -2879,9 +2903,11 @@ local function handleQueuedChat(item)
         -- tool_choice убран — ломает большинство моделей Groq
     end
 
-    -- Таймаут: Gemini flash/lite до 45 сек, Groq — 20 сек
+    -- Таймаут: Gemini 3.x preview с thinking → 60 сек
+    -- Gemini 2.5 flash/lite → 45 сек, Groq → 20 сек
     local isGemini = model:find("^gemini")
-    local timeoutSec = isGemini and 45 or 20
+    local isGemini3x = model:find("^gemini%-3")
+    local timeoutSec = isGemini3x and 60 or (isGemini and 45 or 20)
     local text, err
     do
         local done = false
@@ -2901,10 +2927,18 @@ local function handleQueuedChat(item)
             return
         end
     end
-    -- v18: при rate limit (429) — ждём 5 сек и повторяем один раз
+    -- v18: при rate limit (429) — ждём 5 сек и повторяем один раз (с таймаутом)
     if (not text or text == "") and err and tostring(err):find("429") then
         task.wait(5)
-        text, err = providerRouter:chatCompletions(payload)
+        local retryDone = false
+        task.spawn(function()
+            text, err = providerRouter:chatCompletions(payload)
+            retryDone = true
+        end)
+        local rw = 0
+        while not retryDone and rw < timeoutSec do
+            task.wait(0.5); rw = rw + 0.5
+        end
     end
     if err or not text or text == "" then
         if ClientSettings.Debug then
@@ -6106,8 +6140,8 @@ local groqModels = {
     -- ── GEMINI (Google) ──────────────────────────────────────────────────
     "gemini-2.5-flash-lite",                       -- Gemini 2.5 Flash Lite | быстрый, лёгкий | Google
     "gemini-2.5-flash",                            -- Gemini 2.5 Flash    | reasoning | Google
-    "gemini-3.1-flash-lite",                       -- Gemini 3.1 Flash Lite | новейший, лёгкий | Google
-    "gemini-3.1-flash",                            -- Gemini 3.1 Flash    | новейший | Google
+    "gemini-3.1-flash-lite-preview",               -- Gemini 3.1 Flash Lite | новейший, лёгкий | Google
+    "gemini-3-flash-preview",                      -- Gemini 3 Flash       | новейший | Google
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
