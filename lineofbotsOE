@@ -2289,27 +2289,32 @@ local ACTION_HANDLERS = {
 local function parseActionTag(text)
     if not text then return nil, "" end
 
-    -- Нормализуем регистр для поиска тега: [do:wave] / [DO:wave] / [Do:Wave] → всё работает
-    -- Ищем тег [DO:xxx] или [do:xxx] в любом месте
     local upperText = text:upper()
-    local tagStart, tagEnd, actionUpper = upperText:find("%[DO:([%w_]+)%]")
-
     local action = nil
     local cleanText = text
+    local tagStart, tagEnd
 
+    -- Паттерн 1: закрытый тег [DO:xxx]
+    tagStart, tagEnd = upperText:find("%[DO:([%w_]+)%]")
     if tagStart then
-        -- Извлекаем action из оригинального текста (сохраняем регистр, потом lower())
-        action = text:sub(tagStart + 4, tagEnd - 1):lower()  -- +4 = skip "[DO:", -1 = skip "]"
-
-        -- Убираем найденный тег из текста
+        action = text:sub(tagStart + 4, tagEnd - 1):lower()
         cleanText = text:sub(1, tagStart - 1) .. text:sub(tagEnd + 1)
+    else
+        -- Паттерн 2: незакрытый тег [DO:xxx (без ]) — Gemini иногда забывает скобку
+        tagStart, tagEnd = upperText:find("%[DO:([%w_]+)")
+        if tagStart then
+            action = text:sub(tagStart + 4, tagEnd):lower()
+            -- Убираем тег и возможный символ ] после него
+            local rest = text:sub(tagEnd + 1)
+            rest = rest:gsub("^%s*%]?%s*", "")
+            cleanText = text:sub(1, tagStart - 1) .. rest
+        end
     end
 
-    -- Вырезаем ВСЕ оставшиеся [DO:xxx] теги (любой регистр) — чтобы они не утекали в чат
-    -- Это ловит второй/третий тег если модель написала несколько
-    cleanText = cleanText:gsub("%[%s*[Dd][Oo]:%s*[%w_]+%s*%]", "")
+    -- Убираем ВСЕ оставшиеся DO-теги (закрытые и незакрытые)
+    cleanText = cleanText:gsub("%[%s*[Dd][Oo]:%s*[%w_]+%s*%]?", "")
 
-    -- Убираем двойные пробелы и пробелы по краям
+    -- Trim
     cleanText = cleanText:gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
 
     return action, cleanText
@@ -2874,8 +2879,7 @@ local function handleQueuedChat(item)
         -- tool_choice убран — ломает большинство моделей Groq
     end
 
-    -- Таймаут: Gemini 2.5 с reasoning может думать долго → 45 сек
-    -- Groq обычно отвечает за 2-5 сек → 20 сек достаточно
+    -- Таймаут: Gemini flash/lite до 45 сек, Groq — 20 сек
     local isGemini = model:find("^gemini")
     local timeoutSec = isGemini and 45 or 20
     local text, err
@@ -2973,9 +2977,13 @@ local function runChatQueue(userId)
     end)
 end
 
--- v18: WORLD REACTIONS монитор — здесь runChatQueue уже объявлена
+-- v18: WORLD REACTIONS монитор
+-- §WORLD_REACT
 task.delay(5, function()
-    local prevAir  = {}
+    local prevAir     = {}   -- uid → bool: был ли в воздухе
+    local prevRadius  = {}   -- uid → bool: был ли в радиусе на прошлом тике
+    local enterTime   = {}   -- uid → os.clock(): когда вошёл в радиус
+    local GRACE       = 8    -- сек grace period после входа — не реагируем на взгляд/прыжок
     while true do
         task.wait(0.5)
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then
@@ -2986,16 +2994,38 @@ task.delay(5, function()
         if not myRoot then continue end
         local myPos  = myRoot.Position
         local radius = ClientSettings.Range.Enabled and ClientSettings.Range.Studs or 30
+
         for _, p in ipairs(Players:GetPlayers()) do
             if p == Players.LocalPlayer then continue end
             local char = p.Character
             local uid  = p.UserId
 
-            -- (смерть обрабатывается через событие Humanoid.Died — см. ниже)
-
             local root = char and char:FindFirstChild("HumanoidRootPart")
-            if not root then continue end
-            if (root.Position - myPos).Magnitude > radius then continue end
+            local inRadius = root and (root.Position - myPos).Magnitude <= radius
+
+            -- Трекаем вход/выход из радиуса
+            if inRadius and not prevRadius[uid] then
+                -- Только что вошёл — запускаем grace period
+                enterTime[uid] = os.clock()
+            end
+            if not inRadius then
+                -- Вышел из радиуса — сбрасываем grace и prevAir
+                prevRadius[uid] = false
+                prevAir[uid] = false
+                continue
+            end
+            prevRadius[uid] = true
+
+            -- Grace period: первые GRACE секунд после входа — игнорируем
+            local timeInRadius = os.clock() - (enterTime[uid] or 0)
+            if timeInRadius < GRACE then
+                -- Обновляем prevAir чтобы не накопить ложный "прыжок"
+                local hum2 = char:FindFirstChildOfClass("Humanoid")
+                local st2 = hum2 and hum2:GetState()
+                prevAir[uid] = (st2 == Enum.HumanoidStateType.Jumping or st2 == Enum.HumanoidStateType.Freefall)
+                continue
+            end
+
             local reacted = false
             -- Прыжок
             local hum      = char:FindFirstChildOfClass("Humanoid")
@@ -3017,11 +3047,12 @@ task.delay(5, function()
                 runChatQueue(uid)
             end
             prevAir[uid] = inAir
-            -- Взгляд — только если игрок в радиусе реакции
+
+            -- Взгляд
             if not reacted then
-                local toUs = myRoot.Position - root.Position
+                local toUs = myPos - root.Position
                 local stareDist = toUs.Magnitude
-                if stareDist > 1 and stareDist <= radius and _canWorldReact(uid) then
+                if stareDist > 1 and _canWorldReact(uid) then
                     if root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 then
                         local name = p.DisplayName or p.Name
                         local msgs = {
@@ -6073,8 +6104,10 @@ local groqModels = {
     "moonshotai/kimi-k2-instruct-0905",            -- Kimi K2             | 200 t/s  | диалог
     "qwen/qwen3-32b",                              -- Qwen3 32B           | 400 t/s  | логика
     -- ── GEMINI (Google) ──────────────────────────────────────────────────
-    "gemini-2.0-flash-lite",                       -- Gemini 2.0 Flash Lite | самый быстрый | Google
-    "gemini-2.5-flash",                            -- Gemini 2.5 Flash    | умнее, reasoning | Google
+    "gemini-2.5-flash-lite",                       -- Gemini 2.5 Flash Lite | быстрый, лёгкий | Google
+    "gemini-2.5-flash",                            -- Gemini 2.5 Flash    | reasoning | Google
+    "gemini-3.1-flash-lite",                       -- Gemini 3.1 Flash Lite | новейший, лёгкий | Google
+    "gemini-3.1-flash",                            -- Gemini 3.1 Flash    | новейший | Google
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
