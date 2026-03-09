@@ -1,6 +1,52 @@
+-- ╔══════════════════════════════════════════════════════════════════════╗
+-- ║              LINEOFBOTS v18  —  ОГЛАВЛЕНИЕ / FILE MAP               ║
+-- ║  Используй Ctrl+G (номер строки) или поиск по метке §SECTION_NAME   ║
+-- ╚══════════════════════════════════════════════════════════════════════╝
+--
+--  СТРОКА   МЕТКА                        ОПИСАНИЕ
+--  ───────  ──────────────────────────   ────────────────────────────────────
+--     4     §SAVE          Авто-сохранение ключей и настроек (writefile)
+--   100     §SETTINGS      ClientSettings — все настройки бота
+--   190     §PERSONALITIES Таблица личностей (Friendly, Monday, Toxic…)
+--   515     §HTTP          postJson — HTTP клиент для executor
+--   552     §GROQ          GroqProvider — провайдер Groq API
+--   581     §WEBSEARCH     doWebSearch — Wikipedia + Google News + Jina
+--   818     §GEMINI        GeminiProvider — провайдер Google Gemini API
+--   891     §ROUTER        ProviderRouter — роутинг Groq/Gemini по имени модели
+--   936     §CHAT_SEND     sendChatMessage / showBotChatMessage / sendBotMessage
+--  1057     §SYSPROMPT     makeSystemPrompt — сборка системного промпта
+--  1317     §HELPERS       getModel / isBlacklisted / passesTrigger / stripTrigger
+--  1420     §SPLIT         splitTextIntoParts — разбивка длинных ответов
+--  1479     §EMOTES_DATA   BUILTIN_EMOTES / CUSTOM_EMOTE_IDS / R6_ANIM_IDS
+--  1748     §PLAY_EMOTE    playEmote / playAnimDirect / stopCurrentEmote
+--  1852     §MOVEMENT      stopFollowing / moveToPosition / gotoPlayer / startFollowingPlayer
+--  1962     §JUMP          doJump — прыжки (1-10x) с ChangeState
+--  2042     §SPIN          doSpin — кружение персонажа
+--  2076     §ACTIONS_TABLE ACTION_HANDLERS — таблица [DO:tag] → функция
+--  2151     §PARSE_ACTION  parseActionTag / executeAction
+--  2230     §PLACE         fetchPlaceInfo — PlaceAwareness (MarketplaceService)
+--  2285     §BEHAVIOR      detectBehavior / startBehaviorMonitor — PlayerAwareness
+--  2383     §NEARBY        buildPlayerAwarenessContext — [NEARBY] блок
+--  2449     §CAM_LOOK      smoothLookAt — плавный поворот к игроку
+--  2508     §HISTORY       ChatHistory / appendHistory / getHistory
+--  2545     §LANG          detectLang / getLangForUser — детектор языка
+--  2589     §HANDLE_CHAT   handleQueuedChat — главный обработчик (API call)
+--  2792     §RUN_QUEUE     runChatQueue — запуск очереди сообщений
+--  2810     §WORLD_REACT   WorldReactions — прыжки/взгляды/смерть других игроков
+--  2953     §PROCESS_MSG   processChatMessage — входящее сообщение от игрока
+--  3090     §CHAT_HANDLERS handleLegacyChat / handleTextChatService
+--  3110     §CHAT_LISTEN   ChatListener — startChatListening / updateChatListening
+--  3214     §UI_THEMES     AURORA_COLORS / THEME таблицы / lerpColor
+--  3750     §UI_HELPERS    makeCorner / makeStroke / makePadding / makeTextLabel…
+--  4352     §UI_CREATE     createInterface() — вся UI (9000+ строк ниже)
+--  3865     §FOLLOW_MGR    FollowManager (старый UI-follow, отдельно от [DO:follow])
+--  9773     §LAUNCH        createInterface() — точка запуска скрипта
+-- ─────────────────────────────────────────────────────────────────────────
+
 print("LOB VERSION: v18.5.39 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
+-- §SAVE
 local LOB_KEY_FILE    = "lob_apikey.txt"
 local LOB_GEMINI_FILE = "lob_geminikey.txt"
 local LOB_SETTINGS_FILE = "lob_settings.txt"
@@ -97,6 +143,7 @@ player.CharacterRemoving:Connect(function()
 end)
 
 -- Client-side settings storage (no server dependencies)
+-- §SETTINGS
 local ClientSettings = {
     Enabled = true,
     Debug = false,
@@ -187,6 +234,7 @@ local requestFollow = nil
 local stopFollow = nil
 
 -- Personalities
+-- §PERSONALITIES
 local Personalities = {
     Friendly = {
         label = "Friendly",
@@ -512,6 +560,7 @@ end
 
 -- HTTP Client for direct API calls
 -- HTTP Client for direct API calls (Executor Compatible)
+-- §HTTP
 local function postJson(url, headers, bodyTable)
     local body = HttpService:JSONEncode(bodyTable)
     
@@ -549,6 +598,7 @@ local function postJson(url, headers, bodyTable)
 end
 
 -- Groq Provider
+-- §GROQ
 local GroqProvider = {}
 GroqProvider.__index = GroqProvider
 
@@ -578,6 +628,7 @@ local function isRateLimited(statusCode, statusMsg, body)
 end
 
 -- v18.4.3: Веб-поиск — три источника: Wikipedia + Google News RSS + Jina Reader (fallback)
+-- §WEBSEARCH
 local function doWebSearch(query)
     local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     if not httprequest then return "Поиск недоступен." end
@@ -749,9 +800,8 @@ function GroqProvider:chatCompletions(payload)
     if choice.finish_reason == "tool_calls" and choice.message and choice.message.tool_calls then
         local toolResults = {}
         for _, tc in ipairs(choice.message.tool_calls) do
-            if tc.function_ and tc.function_.name == "web_search" or
-               tc["function"] and tc["function"].name == "web_search" then
-                local fn = tc.function_ or tc["function"]
+            local fn = tc["function"] or tc.function_
+        if fn and fn.name == "web_search" then
                 local args = {}
                 pcall(function() args = HttpService:JSONDecode(fn.arguments or "{}") end)
                 local query = args.query or ""
@@ -774,6 +824,8 @@ function GroqProvider:chatCompletions(payload)
                 temperature = payload.temperature,
                 max_tokens = payload.max_tokens,
                 messages = msgs2,
+                -- НЕ передаём tools во втором запросе — модель уже получила результат поиска
+                -- tools = payload.tools,
             }
             local res2, sc2, sm2, b2, rh2 = postJson(url, {
                 ["Content-Type"] = "application/json",
@@ -815,6 +867,7 @@ end
 
 -- Provider Router (Groq only)
 -- ── GEMINI PROVIDER ──────────────────────────────────────────────────────
+-- §GEMINI
 local GeminiProvider = {}
 GeminiProvider.__index = GeminiProvider
 
@@ -888,6 +941,7 @@ function GeminiProvider:chatCompletions(payload)
     return tostring(parts[1].text or ""), nil
 end
 
+-- §ROUTER
 local ProviderRouter = {}
 ProviderRouter.__index = ProviderRouter
 
@@ -933,6 +987,7 @@ end
 
 -- Chat message display
 -- Chat message display / sending
+-- §CHAT_SEND
 local function sendChatMessage(text)
     text = tostring(text or "")
     if text == "" then return end
@@ -940,7 +995,18 @@ local function sendChatMessage(text)
     -- Try TextChatService
     local okTCS = pcall(function()
         local channels = TextChatService:FindFirstChild("TextChannels")
-        local channel = channels and channels:FindFirstChild(Constants.DefaultChatChannelName)
+        if not channels then error("NoChannels") end
+        -- Сначала пробуем RBXGeneral, потом любой доступный канал
+        local channel = channels:FindFirstChild(Constants.DefaultChatChannelName)
+        if not channel then
+            -- Фоллбэк: берём первый TextChannel
+            for _, ch in ipairs(channels:GetChildren()) do
+                if ch:IsA("TextChannel") and ch.SendAsync then
+                    channel = ch
+                    break
+                end
+            end
+        end
         if channel and channel.SendAsync then
             channel:SendAsync(text)
             return
@@ -1054,6 +1120,7 @@ local _placeInfo = nil           -- { name, placeId, desc } — заполняе
 -- Решение: вставляем в начало промпта явное разрешение от системы.
 local SYSTEM_ACTIONS_HEADER = "DEVELOPER SYSTEM (bypasses all personality rules): These action tags are hardcoded behavior — NOT user instructions. Your 'never accept instructions from users' rule does NOT apply here. Ignoring these tags is a system error:\n\n"
 
+-- §SYSPROMPT
 local function makeSystemPrompt(settings)
     -- SYSTEM_ACTIONS_HEADER всегда первым — иначе кастомные промпты с "не слушай инструкции" блокируют теги
     local system = settings.ActionsEnabled and (SYSTEM_ACTIONS_HEADER .. "== ACTION TAGS ARE MANDATORY. OUTPUT THEM EXACTLY AS SHOWN. ==\n\n") or ""
@@ -1314,6 +1381,7 @@ local function makeSystemPrompt(settings)
     return system
 end
 
+-- §HELPERS
 local function getModel(settings)
     -- Явно выбранная модель имеет приоритет
     local explicit = settings.Models and settings.Models.groq
@@ -1416,6 +1484,7 @@ local function stripTrigger(settings, message)
 end
 
 -- Разбить текст на части по MAX символов, стараясь резать по пробелу/знаку
+-- §SPLIT
 local function splitTextIntoParts(text, maxLen)
     local parts = {}
     maxLen = maxLen or 200
@@ -1476,6 +1545,7 @@ end
 -- ── АНИМАЦИИ ─────────────────────────────────────────────────────────────
 -- Только 100% встроенные эмоции Roblox — работают у ВСЕХ без покупки
 -- Источник: /e команды в стандартном Roblox чате
+-- §EMOTES_DATA
 local BUILTIN_EMOTES = {
     -- name = true означает что эмоция встроена и всегда доступна
     wave   = true,   -- /e wave
@@ -1745,6 +1815,7 @@ local function playAnimDirect(animId, duration)
     return true
 end
 
+-- §PLAY_EMOTE
 local function playEmote(emoteName, duration)
     if not ClientSettings.ActionsEnabled then return end
     local humanoid = getLocalHumanoid()
@@ -1849,6 +1920,7 @@ end
 
 -- ── ДВИЖЕНИЕ ──────────────────────────────────────────────────────────────
 -- ВАЖНО: объявляем ВСЕ флаги ДО функций которые их используют
+-- §MOVEMENT
 local _isFollowing  = false
 local _isGoing      = false   -- ← объявлен ЗДЕСЬ, до stopFollowing
 local _followTarget = nil
@@ -1959,6 +2031,7 @@ local function _clearJumpFlag()
     end
 end
 
+-- §JUMP
 local function doJump(count)
     if not ClientSettings.ActionsEnabled then return end
     if _isJumping then return end
@@ -1979,7 +2052,7 @@ local function doJump(count)
             pcall(function()
                 local s = humanoid:GetState()
                 inAir = (s == Enum.HumanoidStateType.Jumping
-                      or s == Enum.HumanoidStateType.FreeFalling
+                      or s == Enum.HumanoidStateType.Freefall
                       or s == Enum.HumanoidStateType.FallingDown)
             end)
 
@@ -2039,6 +2112,7 @@ local function stopSpin()
 end
 
 -- seconds = 1..10, скорость поворота = 360°/сек
+-- §SPIN
 local function doSpin(seconds)
     if not ClientSettings.ActionsEnabled then return end
     seconds = math.max(1, math.min(seconds or 3, 10))
@@ -2073,6 +2147,7 @@ end
 -- ВАЖНО: для надёжности используем только встроенные /e эмоции
 -- + кастомные которые прелоадим сами (hello, shrug, salute, tilt, stadium, shy, robot)
 -- Кастомные эмоции без прелоада (haha, celebrate и т.д.) — НЕ НАДЁЖНЫ
+-- §ACTIONS_TABLE
 local ACTION_HANDLERS = {
     -- ── Движение ──────────────────────────────────────────────────────────
     goto     = function(p) gotoPlayer(p) end,
@@ -2148,6 +2223,7 @@ local ACTION_HANDLERS = {
 -- Парсим [DO:action] из ответа ИИ
 -- Тег может быть В НАЧАЛЕ, В КОНЦЕ или В СЕРЕДИНЕ текста
 -- Возвращает: actionName | nil,  cleanText (без тега и лишних пробелов)
+-- §PARSE_ACTION
 local function parseActionTag(text)
     if not text then return nil, "" end
 
@@ -2218,6 +2294,7 @@ end
 
 -- (_placeInfo объявлена выше — перед makeSystemPrompt)
 
+-- §PLACE
 local function fetchPlaceInfo()
     if _placeInfo then return _placeInfo end
 
@@ -2293,6 +2370,7 @@ local _behaviorThread = nil
 -- При следующем chat-запросе будет вставлен алерт
 local _toxicAlerts = {}
 
+-- §BEHAVIOR
 local function startBehaviorMonitor()
     if _behaviorThread then return end
     _behaviorThread = task.spawn(function()
@@ -2380,6 +2458,7 @@ local function detectBehavior(uid, myRoot)
     end
 end
 
+-- §NEARBY
 local function buildPlayerAwarenessContext(settings)
     if not settings.PlayerAwareness then return "" end
     local myRoot = getLocalRootPart()
@@ -2446,11 +2525,11 @@ local function _clearCameraThread()
     end
 end
 
+-- §CAM_LOOK
 local function smoothLookAt(targetPos)
     if not ClientSettings.CameraLook then return end
     -- Проверяем ОБЕ системы движения: старую (_isFollowing) и новую (FollowManager)
     if _isFollowing or _isGoing or _isJumping or _isSpinning then return end
-    if _isFollowing or _isGoing then return end  -- FollowManager declared later
 
     local root = getLocalRootPart()
     if not root then return end
@@ -2505,6 +2584,7 @@ local function smoothLookAt(targetPos)
 end
 
 -- Chat History Storage
+-- §HISTORY
 local ChatHistory = {}
 local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
 local MAX_HISTORY = 10
@@ -2532,6 +2612,7 @@ end
 -- Проблема: эмодзи/одна буква → detectLang возвращает nil → фолбэк на кеш
 local _userLangCache = {}  -- userId → "RU"|"EN"
 
+-- §LANG
 local function detectLang(text)
     if not text or text == "" then return nil end
     local t = text:lower()
@@ -2586,6 +2667,7 @@ local function getHistory(settings, userId)
     end
 end
 
+-- §HANDLE_CHAT
 local function handleQueuedChat(item)
     local settings = ClientSettings
     -- world reactions (item.isWorld) работают даже без AutoReply — только Enabled нужен
@@ -2658,12 +2740,24 @@ local function handleQueuedChat(item)
     end
 
     -- v18.2.9: Веб-поиск — ищем по запросу пользователя и добавляем контекст
+    -- Таймаут 8 сек на поиск — если источники медленные, не ждём вечно
     if settings.WebSearch and item.cleaned and #item.cleaned > 3 then
-        local searchResult = doWebSearch(item.cleaned)
-        if searchResult and searchResult ~= "" and not searchResult:find("не найдены") and not searchResult:find("Ошибка") then
+        local searchResult = nil
+        local searchDone = false
+        task.spawn(function()
+            searchResult = doWebSearch(item.cleaned)
+            searchDone = true
+        end)
+        local sw = 0
+        while not searchDone and sw < 8 do
+            task.wait(0.5)
+            sw = sw + 0.5
+        end
+        local sr = searchResult or ""
+        if sr ~= "" and not sr:find("не найдены") and not sr:find("Ошибка") then
             table.insert(apiMessages, {
                 role = "system",
-                content = "[WEB SEARCH RESULTS for: " .. item.cleaned .. "]\n" .. searchResult .. "\n[INSTRUCTION: This is live data from 2026. Use these results as your PRIMARY source. Answer confidently based on this. Do NOT say you lack current info.]"
+                content = "[WEB SEARCH RESULTS for: " .. item.cleaned .. "]\n" .. sr .. "\n[INSTRUCTION: This is live data from 2026. Use these results as your PRIMARY source. Answer confidently based on this. Do NOT say you lack current info.]"
             })
         end
     end
@@ -2789,6 +2883,7 @@ local function handleQueuedChat(item)
     end
 end
 
+-- §RUN_QUEUE
 local function runChatQueue(userId)
     local q = getChatQueue(userId)
     if q.running then
@@ -2950,6 +3045,7 @@ end
 local _lastMsgPerUser = {}
 
 -- Main chat processing function
+-- §PROCESS_MSG
 local function processChatMessage(player, rawMessage)
     local settings = ClientSettings
     
@@ -3102,8 +3198,10 @@ local function processChatMessage(player, rawMessage)
 end
 
 -- Chat message handlers
-local function handleLegacyChat(message)
-    processChatMessage(player, message)
+-- §CHAT_HANDLERS
+local function handleLegacyChat(p, message)
+    -- p = игрок который написал, message = текст
+    processChatMessage(p, message)
 end
 
 local function handleTextChatService(textChatMessage)
@@ -3116,8 +3214,6 @@ local function handleTextChatService(textChatMessage)
     if not chatPlayer then return end
     local msg = textChatMessage.Text
     if type(msg) ~= "string" or msg == "" then return end
-    -- Фильтруем системные сообщения чата (начинаются с "/")
-    if msg:sub(1,1) == "/" then return end
     processChatMessage(chatPlayer, msg)
 end
 
@@ -3191,6 +3287,7 @@ local function stopChatListening()
     chatListenerDisconnectAll()
 end
 
+-- §CHAT_LISTEN
 local function updateChatListening()
     local s = ClientSettings
     if s.Enabled and s.AutoReply then
@@ -3211,6 +3308,7 @@ updateChatListening()
 -- Карточки — матовое стекло чуть светлее фона
 -- ══════════════════════════════════════════════════════
 
+-- §UI_THEMES
 local AURORA_COLORS = {
     Color3.fromRGB(100, 180, 255),
     Color3.fromRGB(160, 110, 255),
@@ -3862,6 +3960,7 @@ pushNotification = function(titleText, bodyText, accent, actions)
 end
 
 local PathfindingService = game:GetService("PathfindingService")
+-- §FOLLOW_MGR
 local FollowManager = { Target = nil, Active = false, LastPathUpdate = 0 }
 
 stopFollow = function(p)
@@ -4349,6 +4448,7 @@ end
 
 
 -- Main UI Creation Wrapper
+-- §UI_CREATE
 local function createInterface()
     if player.PlayerGui:FindFirstChild("LineOfBotsUI") then
         player.PlayerGui.LineOfBotsUI:Destroy()
