@@ -880,7 +880,7 @@ function GeminiProvider:chatCompletions(payload)
     apiKey = type(apiKey) == "string" and apiKey:gsub("%s+","") or ""
     if apiKey == "" then return nil, "MissingGeminiKey" end
 
-    local model = payload.model or "gemini-2.0-flash"
+    local model = payload.model or "gemini-2.0-flash-001"
     local url = "https://generativelanguage.googleapis.com/v1beta/models/"
         .. model .. ":generateContent?key=" .. apiKey
 
@@ -910,6 +910,13 @@ function GeminiProvider:chatCompletions(payload)
             maxOutputTokens = payload.max_tokens or 300,
             temperature = payload.temperature or 0.8,
         },
+        -- Снижаем safety filters для игрового контекста
+        safetySettings = {
+            { category = "HARM_CATEGORY_HARASSMENT",        threshold = "BLOCK_NONE" },
+            { category = "HARM_CATEGORY_HATE_SPEECH",       threshold = "BLOCK_NONE" },
+            { category = "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold = "BLOCK_NONE" },
+            { category = "HARM_CATEGORY_DANGEROUS_CONTENT", threshold = "BLOCK_NONE" },
+        },
     }
 
     -- Объединяем все system тексты в один текстовый блок
@@ -935,10 +942,23 @@ function GeminiProvider:chatCompletions(payload)
     end
 
     local cands = res.candidates
-    if not cands or not cands[1] then return nil, "NoGeminiCandidates" end
-    local parts = cands[1].content and cands[1].content.parts
+    if not cands or not cands[1] then
+        -- Проверяем promptFeedback — если blocked, объясняем
+        if res.promptFeedback and res.promptFeedback.blockReason then
+            return nil, "GeminiBlocked:" .. tostring(res.promptFeedback.blockReason)
+        end
+        return nil, "NoGeminiCandidates"
+    end
+    local cand = cands[1]
+    -- Safety block: candidate есть но без content
+    if cand.finishReason == "SAFETY" or cand.finishReason == "RECITATION" then
+        return nil, "GeminiFiltered:" .. tostring(cand.finishReason)
+    end
+    local parts = cand.content and cand.content.parts
     if not parts or not parts[1] then return nil, "NoGeminiParts" end
-    return tostring(parts[1].text or ""), nil
+    local text = tostring(parts[1].text or "")
+    if text == "" then return nil, "GeminiEmptyText" end
+    return text, nil
 end
 
 -- §ROUTER
@@ -2812,7 +2832,10 @@ local function handleQueuedChat(item)
         -- tool_choice убран — ломает большинство моделей Groq
     end
 
-    -- Таймаут 20 секунд — если модель не ответила, не ждём вечно
+    -- Таймаут: Gemini 2.5 с reasoning может думать долго → 45 сек
+    -- Groq обычно отвечает за 2-5 сек → 20 сек достаточно
+    local isGemini = model:find("^gemini")
+    local timeoutSec = isGemini and 45 or 20
     local text, err
     do
         local done = false
@@ -2821,12 +2844,15 @@ local function handleQueuedChat(item)
             done = true
         end)
         local waited = 0
-        while not done and waited < 20 do
+        while not done and waited < timeoutSec do
             task.wait(0.5)
             waited = waited + 0.5
         end
         if not done then
-            return  -- таймаут — просто пропускаем, бот не отключается
+            if ClientSettings.Debug then
+                print("[LOB] timeout after " .. timeoutSec .. "s for model: " .. model)
+            end
+            return
         end
     end
     -- v18: при rate limit (429) — ждём 5 сек и повторяем один раз
@@ -6005,7 +6031,7 @@ local groqModels = {
     "moonshotai/kimi-k2-instruct-0905",            -- Kimi K2             | 200 t/s  | диалог
     "qwen/qwen3-32b",                              -- Qwen3 32B           | 400 t/s  | логика
     -- ── GEMINI (Google) ──────────────────────────────────────────────────
-    "gemini-2.0-flash",                            -- Gemini 2.0 Flash    | быстрый | Google
+    "gemini-2.0-flash-001",                        -- Gemini 2.0 Flash    | быстрый | Google
     "gemini-2.5-flash",                            -- Gemini 2.5 Flash    | умнее, reasoning | Google
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
@@ -6769,7 +6795,7 @@ do
                 Headers = { ["Content-Type"] = "application/json" },
                 Body = HttpService:JSONEncode({
                     contents = {{ role = "user", parts = {{ text = "hi" }} }},
-                    generationConfig = { maxOutputTokens = 1 },
+                    generationConfig = { maxOutputTokens = 5 },
                 }),
             })
             if not ok2 then setGemStatus(false, "ошибка сети"); return end
