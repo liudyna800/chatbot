@@ -5260,7 +5260,7 @@ end
     local perceptionTabBtn = makeTabButton("Восприятие", "rbxassetid://7743872758")
     local securityTabBtn = makeTabButton("Модерация", "rbxassetid://7734056411")
     local advancedTabBtn = makeTabButton("Настройки", "rbxassetid://7734058803")
-    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://3926305904")
+    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7734060520")
     
     -- Tabs are permanent categories now, so no hiding logic needed.
 
@@ -9885,8 +9885,8 @@ end)
 -- Кнопка сворачивания — стильная, с иконкой
 -- ── Кнопка сворачивания — минималистичная, красивая ─────────────────────
 local minimizeBtn = Instance.new("TextButton")
-minimizeBtn.Size = UDim2.new(0, 28, 0, 28)
-minimizeBtn.Position = UDim2.new(1, -40, 0, 10)
+minimizeBtn.Size = UDim2.new(0, 36, 0, 36)
+minimizeBtn.Position = UDim2.new(1, -48, 0, 8)
 minimizeBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
 minimizeBtn.BackgroundTransparency = 0.2
 minimizeBtn.Text = ""
