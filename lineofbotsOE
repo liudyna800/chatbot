@@ -880,7 +880,7 @@ function GeminiProvider:chatCompletions(payload)
     apiKey = type(apiKey) == "string" and apiKey:gsub("%s+","") or ""
     if apiKey == "" then return nil, "MissingGeminiKey" end
 
-    local model = payload.model or "gemini-2.0-flash-001"
+    local model = payload.model or "gemini-2.5-flash"
     local url = "https://generativelanguage.googleapis.com/v1beta/models/"
         .. model .. ":generateContent?key=" .. apiKey
 
@@ -899,9 +899,23 @@ function GeminiProvider:chatCompletions(payload)
         end
     end
 
-    -- Gemini: contents не может быть пустым и должен начинаться с user
+    -- Gemini: строгое чередование user/model
+    -- 1. Не может начинаться с model
     if #contents == 0 or contents[1].role == "model" then
         table.insert(contents, 1, { role = "user", parts = {{ text = "(start)" }} })
+    end
+    -- 2. Не может быть двух одинаковых ролей подряд — вставляем заглушки
+    local i = 1
+    while i < #contents do
+        if contents[i].role == contents[i+1].role then
+            local fillRole = (contents[i].role == "user") and "model" or "user"
+            table.insert(contents, i+1, { role = fillRole, parts = {{ text = "..." }} })
+        end
+        i = i + 1
+    end
+    -- 3. Последний элемент должен быть user (иначе Gemini не генерирует)
+    if #contents > 0 and contents[#contents].role ~= "user" then
+        table.insert(contents, { role = "user", parts = {{ text = "(continue)" }} })
     end
 
     local body = {
@@ -1687,7 +1701,7 @@ local function stopCurrentEmote()
         pcall(function() _activeEmoteTrack:Stop(0.3) end)
         _activeEmoteTrack = nil
     end
-    -- Дополнительно: останавливаем все Action-треки через Animator
+    -- Останавливаем только Action-треки — НЕ idle/walk
     local hum = getLocalHumanoid()
     local animator = hum and hum:FindFirstChildOfClass("Animator")
     if animator then
@@ -1702,6 +1716,13 @@ local function stopCurrentEmote()
             end
         end)
     end
+    -- Возвращаем idle через Animate скрипт
+    pcall(function()
+        local char = Players.LocalPlayer.Character
+        local animate = char and char:FindFirstChild("Animate")
+        local fn = animate and animate:FindFirstChild("PlayEmote")
+        if fn then fn:Invoke("idle") end
+    end)
 end
 
 -- Определяем тип рига персонажа (R6 или R15)
@@ -1814,10 +1835,16 @@ local function playAnimDirect(animId, duration)
         if pcall(function() track.Priority = prio end) then break end
     end
 
-    -- Останавливаем все конкурирующие треки перед воспроизведением
+    -- Останавливаем только Action треки — НЕ трогаем idle/walk/run
+    -- (остановка idle вызывает застывание персонажа в T-pose)
     pcall(function()
         for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
-            t:Stop(0)
+            if t.Priority == Enum.AnimationPriority.Action
+            or t.Priority == Enum.AnimationPriority.Action2
+            or t.Priority == Enum.AnimationPriority.Action3
+            or t.Priority == Enum.AnimationPriority.Action4 then
+                t:Stop(0)
+            end
         end
     end)
 
@@ -1826,9 +1853,16 @@ local function playAnimDirect(animId, duration)
 
     if duration then
         _activeEmoteThread = task.delay(duration, function()
-            pcall(function() track:Stop(0.1) end)
+            pcall(function() track:Stop(0.3) end)
             _activeEmoteTrack = nil
             _activeEmoteThread = nil
+            -- Восстанавливаем idle через Animate скрипт (R6 и R15)
+            pcall(function()
+                local char = Players.LocalPlayer.Character
+                local animate = char and char:FindFirstChild("Animate")
+                local fn = animate and animate:FindFirstChild("PlayEmote")
+                if fn then fn:Invoke("idle") end
+            end)
         end)
     end
 
@@ -1912,8 +1946,9 @@ local function playEmote(emoteName, duration)
         if ok and played then
             if duration then
                 _activeEmoteThread = task.delay(duration, function()
-                    -- Правильная остановка R15 анимации через Animator
-                    local animator = humanoid:FindFirstChildOfClass("Animator")
+                    -- Остановка R15 Action анимации
+                    local hum2 = getLocalHumanoid()
+                    local animator = hum2 and hum2:FindFirstChildOfClass("Animator")
                     if animator then
                         pcall(function()
                             for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
@@ -1926,6 +1961,13 @@ local function playEmote(emoteName, duration)
                             end
                         end)
                     end
+                    -- Восстанавливаем idle
+                    pcall(function()
+                        local char = Players.LocalPlayer.Character
+                        local animate = char and char:FindFirstChild("Animate")
+                        local fn = animate and animate:FindFirstChild("PlayEmote")
+                        if fn then fn:Invoke("idle") end
+                    end)
                     _activeEmoteThread = nil
                 end)
             end
@@ -2919,13 +2961,13 @@ local function runChatQueue(userId)
     task.spawn(function()
         while true do
             local item = dequeueChatItem(q)
-            if not item then
-                break
+            if not item then break end
+            -- pcall гарантирует что q.running сбросится даже при ошибке
+            local ok, err2 = pcall(handleQueuedChat, item)
+            if not ok and ClientSettings.Debug then
+                print("[LOB] handleQueuedChat error: " .. tostring(err2))
             end
-            handleQueuedChat(item)
-            if q.head <= q.tail then
-                task.wait()
-            end
+            if q.head <= q.tail then task.wait() end
         end
         q.running = false
     end)
@@ -6031,7 +6073,7 @@ local groqModels = {
     "moonshotai/kimi-k2-instruct-0905",            -- Kimi K2             | 200 t/s  | диалог
     "qwen/qwen3-32b",                              -- Qwen3 32B           | 400 t/s  | логика
     -- ── GEMINI (Google) ──────────────────────────────────────────────────
-    "gemini-2.0-flash-001",                        -- Gemini 2.0 Flash    | быстрый | Google
+    "gemini-2.0-flash-lite",                       -- Gemini 2.0 Flash Lite | самый быстрый | Google
     "gemini-2.5-flash",                            -- Gemini 2.5 Flash    | умнее, reasoning | Google
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
