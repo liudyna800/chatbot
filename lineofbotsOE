@@ -5260,7 +5260,7 @@ end
     local perceptionTabBtn = makeTabButton("Восприятие", "rbxassetid://7743872758")
     local securityTabBtn = makeTabButton("Модерация", "rbxassetid://7734056411")
     local advancedTabBtn = makeTabButton("Настройки", "rbxassetid://7734058803")
-    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxthumb://type=Asset&id=126810089141032&w=420&h=420")
+    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxthumb://type=Asset&id=118027640146084&w=420&h=420")
     -- Сбрасываем перекраску для пользовательской иконки (иначе THEME.IconTint закрашивает)
     do
         local cc = chatTestTabBtn:FindFirstChild("ContentContainer")
