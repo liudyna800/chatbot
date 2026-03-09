@@ -5260,7 +5260,15 @@ end
     local perceptionTabBtn = makeTabButton("Восприятие", "rbxassetid://7743872758")
     local securityTabBtn = makeTabButton("Модерация", "rbxassetid://7734056411")
     local advancedTabBtn = makeTabButton("Настройки", "rbxassetid://7734058803")
-    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://126810089141032")
+    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxthumb://type=Asset&id=126810089141032&w=420&h=420")
+    -- Сбрасываем перекраску для пользовательской иконки (иначе THEME.IconTint закрашивает)
+    do
+        local cc = chatTestTabBtn:FindFirstChild("ContentContainer")
+        local ic = cc and cc:FindFirstChild("Icon")
+        if ic then
+            ic.ImageColor3 = Color3.fromRGB(255, 255, 255)  -- белый = без перекраски
+        end
+    end
     
     -- Tabs are permanent categories now, so no hiding logic needed.
 
