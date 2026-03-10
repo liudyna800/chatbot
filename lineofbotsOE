@@ -54,24 +54,40 @@ local function saveSettings()
     pcall(function()
         if not writefile then return end
         local model = ClientSettings and ClientSettings.Models and ClientSettings.Models.groq or ""
-        local data = "AutoReply=" .. tostring(ClientSettings and ClientSettings.AutoReply or false)
-            .. "\nModel=" .. tostring(model)
-        writefile(LOB_SETTINGS_FILE, data)
+        local autoReply = tostring(ClientSettings and ClientSettings.AutoReply or false)
+        -- Используем простой формат key=value по одному на строку
+        local lines = {
+            "AutoReply=" .. autoReply,
+            "Model=" .. model,
+        }
+        writefile(LOB_SETTINGS_FILE, table.concat(lines, "\n"))
+        if ClientSettings and ClientSettings.Debug then
+            print("[LOB] Settings saved: AutoReply=" .. autoReply .. " Model=" .. model)
+        end
     end)
 end
 local function loadSettings()
     pcall(function()
         if not readfile then return end
         local ok, data = pcall(readfile, LOB_SETTINGS_FILE)
-        if not ok or not data then return end
-        if data:find("AutoReply=true") then
-            if ClientSettings then ClientSettings.AutoReply = true end
-        end
-        -- Восстанавливаем выбранную модель
-        local savedModel = data:match("Model=([^\n]+)")
-        if savedModel and savedModel ~= "" then
-            if not ClientSettings.Models then ClientSettings.Models = {} end
-            ClientSettings.Models.groq = savedModel
+        if not ok or not data or data == "" then return end
+        -- Парсим построчно
+        for line in data:gmatch("[^\n]+") do
+            local key, val = line:match("^([^=]+)=(.*)$")
+            if key and val then
+                key = key:match("^%s*(.-)%s*$")
+                val = val:match("^%s*(.-)%s*$")
+                if key == "AutoReply" and val == "true" then
+                    if ClientSettings then ClientSettings.AutoReply = true end
+                elseif key == "Model" and val ~= "" then
+                    if not ClientSettings then ClientSettings = {} end
+                    if not ClientSettings.Models then ClientSettings.Models = {} end
+                    ClientSettings.Models.groq = val
+                    if ClientSettings.Debug then
+                        print("[LOB] Loaded model from file: " .. val)
+                    end
+                end
+            end
         end
     end)
 end
@@ -5260,7 +5276,7 @@ end
     local perceptionTabBtn = makeTabButton("Восприятие", "rbxassetid://7743872758")
     local securityTabBtn = makeTabButton("Модерация", "rbxassetid://7734056411")
     local advancedTabBtn = makeTabButton("Настройки", "rbxassetid://7734058803")
-    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://4516313742")
+    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7734052136")
     
     -- Tabs are permanent categories now, so no hiding logic needed.
 
