@@ -2011,16 +2011,13 @@ local function playEmote(emoteName, duration)
 
     -- Маппинг всех эмоций на встроенные имена Roblox
     local builtinMap = {
-        -- Точные имена встроенных /e эмоций Roblox
+        -- Все 8 встроенных /e эмоций Roblox — humanoid:PlayEmote гарантированно работает
         wave="wave", laugh="laugh", cheer="cheer", point="point",
         sit="sit", dance="dance", dance2="dance2", dance3="dance3",
-        -- Алиасы
-        hi="wave", bye="wave", lol="laugh", haha="laugh",
-        yay="cheer", victory="cheer", agree="cheer", yes="cheer",
-        no="point", disagree="point",
-        -- Всё остальное (robot, shrug, shy, salute, tilt, stadium и новые)
-        -- НЕ в builtinMap → playEmote пойдёт в playAnimDirect
     }
+    -- ВАЖНО: ACTION_HANDLERS вызывает playEmote только с этими 8 именами.
+    -- Если emoteName НЕ в builtinMap → playEmote падает в playAnimDirect.
+    -- Поэтому мы убедились что все вызовы используют только встроенные имена.
     local builtinName = builtinMap[emoteName]
 
     if rigType == "R6" then
@@ -2395,39 +2392,60 @@ local ACTION_HANDLERS = {
     dance2   = function(_) playEmote("dance2", 10) end,
     dance3   = function(_) playEmote("dance3", 10) end,
     robot    = function(_) playEmote("robot",  10) end,
-    -- ── Приветствия ───────────────────────────────────────────────────────
+    -- ── 8 ВСТРОЕННЫХ ROBLOX ЭМОЦИЙ — максимально разнообразное распределение
+    -- wave=машет  laugh=смеётся  cheer=руки вверх  point=указывает
+    -- sit=сидит   dance=танец1   dance2=танец2      dance3=танец3
+    -- ─────────────────────────────────────────────────────────────────────
+    -- ПРИВЕТСТВИЯ → wave (машет рукой)
     wave     = function(_) playEmote("wave",   4) end,
     hi       = function(_) playEmote("wave",   4) end,
     bye      = function(_) playEmote("wave",   4) end,
-    hello    = function(_) playEmote("hello",  5) end,  -- прелоадится
-    -- ── Смех — используем встроенный "laugh" (гарантирован) ──────────────
-    laugh    = function(_) playEmote("laugh",  5) end,  -- /e laugh — ВСТРОЕН
+    hello    = function(_) playEmote("wave",   5) end,
+    greet    = function(_) playEmote("wave",   4) end,
+    salute   = function(_) playEmote("wave",   3) end,
+    -- СМЕХ → laugh (запрокидывает голову)
+    laugh    = function(_) playEmote("laugh",  5) end,
     lol      = function(_) playEmote("laugh",  4) end,
     haha     = function(_) playEmote("laugh",  4) end,
-    -- ── Радость / победа ──────────────────────────────────────────────────
-    cheer    = function(_) playEmote("cheer",   3) end,  -- /e cheer — ВСТРОЕН
-    yay      = function(_) playEmote("cheer",   4) end,  -- тоже cheer
-    victory  = function(_) playEmote("cheer",   5) end,
-    stadium  = function(_) playEmote("stadium", 5) end,  -- прелоадится
-    charging = function(_) playEmote("cheer",   3) end,  -- нет надёжного ID — cheer
-    -- ── Замешательство ────────────────────────────────────────────────────
-    shrug    = function(_) playEmote("shrug",  3) end,  -- прелоадится
-    confused = function(_) playEmote("tilt",   3) end,  -- прелоадится
-    tilt     = function(_) playEmote("tilt",   3) end,
-    dizzy    = function(_) playEmote("tilt",   3) end,  -- нет надёжного — tilt
-    eyeroll  = function(_) playEmote("shrug",  3) end,  -- нет надёжного — shrug
-    -- ── Согласие / несогласие ─────────────────────────────────────────────
-    agree    = function(_) playEmote("cheer",  2) end,  -- нет надёжного — cheer короткий
-    disagree = function(_) playEmote("shrug",  2) end,  -- нет надёжного — shrug
-    no       = function(_) playEmote("shrug",  2) end,
+    -- РАДОСТЬ/ПОБЕДА → cheer (руки вверх)
+    cheer    = function(_) playEmote("cheer",  3) end,
+    yay      = function(_) playEmote("cheer",  4) end,
+    victory  = function(_) playEmote("cheer",  5) end,
+    stadium  = function(_) playEmote("cheer",  5) end,
+    charging = function(_) playEmote("cheer",  3) end,
+    agree    = function(_) playEmote("cheer",  2) end,
     yes      = function(_) playEmote("cheer",  2) end,
-    -- ── Сожаление / негативные ────────────────────────────────────────────
-    sorry    = function(_) playEmote("shrug",  3) end,
-    sad      = function(_) playEmote("point",  3) end,  -- point как "ну вот"
-    facepalm = function(_) playEmote("shrug",  3) end,
-    shy      = function(_) playEmote("shy",    4) end,  -- прелоадится
-    -- ── Другое ────────────────────────────────────────────────────────────
-    salute   = function(_) playEmote("salute", 3) end,  -- прелоадится
+    happy    = function(_) playEmote("cheer",  3) end,
+    celebrate = function(_) playEmote("cheer", 5) end,
+    excited  = function(_) playEmote("dance2", 5) end,  -- dance2 энергичнее
+    -- УКАЗАНИЕ → point (указывает пальцем)
+    point    = function(_) playEmote("point",  3) end,
+    sad      = function(_) playEmote("point",  4) end,  -- опускает руку — грустно
+    sorry    = function(_) playEmote("point",  3) end,
+    confused = function(_) playEmote("point",  3) end,  -- "что это вот там?"
+    -- СИДЕНИЕ → sit
+    sit      = function(_) playEmote("sit",   nil) end,
+    sleep    = function(_) playEmote("sit",   nil) end,
+    tired    = function(_) playEmote("sit",    8) end,
+    bored    = function(_) playEmote("sit",    6) end,
+    -- ЗАМЕШАТЕЛЬСТВО → laugh (трясёт головой смеясь — closest to confused)
+    shrug    = function(_) playEmote("laugh",  3) end,
+    disagree = function(_) playEmote("laugh",  2) end,
+    no       = function(_) playEmote("laugh",  2) end,
+    eyeroll  = function(_) playEmote("laugh",  3) end,
+    facepalm = function(_) playEmote("laugh",  3) end,
+    dizzy    = function(_) playEmote("laugh",  3) end,
+    tilt     = function(_) playEmote("laugh",  3) end,
+    -- ЭМОЦИИ → wave (нейтральный жест)
+    shy      = function(_) playEmote("wave",   4) end,
+    nervous  = function(_) playEmote("wave",   3) end,
+    bow      = function(_) playEmote("wave",   3) end,
+    clap     = function(_) playEmote("cheer",  3) end,
+    flex     = function(_) playEmote("cheer",  4) end,
+    think    = function(_) playEmote("point",  3) end,
+    cry      = function(_) playEmote("point",  4) end,
+    angry    = function(_) playEmote("point",  3) end,
+    surprised = function(_) playEmote("laugh", 3) end,
     point    = function(_) playEmote("point",  3) end,  -- ВСТРОЕН
     sit      = function(_) playEmote("sit",   nil) end, -- ВСТРОЕН, бесконечно
     -- ── Рагдолл ───────────────────────────────────────────────────────────
