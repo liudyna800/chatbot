@@ -5260,13 +5260,7 @@ end
     local perceptionTabBtn = makeTabButton("Восприятие", "rbxassetid://7743872758")
     local securityTabBtn = makeTabButton("Модерация", "rbxassetid://7734056411")
     local advancedTabBtn = makeTabButton("Настройки", "rbxassetid://7734058803")
-    -- 🔽 ИКОНКА "Чат с ИИ" — раскомментируй нужную и закомментируй остальные
-    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7734060520")  -- вариант 1: chat bubble
-    -- local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7734058068")  -- вариант 2: speech
-    -- local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7734056696")  -- вариант 3: dialogue
-    -- local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7734055195")  -- вариант 4: comment
-    -- local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7734053988")  -- вариант 5: message
-    -- local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://6022668898")  -- вариант 6: chat classic
+    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7734060520")
     
     -- Tabs are permanent categories now, so no hiding logic needed.
 
