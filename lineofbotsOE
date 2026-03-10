@@ -1809,6 +1809,7 @@ end
 
 -- R6 анимации — встроенные ID для R6 скелета
 local R6_ANIM_IDS = {
+    -- Встроенные /e эмоции R6
     wave     = "507770239",
     laugh    = "507770818",
     cheer    = "507770677",
@@ -1817,29 +1818,46 @@ local R6_ANIM_IDS = {
     dance    = "507771019",
     dance2   = "507776043",
     dance3   = "507777268",
-    hello    = "507770239",
-    shrug    = "507770453",
-    salute   = "507770239",
-    tilt     = "507770818",
-    stadium  = "507770677",
-    shy      = "507770239",
-    robot    = "507776043",
+    -- Кастомные (через playAnimDirect) — бесплатные Roblox аним
+    hello    = "507770239",   -- wave фоллбэк
+    shrug    = "3360689322",  -- Shrug R6
+    salute   = "3360686151",  -- Salute R6
+    tilt     = "3360690927",  -- Head Shake R6
+    stadium  = "507770677",   -- cheer фоллбэк
+    shy      = "3360692468",  -- Shy R6
+    robot    = "507776043",   -- dance2 фоллбэк
     agree    = "507770677",
-    disagree = "507770453",
-    eyeroll  = "507770818",
-    confused = "507770453",
+    disagree = "3360689322",  -- shrug R6
+    eyeroll  = "3360692468",  -- shy R6
+    confused = "3360690927",  -- tilt R6
     dizzy    = "507770818",
     yay      = "507770677",
     victory  = "507770677",
     charging = "507770677",
-    sorry    = "507770239",
-    facepalm = "507770818",
+    sorry    = "3360689322",  -- shrug R6
+    facepalm = "3360692468",  -- shy R6
     sad      = "507770453",
+    -- Новые анимации R6
+    clap     = "507770677",   -- cheer R6
+    bow      = "507770239",   -- wave R6
+    think    = "3360690927",  -- head shake R6
+    sleep    = "507768133",   -- sit R6
+    cry      = "507770453",   -- point R6
+    angry    = "3360689322",  -- shrug R6
+    nervous  = "3360692468",  -- shy R6
+    happy    = "507770677",   -- cheer R6
+    surprised = "3360689322", -- shrug R6
+    excited  = "507771019",   -- dance R6
+    celebrate = "507770677",  -- cheer R6
+    greet    = "507770239",   -- wave R6
+    tired    = "507768133",   -- sit R6
+    bored    = "3360690927",  -- tilt R6
 }
 
 -- R15 анимации — те же встроенные эмоции но ID для R15 скелета
 -- Используются как фоллбэк когда humanoid:PlayEmote() не работает
 local R15_ANIM_IDS = {
+    -- Встроенные /e эмоции R15
     wave     = "507770239",
     laugh    = "507770818",
     cheer    = "507770677",
@@ -1848,24 +1866,40 @@ local R15_ANIM_IDS = {
     dance    = "507771019",
     dance2   = "507776043",
     dance3   = "507777268",
-    hello    = "507770239",
-    shrug    = "507770453",
-    salute   = "507770239",
-    tilt     = "507770818",
-    stadium  = "507770677",
-    shy      = "507770239",
-    robot    = "507776043",
+    -- Кастомные (через playAnimDirect) — бесплатные Roblox анимации
+    hello    = "3576686446",  -- Hello R15 (Roblox каталог, бесплатно)
+    shrug    = "3576968026",  -- Shrug R15
+    salute   = "3360689775",  -- Salute R15
+    tilt     = "3360692915",  -- Head Tilt R15
+    stadium  = "3360686498",  -- Stadium R15
+    shy      = "3576717965",  -- Shy R15
+    robot    = "3576721660",  -- Robot R15
     agree    = "507770677",
-    disagree = "507770453",
-    eyeroll  = "507770818",
-    confused = "507770453",
+    disagree = "3576968026",  -- shrug R15
+    eyeroll  = "3576717965",  -- shy R15
+    confused = "3360692915",  -- tilt R15
     dizzy    = "507770818",
     yay      = "507770677",
     victory  = "507770677",
-    charging = "507770677",
-    sorry    = "507770239",
-    facepalm = "507770818",
+    charging = "3360686498",  -- stadium R15
+    sorry    = "3576968026",  -- shrug R15
+    facepalm = "3576717965",  -- shy R15
     sad      = "507770453",
+    -- Новые анимации R15
+    clap     = "507770677",   -- cheer R15
+    bow      = "3576686446",  -- hello (поклон) R15
+    think    = "3360692915",  -- tilt R15
+    sleep    = "2506281703",  -- sit R15
+    cry      = "507770453",   -- point R15
+    angry    = "3576968026",  -- shrug R15
+    nervous  = "3576717965",  -- shy R15
+    happy    = "507770677",   -- cheer R15
+    surprised = "3576968026", -- shrug R15
+    excited  = "507771019",   -- dance R15
+    celebrate = "3360686498", -- stadium R15
+    greet    = "3576686446",  -- hello R15
+    tired    = "2506281703",  -- sit R15
+    bored    = "3360692915",  -- tilt R15
 }
 
 -- Воспроизвести анимацию напрямую через AnimationTrack (R6 и R15)
@@ -1950,17 +1984,13 @@ local function playEmote(emoteName, duration)
 
     -- Маппинг всех эмоций на встроенные имена Roblox
     local builtinMap = {
+        -- ТОЛЬКО встроенные /e эмоции — humanoid:PlayEmote работает без покупки
         wave="wave", laugh="laugh", cheer="cheer", point="point",
         sit="sit", dance="dance1", dance2="dance2", dance3="dance3",
-        hello="wave", hi="wave", bye="wave",
-        shrug="point", agree="cheer", disagree="point",
-        yay="cheer", victory="cheer", stadium="cheer", charging="cheer",
-        sorry="wave", sad="point", shy="wave", salute="wave",
-        tilt="laugh", confused="point", dizzy="laugh",
-        eyeroll="laugh", facepalm="laugh",
-        robot="dance2", lol="laugh", haha="laugh",
-        run="wave", stop="wave", sleep="sit", think="point",
-        clap="cheer", bow="wave", flex="cheer",
+        -- Алиасы встроенных (hi/bye/lol → встроенный)
+        hi="wave", bye="wave", lol="laugh", haha="laugh",
+        yay="cheer", victory="cheer", agree="cheer", yes="cheer",
+        -- Всё остальное НЕ в builtinMap → пойдёт в playAnimDirect с реальным ID
     }
     local builtinName = builtinMap[emoteName]
 
