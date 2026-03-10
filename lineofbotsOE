@@ -1090,38 +1090,52 @@ end
 local function sendChatMessage(text)
     text = tostring(text or "")
     if text == "" then return end
-    
-    -- Try TextChatService
-    local okTCS = pcall(function()
-        local channels = TextChatService:FindFirstChild("TextChannels")
-        if not channels then error("NoChannels") end
-        -- Сначала пробуем RBXGeneral, потом любой доступный канал
-        local channel = channels:FindFirstChild(Constants.DefaultChatChannelName)
+
+    -- Метод 1: TextChatService SendAsync (новые игры 2022+)
+    local ok1 = pcall(function()
+        local tcs = game:GetService("TextChatService")
+        -- Ищем RBXGeneral или любой активный канал
+        local channels = tcs:FindFirstChild("TextChannels")
+        if not channels then error("no TextChannels") end
+        local channel = channels:FindFirstChild("RBXGeneral")
+                     or channels:FindFirstChild(Constants.DefaultChatChannelName)
         if not channel then
-            -- Фоллбэк: берём первый TextChannel
             for _, ch in ipairs(channels:GetChildren()) do
-                if ch:IsA("TextChannel") and ch.SendAsync then
-                    channel = ch
-                    break
-                end
+                if ch:IsA("TextChannel") then channel = ch break end
             end
         end
-        if channel and channel.SendAsync then
-            channel:SendAsync(text)
-            return
-        end
-        error("NoTCS")
+        if not channel then error("no channel") end
+        channel:SendAsync(text)
     end)
-    if okTCS then return end
-    
-    -- Try Legacy Chat
-    local rStorage = game:GetService("ReplicatedStorage")
-    local remote = rStorage:FindFirstChild("DefaultChatSystemChatEvents") 
-        and rStorage.DefaultChatSystemChatEvents:FindFirstChild("SayMessageRequest")
-        
-    if remote then
-        remote:FireServer(text, "All")
-    end
+    if ok1 then return end
+
+    -- Метод 2: Legacy Chat (старые игры)
+    local ok2 = pcall(function()
+        local rs = game:GetService("ReplicatedStorage")
+        local events = rs:FindFirstChild("DefaultChatSystemChatEvents")
+        local remote = events and events:FindFirstChild("SayMessageRequest")
+        if remote then remote:FireServer(text, "All") end
+    end)
+    if ok2 then return end
+
+    -- Метод 3: SayMessageRequest напрямую (альтернативный путь)
+    local ok3 = pcall(function()
+        local rs = game:GetService("ReplicatedStorage")
+        -- Некоторые игры используют другой путь
+        local remote = rs:FindFirstChild("SayMessageRequest")
+        if remote then remote:FireServer(text, "All") end
+    end)
+    if ok3 then return end
+
+    -- Метод 4: StarterGui SetCore ChatMakeSystemMessage (виден только локально, но лучше чем ничего)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("ChatMakeSystemMessage", {
+            Text = text,
+            Color = Color3.fromRGB(255, 255, 255),
+            Font = Enum.Font.GothamBold,
+            TextSize = 18,
+        })
+    end)
 end
 
 local function getTabScale(frame)
