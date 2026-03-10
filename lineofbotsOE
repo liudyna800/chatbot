@@ -5366,10 +5366,6 @@ local function switchTab(name)
         local newOrder = newBtn.LayoutOrder or 0
         dir = (newOrder >= oldOrder) and 1 or -1
     end
-    local slideOffset = 22
-    local inStartPos = UDim2.new(0, slideOffset * dir, 0, 0)
-    local outEndPos = UDim2.new(0, -slideOffset * dir, 0, 0)
-
     -- Reset / Hide non-participating frames
     for _, frame in pairs(tabFrames) do
         if frame ~= oldFrame and frame ~= newFrame then
@@ -5386,7 +5382,7 @@ local function switchTab(name)
     isTabSwitching = true
     pendingTabName = nil
 
-    -- Animate OLD Frame (Exit) — slide + fade + slight shrink
+    -- OLD Frame: fade out + чуть сжимается (уходит "вглубь")
     if oldFrame then
         cancelFrameTweens(oldFrame)
         oldFrame.Visible = true
@@ -5395,24 +5391,24 @@ local function switchTab(name)
         oldFrame.GroupTransparency = 0
         local scOld = getTabScale(oldFrame)
         if scOld then scOld.Scale = 1 end
-        local tOut = tween(oldFrame, TWEEN_TAB, { Position = outEndPos, GroupTransparency = 1 })
+        local tOut = tween(oldFrame, TWEEN_TAB, { GroupTransparency = 1 })
         trackFrameTween(oldFrame, tOut)
-        if scOld then tween(scOld, TWEEN_TAB, { Scale = 0.97 }) end
+        if scOld then tween(scOld, TWEEN_TAB, { Scale = 0.94 }) end
     end
 
-    -- Animate NEW Frame (Enter) — slide + fade
+    -- NEW Frame: fade in + вырастает из 0.94 до 1 ("выходит из глубины")
     if newFrame then
         cancelFrameTweens(newFrame)
         newFrame.Visible = true
         newFrame.ZIndex = 2
-        newFrame.Position = inStartPos
+        newFrame.Position = basePos
         newFrame.GroupTransparency = 1
         local sc = getTabScale(newFrame)
-        if sc then sc.Scale = 0.97 end
-        local tIn = tween(newFrame, TWEEN_TAB, { Position = basePos, GroupTransparency = 0 })
+        if sc then sc.Scale = 0.94 end
+        local tIn = tween(newFrame, TWEEN_TAB, { GroupTransparency = 0 })
         trackFrameTween(newFrame, tIn)
         if sc then
-            tween(sc, TWEEN_TAB, { Scale = 1 })
+            tween(sc, TweenInfo.new(TWEEN_TAB.Time, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 })
         end
     end
 
@@ -10250,11 +10246,11 @@ local function minimizeWindow()
     -- Сжимаем окно к центру — Back In (слегка вырастает перед тем как схлопнуться)
     window.AnchorPoint = Vector2.new(0.5, 0.5)
     window.Position = UDim2.new(0.5, 0, 0.5, 0)
-    tween(window, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+    tween(window, TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
         Size = UDim2.new(0, winW * 0.04, 0, winH * 0.04),
         BackgroundTransparency = 1,
     })
-    task.delay(0.42, function()
+    task.delay(0.32, function()
         windowHolder.Visible = false
         window.Size = UDim2.new(0, winW, 0, winH)
         window.AnchorPoint = Vector2.new(0, 0)
@@ -10313,10 +10309,12 @@ do
         end
     end)
 
-    circleBtn.InputChanged:Connect(function(input)
-        if (input.UserInputType == Enum.UserInputType.MouseMovement
-            or input.UserInputType == Enum.UserInputType.Touch)
-            and _circleDownPos then
+    -- Глобальный трекинг движения — ловим даже когда курсор ушёл за пределы кнопки
+    local UIS = game:GetService("UserInputService")
+    UIS.InputChanged:Connect(function(input)
+        if not _circleDownPos then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
             local dx = input.Position.X - _circleDownPos.X
             local dy = input.Position.Y - _circleDownPos.Y
             if math.sqrt(dx*dx + dy*dy) > _circleDragThreshold then
@@ -10325,14 +10323,16 @@ do
         end
     end)
 
-    circleBtn.InputEnded:Connect(function(input)
+    UIS.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
-            if not _circleDidDrag then
-                restoreWindow()
+            if _circleDownPos then  -- только если мы начали на кнопке
+                if not _circleDidDrag then
+                    restoreWindow()
+                end
+                _circleDownPos = nil
+                _circleDidDrag = false
             end
-            _circleDownPos = nil
-            _circleDidDrag = false
         end
     end)
 end
