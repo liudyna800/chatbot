@@ -1460,18 +1460,22 @@ local function makeSystemPrompt(settings)
                 .. "\nпосмейся→[DO:laugh]  порадуйся→[DO:cheer]  потанцуй→[DO:dance]"
                 .. "\nскажи да→[DO:agree]  скажи нет→[DO:disagree]  закатай глаза→[DO:eyeroll]"
                 .. "\nпомашь→[DO:wave]  сядь→[DO:sit]  покажи→[DO:point]"
+                .. "\nпожми плечами→[DO:shrug]  извинись→[DO:sorry]  погрусти→[DO:sad]"
+                .. "\nзастесняйся→[DO:shy]  не понял→[DO:confused]  удивись→[DO:dizzy]"
                 .. "\nпрыгни→[DO:jump]  прыгни 2→[DO:jump2]  прыгни 3→[DO:jump3]  прыгни 4→[DO:jump4]"
                 .. "\nпрыгни 5→[DO:jump5]  прыгни 6→[DO:jump6]  прыгни 7→[DO:jump7]"
                 .. "\nпрыгни 8→[DO:jump8]  прыгни 9→[DO:jump9]  прыгни 10→[DO:jump10]"
                 .. "\n"
-                .. "\nEXAMPLES:"
+                .. "\nEXAMPLES (USE VARIETY — do NOT always pick laugh/point):"
                 .. "\nпосмейся→[DO:laugh]хаха!   lol→[DO:laugh]haha"
                 .. "\nпорадуйся→[DO:cheer]ура!   we won→[DO:yay]LETS GO!"
                 .. "\nда→[DO:agree]конечно   нет→[DO:disagree]неа"
                 .. "\nпривет→[DO:wave]хей   подойди→[DO:goto]иду"
-                .. "\nпрыгни→[DO:jump]ok   прыгни 2 раза→[DO:jump2]ok   прыгни 5 раз→[DO:jump5]ok   прыгни 10 раз→[DO:jump10]ok"
-                .. "\nкрутись→[DO:spin]ок   крутись 10 сек→[DO:spin10]ок"
-                .. "\nidk→[DO:shrug]хз   sorry→[DO:sorry]всё ок"
+                .. "\nхз/idk→[DO:shrug]хз   прости→[DO:sorry]всё ок"
+                .. "\nжаль→[DO:sad]жаль   не понял→[DO:confused]что?"
+                .. "\nнуу→[DO:shy]нуу   вау→[DO:stadium]нереально!"
+                .. "\nпрыгни→[DO:jump]ok   прыгни 5 раз→[DO:jump5]ok   крутись→[DO:spin]ок"
+                .. "\nDO NOT repeat the same tag every message. Vary your emotes naturally."
         end
     end
 
@@ -1627,11 +1631,22 @@ end
 
 local function sendBotMessage(text)
     if type(text) ~= "string" or text == "" then return end
-    -- Убираем служебные теги которые ИИ иногда копирует в ответ
+    -- Шаг 1: убираем закрытые теги вида [TAG:...] и [TAG]
     text = text:gsub("%[LANG:[^%]]*%]%s*", "")
     text = text:gsub("%[NAME:[^%]]*%]%s*", "")
-    text = text:gsub("%[DO:[^%]]*%]%s*", "")  -- убираем оставшиеся action теги
-    text = text:gsub("%[SYSTEM:[^%]]*%]%s*", "")  -- убираем [SYSTEM:...] если ИИ скопировал
+    text = text:gsub("%[DO:[^%]]*%]%s*", "")
+    text = text:gsub("%[SYSTEM:[^%]]*%]%s*", "")
+    text = text:gsub("%[NEARBY[^%]]*%]%s*", "")
+    -- Шаг 2: убираем НЕЗАКРЫТЫЕ теги — ИИ иногда пишет "[DO:wave" без ]
+    text = text:gsub("%[DO:[%w_]*%s*", "")
+    text = text:gsub("%[LANG:[%w_]*%s*", "")
+    text = text:gsub("%[NAME:[^%s%]]*%s*", "")
+    text = text:gsub("%[SYSTEM:[^%]]*", "")
+    -- Шаг 3: одиночные [ или ] которые остались — убираем
+    text = text:gsub("%[%s*%]", "")       -- пустые []
+    text = text:gsub("%[%s*$", "")        -- [ в конце строки
+    text = text:gsub("^%s*%]%s*", "")     -- ] в начале
+    -- Шаг 4: финальная нормализация
     text = normalizeOneLine(text)
     if text == "" then return end
 
@@ -1996,13 +2011,15 @@ local function playEmote(emoteName, duration)
 
     -- Маппинг всех эмоций на встроенные имена Roblox
     local builtinMap = {
-        -- ТОЛЬКО встроенные /e эмоции — humanoid:PlayEmote работает без покупки
+        -- Точные имена встроенных /e эмоций Roblox
         wave="wave", laugh="laugh", cheer="cheer", point="point",
-        sit="sit", dance="dance1", dance2="dance2", dance3="dance3",
-        -- Алиасы встроенных (hi/bye/lol → встроенный)
+        sit="sit", dance="dance", dance2="dance2", dance3="dance3",
+        -- Алиасы
         hi="wave", bye="wave", lol="laugh", haha="laugh",
         yay="cheer", victory="cheer", agree="cheer", yes="cheer",
-        -- Всё остальное НЕ в builtinMap → пойдёт в playAnimDirect с реальным ID
+        no="point", disagree="point",
+        -- Всё остальное (robot, shrug, shy, salute, tilt, stadium и новые)
+        -- НЕ в builtinMap → playEmote пойдёт в playAnimDirect
     }
     local builtinName = builtinMap[emoteName]
 
@@ -2367,8 +2384,13 @@ local ACTION_HANDLERS = {
     twirl    = function(_) doSpin(3)  end,  -- алиас
     -- ── Танцы ─────────────────────────────────────────────────────────────
     dance    = function(_)
-        local v = {"dance","dance2","dance3","robot"}
-        playEmote(v[math.random(1,#v)], 10)
+        -- dance/dance2/dance3 — встроенные, robot — через playAnimDirect
+        local idx = math.random(1, 4)
+        if idx == 4 then
+            playEmote("robot", 10)
+        else
+            playEmote(("dance" .. (idx == 1 and "" or tostring(idx))), 10)
+        end
     end,
     dance2   = function(_) playEmote("dance2", 10) end,
     dance3   = function(_) playEmote("dance3", 10) end,
@@ -3234,16 +3256,17 @@ task.delay(5, function()
             end
             prevAir[uid] = inAir
 
-            -- Взгляд
+            -- Взгляд: сначала проверяем смотрит ли — потом тратим кулдаун
             if not reacted then
                 local toUs = myPos - root.Position
                 local stareDist = toUs.Magnitude
-                if stareDist > 1 and _canWorldReact(uid, "stare") then
-                    if root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 then
+                -- dot product ПЕРВЫМ — кулдаун не тратим если не смотрит
+                if stareDist > 1 and root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 then
+                    if _canWorldReact(uid, "stare") then
                         local name = p.DisplayName or p.Name
                         local msgs = {
-                            "[SYSTEM: "..name.." is staring right at you. Acknowledge them in 1 short sentence.]",
-                            "[SYSTEM: "..name.." keeps looking at you. React briefly.]",
+                            "[SYSTEM: "..name.." is staring right at you. React naturally in 1 short sentence, stay in character. Do NOT greet them again if you already talked.]",
+                            "[SYSTEM: "..name.." keeps looking at you. React briefly, stay in character.]",
                         }
                         enqueueChatItem(uid, {
                             player=p, userId=uid, name=p.Name,
