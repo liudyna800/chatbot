@@ -5261,7 +5261,27 @@ end
     local perceptionTabBtn = makeTabButton("Восприятие", "rbxassetid://7743872758")
     local securityTabBtn = makeTabButton("Модерация", "rbxassetid://7734056411")
     local advancedTabBtn = makeTabButton("Настройки", "rbxassetid://7734058803")
-    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7733771900")
+    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7734058803")
+    -- Заменяем иконку на символ чата (asset ID не грузятся)
+    do
+        local cc = chatTestTabBtn:FindFirstChild("ContentContainer")
+        local ic = cc and cc:FindFirstChild("Icon")
+        if ic then
+            ic.Image = ""
+            ic.BackgroundTransparency = 1
+            local emojiLbl = Instance.new("TextLabel")
+            emojiLbl.Size = UDim2.new(0, 20, 0, 20)
+            emojiLbl.Position = UDim2.new(0, 16, 0.5, -10)
+            emojiLbl.BackgroundTransparency = 1
+            emojiLbl.Text = "💬"
+            emojiLbl.TextSize = 16
+            emojiLbl.Font = Enum.Font.GothamBold
+            emojiLbl.TextXAlignment = Enum.TextXAlignment.Center
+            emojiLbl.TextYAlignment = Enum.TextYAlignment.Center
+            emojiLbl.ZIndex = ic.ZIndex
+            emojiLbl.Parent = cc
+        end
+    end
     
     -- Tabs are permanent categories now, so no hiding logic needed.
 
