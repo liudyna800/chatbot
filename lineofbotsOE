@@ -585,8 +585,8 @@ local function postJson(url, headers, bodyTable)
         Body = body,
     })
     
-    local respBody    = response.Body or response.body
-    local respStatus  = response.StatusCode or response.statusCode or response.Status or response.status
+    local respBody    = response.Body or response.body or ""
+    local respStatus  = response.StatusCode or response.statusCode or response.Status or response.status or 200
     local respMsg     = response.StatusMessage or response.statusMessage or "Unknown"
     local respHeaders = response.Headers or response.headers or {}
 
@@ -1539,6 +1539,7 @@ local function isBlacklisted(settings, userId)
 end
 
 local function passesTrigger(settings, message)
+    if not message then return false end
     local trigger = settings.Trigger
     if type(trigger) ~= "table" then
         return true
@@ -1585,6 +1586,8 @@ end
 -- §SPLIT
 local function splitTextIntoParts(text, maxLen)
     local parts = {}
+    text = text and text:match("^%s*(.-)%s*$") or ""
+    if text == "" then return {""} end
     maxLen = maxLen or 200
     while #text > maxLen do
         -- Ищем последний пробел в пределах maxLen
@@ -1948,12 +1951,14 @@ local function playEmote(emoteName, duration)
         wave="wave", laugh="laugh", cheer="cheer", point="point",
         sit="sit", dance="dance1", dance2="dance2", dance3="dance3",
         hello="wave", hi="wave", bye="wave",
-        shrug="wave", agree="cheer", disagree="point",
+        shrug="point", agree="cheer", disagree="point",
         yay="cheer", victory="cheer", stadium="cheer", charging="cheer",
         sorry="wave", sad="point", shy="wave", salute="wave",
         tilt="laugh", confused="point", dizzy="laugh",
         eyeroll="laugh", facepalm="laugh",
         robot="dance2", lol="laugh", haha="laugh",
+        run="wave", stop="wave", sleep="sit", think="point",
+        clap="cheer", bow="wave", flex="cheer",
     }
     local builtinName = builtinMap[emoteName]
 
@@ -2085,12 +2090,21 @@ local function moveToPosition(targetPos, followMode)
                     humanoid.Jump = true
                 end
                 humanoid:MoveTo(wp.Position)
-                local finished = humanoid.MoveToFinished:Wait(3)
-                if not finished then break end
+                -- Таймаут 2с вместо 3с + проверка флагов каждые 0.1с
+                local waited2 = 0
+                local arrived = false
+                local conn2 = humanoid.MoveToFinished:Connect(function(r) arrived = r end)
+                while not arrived and waited2 < 2 do
+                    if followMode and not _isFollowing then break end
+                    if not followMode and not _isGoing then break end
+                    task.wait(0.1); waited2 = waited2 + 0.1
+                end
+                pcall(function() conn2:Disconnect() end)
+                if not arrived then break end
             end
         else
             humanoid:MoveTo(targetPos)
-            humanoid.MoveToFinished:Wait(3)
+            humanoid.MoveToFinished:Wait(2)
         end
     end)
     if not ok then
@@ -2137,9 +2151,13 @@ local function startFollowingPlayer(targetPlayer)
             local char = _followTarget and _followTarget.Character
             local targetRoot = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
             if targetRoot then
-                moveToPosition(targetRoot.Position, true)
+                -- Не идём если уже рядом (меньше 5 студ)
+                local myRoot2 = getLocalRootPart()
+                if myRoot2 and (myRoot2.Position - targetRoot.Position).Magnitude > 5 then
+                    moveToPosition(targetRoot.Position, true)
+                end
             end
-            task.wait(0.3)
+            task.wait(0.5)
         end
     end)
 end
@@ -2718,6 +2736,11 @@ end
 -- §HISTORY
 local ChatHistory = {}
 local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
+-- Очистка истории при выключении памяти
+local function clearAllHistory()
+    ChatHistory = {}
+    DirectChatHistory = {}
+end
 local MAX_HISTORY = 10
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -2726,13 +2749,16 @@ local MAX_HISTORY = 10
 -- Cooldown 60 сек на игрока. task.delay(5) гарантирует что все функции
 -- (enqueueChatItem, runChatQueue и др.) уже объявлены к моменту запуска.
 -- ═══════════════════════════════════════════════════════════════════════════
-local _worldReactCooldowns = {}
+local _worldReactCooldowns = {}  -- [userId..type] → os.clock()
 local WORLD_REACT_COOLDOWN  = 60
+local WORLD_REACT_STARE_CD  = 45  -- взгляд чуть короче
 
-local function _canWorldReact(userId)
-    local t = _worldReactCooldowns[userId]
-    if t and (os.clock() - t) < WORLD_REACT_COOLDOWN then return false end
-    _worldReactCooldowns[userId] = os.clock()
+local function _canWorldReact(userId, reactType)
+    local key = tostring(userId) .. (reactType or "")
+    local t = _worldReactCooldowns[key]
+    local cd = (reactType == "stare") and WORLD_REACT_STARE_CD or WORLD_REACT_COOLDOWN
+    if t and (os.clock() - t) < cd then return false end
+    _worldReactCooldowns[key] = os.clock()
     return true
 end
 -- (монитор запускается ниже после объявления runChatQueue)
@@ -2748,9 +2774,12 @@ local function detectLang(text)
     if not text or text == "" then return nil end
     local t = text:lower()
     local cyr = 0
-    for _ in t:gmatch("[\208-\209][\128-\191]") do cyr = cyr + 1 end
+    for _ in t:gmatch("[\xd0-\xd1][\x80-\xbf]") do cyr = cyr + 1 end do cyr = cyr + 1 end
     local lat = 0
-    for _ in t:gmatch("[a-z]+") do lat = lat + 1 end
+    -- Считаем только слова длиннее 2 букв (исключаем "a", "I", "ok", и т.п.)
+    for w in t:gmatch("[a-z]+") do
+        if #w > 2 then lat = lat + 1 end
+    end
     if cyr > 1 then return "RU" end
     if lat > 0 then return "EN" end
     return nil  -- не определили (эмодзи, цифры, одна буква)
@@ -2771,6 +2800,10 @@ end
 
 -- Безопасно добавить пару в историю и обрезать до лимита
 local function appendHistory(history, userMsg, assistantMsg)
+    if not history then return end
+    -- Не добавляем пустые сообщения в историю
+    if not userMsg or userMsg:match("^%s*$") then return end
+    if not assistantMsg or assistantMsg:match("^%s*$") then return end
     table.insert(history, { role = "user",      content = userMsg      })
     table.insert(history, { role = "assistant", content = assistantMsg })
     -- Обрезаем: каждая пара = 2 элемента, оставляем MAX_HISTORY пар
@@ -2898,6 +2931,7 @@ local function handleQueuedChat(item)
     table.insert(apiMessages, { role = "user", content = "[LANG:" .. langTag .. "] " .. userContent })
 
     local model = getModel(settings)
+    model = model and model:match("^%s*(.-)%s*$") or ""
     if model == "" then return end
 
     -- В экономном режиме max_tokens тоже уменьшаем (короткие ответы)
@@ -2987,12 +3021,12 @@ local function handleQueuedChat(item)
         return
     end
 
-    -- FIX: удаляем [NAME:...] теги из ответа ИИ если модель их нечаянно скопировала
-    -- Это надёжнее чем надеяться только на промпт
+    -- Trim whitespace и удаляем [NAME:...] теги из ответа ИИ
+    text = text:match("^%s*(.-)%s*$") or text
     text = text:gsub("%[NAME:[^%]]*%]%s*", "")
 
     -- v17: поворачиваемся к говорящему игроку (если CameraLook включён)
-    if item.player and item.player.Character then
+    if settings.CameraLook and item.player and item.player.Character then
         local pRoot = item.player.Character:FindFirstChild("HumanoidRootPart")
         if pRoot then
             smoothLookAt(pRoot.Position)
@@ -3032,9 +3066,9 @@ end
 -- §RUN_QUEUE
 local function runChatQueue(userId)
     local q = getChatQueue(userId)
-    if q.running then
-        return
-    end
+    if q.running then return end
+    -- Очередь пуста — нечего делать
+    if q.head > q.tail then return end
     q.running = true
     task.spawn(function()
         while true do
@@ -3106,7 +3140,7 @@ task.delay(5, function()
             local humState = hum and hum:GetState()
             local inAir    = humState == Enum.HumanoidStateType.Jumping
                           or humState == Enum.HumanoidStateType.Freefall
-            if inAir and not prevAir[uid] and _canWorldReact(uid) then
+            if inAir and not prevAir[uid] and _canWorldReact(uid, "jump") then
                 reacted = true
                 local name = p.DisplayName or p.Name
                 local msgs = {
@@ -3126,7 +3160,7 @@ task.delay(5, function()
             if not reacted then
                 local toUs = myPos - root.Position
                 local stareDist = toUs.Magnitude
-                if stareDist > 1 and _canWorldReact(uid) then
+                if stareDist > 1 and _canWorldReact(uid, "stare") then
                     if root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 then
                         local name = p.DisplayName or p.Name
                         local msgs = {
@@ -3174,6 +3208,9 @@ local function _watchPlayerDeath(p)
             while _deathConns[uid] and p.Character == char do
                 local r = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
                 if r then lastPos = r.Position end
+                -- Останавливаемся если humanoid мёртв
+                local h2 = char:FindFirstChildOfClass("Humanoid")
+                if not h2 or h2.Health <= 0 then break end
                 task.wait(0.5)
             end
         end)
@@ -3216,6 +3253,8 @@ end
 
 -- v17.5: Антиспам — один словарь на весь модуль
 local _lastMsgPerUser = {}
+local _floodLastBatch  = nil  -- глобальный флуд-протектор
+local _floodBatchCount = 0
 
 -- Main chat processing function
 -- §PROCESS_MSG
@@ -3259,17 +3298,19 @@ local function processChatMessage(player, rawMessage)
         local lastData = _lastMsgPerUser[player.UserId]
         local msgLower = rawMessage:lower():gsub("%s+", " "):match("^%s*(.-)%s*$")
         local nowTime = os.clock()
-        if lastData and lastData.text == msgLower and (nowTime - lastData.time) < 8 then
-            return -- то же сообщение в течение 8 секунд — игнорируем
+        if lastData and lastData.text == msgLower and (nowTime - lastData.time) < 12 then
+            return -- то же сообщение в течение 12 секунд — игнорируем
         end
         _lastMsgPerUser[player.UserId] = { text = msgLower, time = nowTime }
     end
 
     -- v17.5: ReactToMention — отвечаем даже без триггера если упомянули наш ник
     local msgLowerForMention = rawMessage:lower()
+    local _myNameLow = Players.LocalPlayer.Name:lower()
+    local _myDispLow = Players.LocalPlayer.DisplayName:lower()
     local mentionHit = settings.ReactToMention
-        and (msgLowerForMention:find(Players.LocalPlayer.Name:lower())
-          or msgLowerForMention:find(Players.LocalPlayer.DisplayName:lower()))
+        and (msgLowerForMention:find(_myNameLow, 1, true)
+          or msgLowerForMention:find(_myDispLow, 1, true))
 
     -- ВАЖНО: passesTrigger проверяем на оригинальном сообщении ДО нормализации
     if not mentionHit and not passesTrigger(settings, rawMessage) then
