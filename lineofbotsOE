@@ -52,16 +52,70 @@ local LOB_GEMINI_FILE = "lob_geminikey.txt"
 local LOB_SETTINGS_FILE = "lob_settings.txt"
 local LOB_MODEL_FILE  = "lob_model.txt"
 local function saveSettings()
-    pcall(function() if writefile then writefile(LOB_SETTINGS_FILE, "AutoReply=" .. tostring(ClientSettings and ClientSettings.AutoReply or false)) end end)
+    pcall(function()
+        if not writefile then return end
+        local cs = ClientSettings or {}
+        local lines = {
+            "AutoReply="      .. tostring(cs.AutoReply      or false),
+            "MemoryEnabled="  .. tostring(cs.MemoryEnabled  ~= false),
+            "ActionsEnabled=" .. tostring(cs.ActionsEnabled ~= false),
+            "WebSearch="      .. tostring(cs.WebSearch      or false),
+            "WorldReactions=" .. tostring(cs.WorldReactions ~= false),
+            "AntiSpam="       .. tostring(cs.AntiSpam       ~= false),
+            "ReactToMention=" .. tostring(cs.ReactToMention ~= false),
+            "PlayerAwareness=".. tostring(cs.PlayerAwareness~= false),
+            "PlaceAwareness=" .. tostring(cs.PlaceAwareness ~= false),
+            "CameraLook="     .. tostring(cs.CameraLook     ~= false),
+            "UsePlayerName="  .. tostring(cs.UsePlayerName  ~= false),
+            "FollowConfirm="  .. tostring(cs.FollowConfirm  ~= false),
+            "TokenEconomy="   .. tostring(cs.TokenEconomy   or false),
+            "PerUserMemory="  .. tostring(cs.PerUserMemory  or false),
+            "Temperature="    .. tostring(cs.Temperature    or 0.7),
+            "MaxTokens="      .. tostring(cs.MaxTokens      or 1024),
+            "PersonalityId="  .. tostring(cs.PersonalityId  or "Friendly"),
+        }
+        writefile(LOB_SETTINGS_FILE, table.concat(lines, "\n"))
+    end)
 end
 local function loadSettings()
     pcall(function()
         if not readfile then return end
         local ok, data = pcall(readfile, LOB_SETTINGS_FILE)
-        if not ok or not data then return end
-        if data:find("AutoReply=true") then
-            if ClientSettings then ClientSettings.AutoReply = true end
+        if not ok or not data or data == "" then return end
+        local cs = ClientSettings
+        if not cs then return end
+        local function getBool(key, default)
+            local v = data:match(key .. "=(%a+)")
+            if v == "true" then return true end
+            if v == "false" then return false end
+            return default
         end
+        local function getNum(key, default)
+            local v = data:match(key .. "=([%d%.]+)")
+            return v and tonumber(v) or default
+        end
+        local function getStr(key, default)
+            local v = data:match(key .. "=([^\n]+)")
+            return v and v:match("^%s*(.-)%s*$") or default
+        end
+        cs.AutoReply       = getBool("AutoReply",       false)
+        cs.MemoryEnabled   = getBool("MemoryEnabled",   true)
+        cs.ActionsEnabled  = getBool("ActionsEnabled",  true)
+        cs.WebSearch       = getBool("WebSearch",       false)
+        cs.WorldReactions  = getBool("WorldReactions",  true)
+        cs.AntiSpam        = getBool("AntiSpam",        true)
+        cs.ReactToMention  = getBool("ReactToMention",  true)
+        cs.PlayerAwareness = getBool("PlayerAwareness", true)
+        cs.PlaceAwareness  = getBool("PlaceAwareness",  true)
+        cs.CameraLook      = getBool("CameraLook",      true)
+        cs.UsePlayerName   = getBool("UsePlayerName",   true)
+        cs.FollowConfirm   = getBool("FollowConfirm",   true)
+        cs.TokenEconomy    = getBool("TokenEconomy",    false)
+        cs.PerUserMemory   = getBool("PerUserMemory",   false)
+        cs.Temperature     = getNum("Temperature",      0.7)
+        cs.MaxTokens       = getNum("MaxTokens",        1024)
+        local pid = getStr("PersonalityId", "Friendly")
+        if pid and pid ~= "" then cs.PersonalityId = pid end
     end)
 end
 local function saveModel(model)
@@ -922,8 +976,9 @@ function GeminiProvider:chatCompletions(payload)
             -- Убираем все служебные теги из user text
             userText = userText:gsub("%[LANG:[A-Z]+%]%s*", "")
             userText = userText:gsub("%[NAME:[^%]]+%]%s*", "")
-            -- [SYSTEM: ...] world-events: не путаем с командами пользователя
-            -- Оставляем текст как есть — ИИ сам поймёт по system prompt
+            -- [SYSTEM: ...] world-events: Gemini видит как user message
+            -- Очищаем метки чтобы Gemini не путался, сохраняем смысл
+            userText = userText:gsub("%[SYSTEM:%s*", ""):gsub("%]%s*$", "")
             userText = userText:match("^%s*(.-)%s*$") or userText
             if userText == "" then userText = "..." end
             table.insert(contents, { role = "user", parts = {{ text = userText }} })
@@ -969,13 +1024,21 @@ function GeminiProvider:chatCompletions(payload)
     -- Gemini 3.x (preview) модели используют reasoning/thinking
     -- thinkingConfig нужен чтобы контролировать глубину reasoning
     -- "low" = минимум (быстро), без него модель может думать очень долго
-    local isGemini3 = model:find("^gemini%-3") ~= nil
+    -- thinking доступен в 2.5+ и 3.x preview моделях
+    local isGemini3 = (model:find("^gemini%-3") or model:find("2%.5") or model:find("2%.0%-flash%-think")) ~= nil
     local genConfig = {
         maxOutputTokens = payload.max_tokens or 300,
         temperature = payload.temperature or 0.8,
     }
     if isGemini3 then
-        genConfig.thinkingConfig = { thinkingBudget = 512 }  -- ограничиваем thinking для скорости
+        -- thinkingBudget = 0 отключает reasoning (мгновенный ответ для чата)
+        -- Только если вопрос сложный (длинный промпт) — даём немного thinking
+        local totalPromptLen = 0
+        for _, m in ipairs(payload.messages or {}) do
+            totalPromptLen = totalPromptLen + #tostring(m.content or "")
+        end
+        local budget = totalPromptLen > 2000 and 256 or 0
+        genConfig.thinkingConfig = { thinkingBudget = budget }
     end
 
     local body = {
@@ -1021,9 +1084,16 @@ function GeminiProvider:chatCompletions(payload)
         return nil, "NoGeminiCandidates"
     end
     local cand = cands[1]
-    -- Safety block: candidate есть но без content
+    -- Safety block
     if cand.finishReason == "SAFETY" or cand.finishReason == "RECITATION" then
         return nil, "GeminiFiltered:" .. tostring(cand.finishReason)
+    end
+    -- MAX_TOKENS: ответ обрезан — принимаем что есть (не ошибка)
+    -- OTHER/BLOCKLIST: логируем но продолжаем
+    if cand.finishReason == "OTHER" or cand.finishReason == "BLOCKLIST" then
+        if ClientSettings.Debug then
+            print("[LOB] Gemini finishReason: " .. tostring(cand.finishReason))
+        end
     end
     local parts = cand.content and cand.content.parts
     if not parts or #parts == 0 then return nil, "NoGeminiParts" end
@@ -2955,6 +3025,8 @@ local function handleQueuedChat(item)
     -- world reactions (item.isWorld) работают даже без AutoReply — только Enabled нужен
     if not settings.Enabled then return end
     if not item.isWorld and not settings.AutoReply then return end
+    -- Guard: пустое сообщение не обрабатываем
+    if not item.cleaned or item.cleaned:match("^%s*$") then return end
 
     -- history = nil если память выключена
     local history = getHistory(settings, item.userId)
@@ -3031,9 +3103,9 @@ local function handleQueuedChat(item)
             searchDone = true
         end)
         local sw = 0
-        while not searchDone and sw < 8 do
-            task.wait(0.5)
-            sw = sw + 0.5
+        while not searchDone and sw < 5 do
+            task.wait(0.3)
+            sw = sw + 0.3
         end
         local sr = searchResult or ""
         if sr ~= "" and not sr:find("не найдены") and not sr:find("Ошибка") then
@@ -3098,7 +3170,7 @@ local function handleQueuedChat(item)
     -- Таймаут: Gemini 3.x preview с thinking → 60 сек
     -- Gemini 2.5 flash/lite → 45 сек, Groq → 20 сек
     local isGemini = model:find("^gemini")
-    local isGemini3x = model:find("^gemini%-3")
+    local isGemini3x = model:find("^gemini%-3") or model:find("2%.5") or model:find("2%.5%-pro")
     local timeoutSec = isGemini3x and 60 or (isGemini and 45 or 20)
     local text, err
     do
@@ -3139,9 +3211,13 @@ local function handleQueuedChat(item)
         return
     end
 
-    -- Trim whitespace и удаляем [NAME:...] теги из ответа ИИ
+    -- Trim + очистка служебных блоков из ответа ИИ
     text = text:match("^%s*(.-)%s*$") or text
     text = text:gsub("%[NAME:[^%]]*%]%s*", "")
+    -- compound-beta добавляет [Sources] блок в конце — убираем
+    text = text:gsub("%\n?%[Sources?%].-$", "")
+    text = text:gsub("%\n?Sources?:%s*%d+%..+$", "")
+    text = text:match("^%s*(.-)%s*$") or text
 
     -- v17: поворачиваемся к говорящему игроку (если CameraLook включён)
     if settings.CameraLook and item.player and item.player.Character then
@@ -3848,10 +3924,12 @@ local Themes = {
 }
 local THEME = Themes[ClientSettings.Theme] or Themes.LineOfBots
 
-local TWEEN_FAST = TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-local TWEEN_MED = TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-local TWEEN_SLOW = TweenInfo.new(0.38, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-local TWEEN_TAB = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+local TWEEN_FAST = TweenInfo.new(0.14, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+local TWEEN_MED  = TweenInfo.new(0.26, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+local TWEEN_SLOW = TweenInfo.new(0.40, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+local TWEEN_TAB  = TweenInfo.new(0.22, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+local TWEEN_SPRING = TweenInfo.new(0.45, Enum.EasingStyle.Back,        Enum.EasingDirection.Out)
+local TWEEN_BOUNCE = TweenInfo.new(0.38, Enum.EasingStyle.Bounce,      Enum.EasingDirection.Out)
 
 local function tween(o, info, props)
     local t = TweenService:Create(o, info, props)
@@ -4207,12 +4285,15 @@ local function pushNotificationInternal(titleText, bodyText, accent, actions)
     
     local function close()
         if not wrapper.Parent then return end
-        local exitInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
-        TweenService:Create(card, exitInfo, { Position = UDim2.new(1.15, 0, 0, 0) }):Play()
-        task.delay(0.2, function()
-            local collapseInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-            TweenService:Create(wrapper, collapseInfo, { Size = UDim2.new(1, 0, 0, 0) }):Play()
-            task.delay(0.25, function() if wrapper.Parent then wrapper:Destroy() end end)
+        -- улетает вправо + fade out
+        local exitInfo = TweenInfo.new(0.24, Enum.EasingStyle.Exponential, Enum.EasingDirection.In)
+        TweenService:Create(card, exitInfo, { Position = UDim2.new(1.1, 0, 0, 0) }):Play()
+        TweenService:Create(card, TweenInfo.new(0.20, Enum.EasingStyle.Linear, Enum.EasingDirection.In),
+            { BackgroundTransparency = 1 }):Play()
+        task.delay(0.22, function()
+            TweenService:Create(wrapper, TweenInfo.new(0.18, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out),
+                { Size = UDim2.new(1, 0, 0, 0) }):Play()
+            task.delay(0.18, function() if wrapper.Parent then wrapper:Destroy() end end)
         end)
     end
 
@@ -4267,9 +4348,15 @@ local function pushNotificationInternal(titleText, bodyText, accent, actions)
     end
 
     task.defer(function()
-        local openInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-        TweenService:Create(wrapper, openInfo, { Size = UDim2.new(1, 0, 0, cardHeight + 8) }):Play()
-        TweenService:Create(card, openInfo, { Position = UDim2.new(0, 0, 0, 0) }):Play()
+        -- wrapper разворачивается вниз
+        local expandInfo = TweenInfo.new(0.28, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+        TweenService:Create(wrapper, expandInfo, { Size = UDim2.new(1, 0, 0, cardHeight + 8) }):Play()
+        -- карточка вылетает с пружиной, начинает прозрачной
+        card.BackgroundTransparency = 1
+        local slideInfo = TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        TweenService:Create(card, slideInfo, { Position = UDim2.new(0, 0, 0, 0) }):Play()
+        TweenService:Create(card, TweenInfo.new(0.18, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+            { BackgroundTransparency = 0 }):Play()
     end)
     
     if not hasActions then
@@ -4527,12 +4614,12 @@ local function makeToggle(parent, text, initialState, callback)
         state = not state
         if state then
             startSwitchAurora()
-            tween(knob, TWEEN_MED, { Position = UDim2.new(0, 25, 0.5, 0) })
+            tween(knob, TWEEN_SPRING, { Position = UDim2.new(0, 25, 0.5, 0) })
             tween(sideAccent, TWEEN_MED, { BackgroundTransparency = 0 })
             TweenService:Create(switchBg:FindFirstChildOfClass("UIStroke"), TWEEN_MED, { Transparency = 0.75 }):Play()
         else
             stopSwitchAurora()
-            tween(knob, TWEEN_MED, { Position = UDim2.new(0, 3, 0.5, 0) })
+            tween(knob, TWEEN_SPRING, { Position = UDim2.new(0, 3, 0.5, 0) })
             tween(sideAccent, TWEEN_MED, { BackgroundTransparency = 1 })
             TweenService:Create(switchBg:FindFirstChildOfClass("UIStroke"), TWEEN_MED, { Transparency = 0.92 }):Play()
         end
@@ -5264,7 +5351,7 @@ local function switchTab(name)
         local newOrder = newBtn.LayoutOrder or 0
         dir = (newOrder >= oldOrder) and 1 or -1
     end
-    local slideOffset = 16
+    local slideOffset = 22
     local inStartPos = UDim2.new(0, slideOffset * dir, 0, 0)
     local outEndPos = UDim2.new(0, -slideOffset * dir, 0, 0)
 
@@ -5284,26 +5371,34 @@ local function switchTab(name)
     isTabSwitching = true
     pendingTabName = nil
 
-    -- Animate OLD Frame (Exit)
+    -- Animate OLD Frame (Exit) — slide + fade + slight shrink
     if oldFrame then
         cancelFrameTweens(oldFrame)
         oldFrame.Visible = true
         oldFrame.ZIndex = 1
         oldFrame.Position = basePos
         oldFrame.GroupTransparency = 0
+        local scOld = getTabScale(oldFrame)
+        if scOld then scOld.Scale = 1 end
         local tOut = tween(oldFrame, TWEEN_TAB, { Position = outEndPos, GroupTransparency = 1 })
         trackFrameTween(oldFrame, tOut)
+        if scOld then tween(scOld, TWEEN_TAB, { Scale = 0.97 }) end
     end
 
-    -- Animate NEW Frame (Enter)
+    -- Animate NEW Frame (Enter) — slide + fade
     if newFrame then
         cancelFrameTweens(newFrame)
         newFrame.Visible = true
         newFrame.ZIndex = 2
         newFrame.Position = inStartPos
         newFrame.GroupTransparency = 1
+        local sc = getTabScale(newFrame)
+        if sc then sc.Scale = 0.97 end
         local tIn = tween(newFrame, TWEEN_TAB, { Position = basePos, GroupTransparency = 0 })
         trackFrameTween(newFrame, tIn)
+        if sc then
+            tween(sc, TWEEN_TAB, { Scale = 1 })
+        end
     end
 
     -- Cleanup
@@ -6202,8 +6297,8 @@ makeToggleRow(
     ClientSettings.MemoryEnabled,
     function(state)
         ClientSettings.MemoryEnabled = state
+        saveSettings()
         if not state then
-            -- Стираем ВСЮ историю при выключении памяти
             for k in pairs(ChatHistory) do ChatHistory[k] = nil end
             for i = #DirectChatHistory, 1, -1 do DirectChatHistory[i] = nil end
         end
@@ -6218,6 +6313,7 @@ makeToggleRow(
     ClientSettings.PerUserMemory,
     function(state)
         ClientSettings.PerUserMemory = state
+        saveSettings()
         -- При смене режима — сбрасываем историю чтобы не мешать контексты
         for k in pairs(ChatHistory) do ChatHistory[k] = nil end
     end
@@ -6242,6 +6338,7 @@ makeToggleRow(
     ClientSettings.UsePlayerName ~= false,
     function(state)
         ClientSettings.UsePlayerName = state
+        saveSettings()
     end
 )
 
@@ -6251,7 +6348,7 @@ makeToggleRow(
     "🔇 Антиспам",
     "Игнорировать если игрок отправляет одно и то же сообщение подряд.",
     ClientSettings.AntiSpam ~= false,
-    function(state) ClientSettings.AntiSpam = state end
+    function(state) ClientSettings.AntiSpam = state; saveSettings() end
 )
 
 -- v17.5: Авто-реакция на упоминание ника бота
@@ -6260,7 +6357,7 @@ makeToggleRow(
     "📢 Реакция на имя",
     "Бот реагирует когда кто-то упоминает его ник в чате, даже без триггера.",
     ClientSettings.ReactToMention ~= false,
-    function(state) ClientSettings.ReactToMention = state end
+    function(state) ClientSettings.ReactToMention = state; saveSettings() end
 )
 
 -- v18: Реакции на мир
@@ -6269,7 +6366,7 @@ makeToggleRow(
     "👀 Реакции на мир",
     "Бот замечает прыжки и взгляды игроков рядом и реагирует сам. Раз в минуту на каждого игрока.",
     ClientSettings.WorldReactions ~= false,
-    function(state) ClientSettings.WorldReactions = state end
+    function(state) ClientSettings.WorldReactions = state; saveSettings() end
 )
 
 -- v16: Команды и эмоции
@@ -6280,6 +6377,7 @@ makeToggleRow(
     ClientSettings.ActionsEnabled ~= false,
     function(state)
         ClientSettings.ActionsEnabled = state
+        saveSettings()
         if not state then
             stopFollowing()
             stopCurrentEmote()
@@ -6295,6 +6393,7 @@ makeToggleRow(
     ClientSettings.WebSearch == true,
     function(state)
         ClientSettings.WebSearch = state
+        saveSettings()
     end
 )
 
@@ -6306,6 +6405,7 @@ makeToggleRow(
     ClientSettings.TokenEconomy == true,
     function(state)
         ClientSettings.TokenEconomy = state
+        saveSettings()
     end
 )
 
@@ -6317,6 +6417,7 @@ makeToggleRow(
     ClientSettings.PlaceAwareness ~= false,
     function(state)
         ClientSettings.PlaceAwareness = state
+        saveSettings()
         _placeInfo = nil
     end
 )
@@ -6329,6 +6430,7 @@ makeToggleRow(
     ClientSettings.PlayerAwareness ~= false,
     function(state)
         ClientSettings.PlayerAwareness = state
+        saveSettings()
     end
 )
 
@@ -6340,6 +6442,7 @@ makeToggleRow(
     ClientSettings.CameraLook ~= false,
     function(state)
         ClientSettings.CameraLook = state
+        saveSettings()
     end
 )
 
@@ -6358,10 +6461,11 @@ local groqModels = {
     "moonshotai/kimi-k2-instruct-0905",            -- Kimi K2             | 200 t/s  | диалог
     "qwen/qwen3-32b",                              -- Qwen3 32B           | 400 t/s  | логика
     -- ── GEMINI (Google) ──────────────────────────────────────────────────
-    "gemini-2.5-flash-lite",                       -- Gemini 2.5 Flash Lite | быстрый, лёгкий | Google
-    "gemini-2.5-flash",                            -- Gemini 2.5 Flash    | reasoning | Google
-    "gemini-3.1-flash-lite-preview",               -- Gemini 3.1 Flash Lite | новейший, лёгкий | Google
-    "gemini-3-flash-preview",                      -- Gemini 3 Flash       | новейший | Google
+    "gemini-2.5-flash-preview-04-17",              -- Gemini 2.5 Flash    | reasoning | Google
+    "gemini-2.5-pro-preview-03-25",                -- Gemini 2.5 Pro      | топ | Google
+    "gemini-3.0-flash-preview",                    -- Gemini 3.0 Flash    | новейший | Google
+    "gemini-3.1-flash-lite-preview",               -- Gemini 3.1 Flash Lite | новейший лёгкий | Google
+    "gemini-3-flash-preview",                      -- Gemini 3 Flash      | новейший | Google
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
@@ -6786,6 +6890,7 @@ do
     end)
     makeToggleRow(advancedScroll, "Подтверждение следования", "Включено: выскакивает кнопка «Идти/Отказать» перед тем как идти. Выключено: бот идёт сразу без вопросов.", ClientSettings.FollowConfirm, function(state)
         ClientSettings.FollowConfirm = state
+        saveSettings()
     end)
 
     local _, followModeCtrl = makeRightControlRow(advancedScroll, "Режим следования", "Pathfinding обходит стены; Linear — прямая линия.", 200)
@@ -10127,22 +10232,26 @@ local function minimizeWindow()
     -- Сохраняем позицию windowHolder (не window) чтобы не было смещения при восстановлении
     local _savedHolderPos = windowHolder.Position
 
-    tween(window, TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
-        Size = UDim2.new(0, 0, 0, 0),
+    -- Сжимаем окно к центру с fade
+    local cx = windowHolder.AbsolutePosition.X + windowHolder.AbsoluteSize.X * 0.5
+    local cy = windowHolder.AbsolutePosition.Y + windowHolder.AbsoluteSize.Y * 0.5
+    window.AnchorPoint = Vector2.new(0.5, 0.5)
+    window.Position = UDim2.new(0.5, 0, 0.5, 0)
+    tween(window, TweenInfo.new(0.22, Enum.EasingStyle.Exponential, Enum.EasingDirection.In), {
+        Size = UDim2.new(0, winW * 0.04, 0, winH * 0.04),
         BackgroundTransparency = 1,
     })
-    task.delay(0.28, function()
-        -- Скрываем windowHolder целиком — он перехватывает клики даже невидимый
+    task.delay(0.22, function()
         windowHolder.Visible = false
         window.Size = UDim2.new(0, winW, 0, winH)
+        window.AnchorPoint = Vector2.new(0, 0)
+        window.Position = UDim2.new(0, 0, 0, 0)
         window.BackgroundTransparency = _savedWinBgT
-        -- Показываем круг
         circleBtn.Visible = true
         circleBtn.Size = UDim2.new(0, 0, 0, 0)
-        tween(circleBtn, TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        tween(circleBtn, TweenInfo.new(0.40, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
             Size = UDim2.new(0, CIRCLE_SIZE, 0, CIRCLE_SIZE),
         })
-        -- Восстанавливаем позицию holder на случай если сдвинулся
         windowHolder.Position = _savedHolderPos
     end)
 end
@@ -10150,20 +10259,27 @@ end
 local function restoreWindow()
     if not isMinimized then return end
     isMinimized = false
-    tween(circleBtn, TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+    tween(circleBtn, TweenInfo.new(0.16, Enum.EasingStyle.Exponential, Enum.EasingDirection.In), {
         Size = UDim2.new(0, 0, 0, 0),
     })
-    task.delay(0.2, function()
+    task.delay(0.16, function()
         circleBtn.Visible = false
         circleBtn.Size = UDim2.new(0, CIRCLE_SIZE, 0, CIRCLE_SIZE)
-        -- Показываем windowHolder и анимируем window внутри него
         windowHolder.Visible = true
-        window.Size = UDim2.new(0, 0, 0, 0)
+        -- Старт: маленькое + прозрачное, из центра
+        window.AnchorPoint = Vector2.new(0.5, 0.5)
+        window.Position = UDim2.new(0.5, 0, 0.5, 0)
+        window.Size = UDim2.new(0, winW * 0.06, 0, winH * 0.06)
         window.BackgroundTransparency = 1
-        tween(window, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        -- Back spring раскрытие
+        tween(window, TweenInfo.new(0.48, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
             Size = UDim2.new(0, winW, 0, winH),
             BackgroundTransparency = _savedWinBgT,
         })
+        task.delay(0.48, function()
+            window.AnchorPoint = Vector2.new(0, 0)
+            window.Position = UDim2.new(0, 0, 0, 0)
+        end)
     end)
 end
 
