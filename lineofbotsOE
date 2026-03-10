@@ -201,6 +201,7 @@ local ClientSettings = {
     AdminUserIds = {},
     FollowingEnabled = true,
     FollowMode = "Pathfinding",
+    FollowConfirm = true,  -- показывать подтверждение перед следованием
     AntiSpam = true,         -- v17.5: игнорировать одинаковые сообщения подряд
     ReactToMention = true,   -- v17.5: реагировать на упоминание своего ника
     WorldReactions = true,   -- v18: реагировать на прыжки/взгляды игроков рядом
@@ -1371,7 +1372,7 @@ local function makeSystemPrompt(settings)
             -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
             system = system
                 .. "\n\nDO_TAGS(start of reply,1 per msg,silent):"
-                .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop/прекрати/хватит/не иди"
+                .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop\n[DO:clap]=хлопай [DO:bow]=поклонись [DO:think]=задумайся [DO:sleep]=спи [DO:cry]=плачь [DO:angry]=злись [DO:excited]=возбуждённость [DO:celebrate]=празднуй [DO:nervous]=нервничай [DO:greet]=поздоровайся"
                 .. "\n[DO:jump]=прыгни/jump [DO:jump2]=2x [DO:jump3]=3x [DO:jump5]=5x [DO:jump10]=10x"
                 .. "\n[DO:spin]=крутись/spin(3с) [DO:spin5]=5с [DO:spin10]=10с"
                 .. "\n[DO:dance]=танцуй/dance [DO:robot]=robot"
@@ -1392,6 +1393,7 @@ local function makeSystemPrompt(settings)
                 .. "\nMOVEMENT:"
                 .. "\n[DO:goto]   подойди/come here/иди сюда/иди ко мне — ONE-TIME walk, then stop"
                 .. "\n[DO:follow] иди за мной/follow me/следуй — follow CONTINUOUSLY"
+                .. "\n[DO:clap]/[DO:bow]/[DO:think]/[DO:sleep]/[DO:cry]/[DO:angry]/[DO:excited]/[DO:celebrate]/[DO:nervous]/[DO:greet]/[DO:surprised]/[DO:tired]/[DO:bored]/[DO:happy] — эмоции"
                 .. "\n[DO:stop]   стой/stop/stay/прекрати/хватит/не иди/перестань — stop all movement"
                 .. "\n!! 'подойди'/'come here' = ALWAYS [DO:goto], never follow"
                 .. "\n"
@@ -2295,7 +2297,15 @@ end
 local ACTION_HANDLERS = {
     -- ── Движение ──────────────────────────────────────────────────────────
     goto     = function(p) gotoPlayer(p) end,
-    follow   = function(p) startFollowingPlayer(p) end,
+    follow   = function(p)
+        if ClientSettings.FollowConfirm and requestFollow then
+            -- Показываем подтверждение через UI-нотификацию
+            requestFollow(p)
+        else
+            -- Сразу идём без подтверждения
+            startFollowingPlayer(p)
+        end
+    end,
     stop     = function(_) stopFollowing() end,
     -- ── Прыжки (1-10) ─────────────────────────────────────────────────────
     jump     = function(_) doJump(1) end,
@@ -2357,6 +2367,32 @@ local ACTION_HANDLERS = {
     point    = function(_) playEmote("point",  3) end,  -- ВСТРОЕН
     sit      = function(_) playEmote("sit",   nil) end, -- ВСТРОЕН, бесконечно
     -- ── Рагдолл ───────────────────────────────────────────────────────────
+
+    -- ── Новые анимации ────────────────────────────────────────────────────
+    clap     = function(_) playEmote("cheer",   3) end,
+    bow      = function(_) playEmote("wave",    3) end,
+    flex     = function(_) playEmote("cheer",   4) end,
+    think    = function(_) playEmote("tilt",    4) end,
+    sleep    = function(_) playEmote("sit",     8) end,
+    cry      = function(_) playEmote("sad",     5) end,
+    angry    = function(_) playEmote("shrug",   3) end,
+    bored    = function(_) playEmote("tilt",    4) end,
+    excited  = function(_)
+        local v = {"cheer","dance","dance2"}
+        playEmote(v[math.random(1,#v)], 5)
+    end,
+    celebrate = function(_)
+        local v = {"cheer","stadium","dance"}
+        playEmote(v[math.random(1,#v)], 6)
+    end,
+    greet    = function(_)
+        local v = {"wave","hello","salute"}
+        playEmote(v[math.random(1,#v)], 4)
+    end,
+    nervous  = function(_) playEmote("shy",     4) end,
+    happy    = function(_) playEmote("cheer",   3) end,
+    surprised = function(_) playEmote("shrug",  3) end,
+    tired    = function(_) playEmote("sit",    nil) end,
 
 }
 
@@ -4193,18 +4229,18 @@ requestFollow = function(p)
         return 
     end
     
-    pushNotification("Follow Request", p.DisplayName .. " (@" .. p.Name .. ") wants you to follow them.", THEME.Accent, {
+    local pName = p and (p.DisplayName or p.Name) or "?"
+    pushNotification("Следовать?", pName .. " просит тебя идти за ним.", THEME.Accent, {
         {
-            Text = "Approve",
+            Text = "Идти",
             Primary = true,
             Callback = function()
-                FollowManager.Target = p
-                FollowManager.Active = true
-                pushNotification("Following", "Now following " .. p.DisplayName, THEME.Accent)
+                startFollowingPlayer(p)
+                pushNotification("Следую", "Иду за " .. pName, THEME.Accent)
             end
         },
         {
-            Text = "Decline",
+            Text = "Отказать",
             Callback = function() end
         }
     })
@@ -6664,6 +6700,9 @@ do
     local _ = makeToggleRow(advancedScroll, "Включить следование", "Позволять игрокам просить следовать за ними.", ClientSettings.FollowingEnabled, function(state)
         ClientSettings.FollowingEnabled = state
         if not state then stopFollow() end
+    end)
+    makeToggleRow(advancedScroll, "Подтверждение следования", "Включено: выскакивает кнопка «Идти/Отказать» перед тем как идти. Выключено: бот идёт сразу без вопросов.", ClientSettings.FollowConfirm, function(state)
+        ClientSettings.FollowConfirm = state
     end)
 
     local _, followModeCtrl = makeRightControlRow(advancedScroll, "Режим следования", "Pathfinding обходит стены; Linear — прямая линия.", 200)
