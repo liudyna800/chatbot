@@ -5244,9 +5244,24 @@ local function setTabButtonState(tabName, selected, instant)
         if label then label.TextColor3 = txtCol end
         if icon  then icon.ImageColor3  = iconCol end
     else
-        tween(btn, TWEEN_MED, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
-        if label then tween(label, TWEEN_MED, { TextColor3 = txtCol }) end
-        if icon  then tween(icon,  TWEEN_MED, { ImageColor3 = iconCol }) end
+        -- Быстрый цвет + небольшой scale-пульс при выборе
+        tween(btn, TWEEN_FAST, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
+        if label then tween(label, TWEEN_FAST, { TextColor3 = txtCol }) end
+        if icon  then tween(icon,  TWEEN_FAST, { ImageColor3 = iconCol }) end
+        -- Scale-пульс: при выборе кнопка быстро чуть вырастает и возвращается
+        if selected and container then
+            local sc = container:FindFirstChildOfClass("UIScale")
+            if not sc then
+                sc = Instance.new("UIScale")
+                sc.Scale = 1
+                sc.Parent = container
+            end
+            sc.Scale = 1
+            tween(sc, TweenInfo.new(0.10, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), { Scale = 1.12 })
+            task.delay(0.10, function()
+                tween(sc, TweenInfo.new(0.20, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.0 })
+            end)
+        end
     end
 end
 
@@ -10232,16 +10247,14 @@ local function minimizeWindow()
     -- Сохраняем позицию windowHolder (не window) чтобы не было смещения при восстановлении
     local _savedHolderPos = windowHolder.Position
 
-    -- Сжимаем окно к центру с fade
-    local cx = windowHolder.AbsolutePosition.X + windowHolder.AbsoluteSize.X * 0.5
-    local cy = windowHolder.AbsolutePosition.Y + windowHolder.AbsoluteSize.Y * 0.5
+    -- Сжимаем окно к центру — Back In (слегка вырастает перед тем как схлопнуться)
     window.AnchorPoint = Vector2.new(0.5, 0.5)
     window.Position = UDim2.new(0.5, 0, 0.5, 0)
-    tween(window, TweenInfo.new(0.22, Enum.EasingStyle.Exponential, Enum.EasingDirection.In), {
+    tween(window, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
         Size = UDim2.new(0, winW * 0.04, 0, winH * 0.04),
         BackgroundTransparency = 1,
     })
-    task.delay(0.22, function()
+    task.delay(0.42, function()
         windowHolder.Visible = false
         window.Size = UDim2.new(0, winW, 0, winH)
         window.AnchorPoint = Vector2.new(0, 0)
@@ -10284,7 +10297,46 @@ local function restoreWindow()
 end
 
 minimizeBtn.MouseButton1Click:Connect(minimizeWindow)
-circleBtn.MouseButton1Click:Connect(restoreWindow)
+
+-- circleBtn: различаем drag и tap
+-- Если палец/мышь сдвинулся >8px — это drag, НЕ открываем окно
+do
+    local _circleDragThreshold = 8
+    local _circleDownPos = nil
+    local _circleDidDrag = false
+
+    circleBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            _circleDownPos = input.Position
+            _circleDidDrag = false
+        end
+    end)
+
+    circleBtn.InputChanged:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch)
+            and _circleDownPos then
+            local dx = input.Position.X - _circleDownPos.X
+            local dy = input.Position.Y - _circleDownPos.Y
+            if math.sqrt(dx*dx + dy*dy) > _circleDragThreshold then
+                _circleDidDrag = true
+            end
+        end
+    end)
+
+    circleBtn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            if not _circleDidDrag then
+                restoreWindow()
+            end
+            _circleDownPos = nil
+            _circleDidDrag = false
+        end
+    end)
+end
+
 makeDraggable(circleBtn)
 
 gui.Destroying:Connect(function()
