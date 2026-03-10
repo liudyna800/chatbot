@@ -5261,7 +5261,7 @@ end
     local perceptionTabBtn = makeTabButton("Восприятие", "rbxassetid://7743872758")
     local securityTabBtn = makeTabButton("Модерация", "rbxassetid://7734056411")
     local advancedTabBtn = makeTabButton("Настройки", "rbxassetid://7734058803")
-    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7733772202")
+    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://7733771900")
     
     -- Tabs are permanent categories now, so no hiding logic needed.
 
