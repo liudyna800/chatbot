@@ -5260,7 +5260,7 @@ end
     local perceptionTabBtn = makeTabButton("Восприятие", "rbxassetid://7743872758")
     local securityTabBtn = makeTabButton("Модерация", "rbxassetid://7734056411")
     local advancedTabBtn = makeTabButton("Настройки", "rbxassetid://7734058803")
-    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://6031094667")
+    local chatTestTabBtn = makeTabButton("Чат с ИИ", "rbxassetid://4516313742")
     
     -- Tabs are permanent categories now, so no hiding logic needed.
 
@@ -6248,6 +6248,7 @@ do
     
     local modelDropdown = makeDropdown(ctrl, groqModels, currentModel or "llama-3.1-8b-instant", function(val)
         ClientSettings.Models.groq = val
+        saveSettings()  -- сохраняем выбранную модель на диск
     end)
 end
 
