@@ -58,7 +58,7 @@ local ClientSettings = {
         groq = "llama-3.1-8b-instant",
     },
     Temperature = 0.7,
-    MaxTokens = 120,
+    MaxTokens = 512,
     PersonalityId = "Friendly",
     CustomSystemPrompt = "",
     Trigger = {
@@ -77,7 +77,8 @@ local ClientSettings = {
     MaxMessagesPerSecond = 10,
     MaxQueuePerUser = 10,
     AutoReply = false,
-    PerUserMemory = false, -- New: Separate history per user
+    PerUserMemory = false, -- Separate history per user (works only if MemoryEnabled=true)
+    MemoryEnabled = true,  -- Включена ли память вообще
     BlacklistUserIds = {},
     Blacklist = {
         Permanent = {},
@@ -779,13 +780,34 @@ end
 -- Chat History Storage
 local ChatHistory = {}
 local DirectChatHistory = {} -- История только для вкладки "Чат с ИИ"
-local MAX_HISTORY = 10 -- Keep last 10 messages context
+-- MAX_HISTORY = количество ПАР сообщений (user+assistant) которые хранятся
+-- Итого сообщений в API = MAX_HISTORY * 2
+local MAX_HISTORY = 10
 
+-- Безопасно добавить пару в историю и обрезать до лимита
+local function appendHistory(history, userMsg, assistantMsg)
+    table.insert(history, { role = "user",      content = userMsg      })
+    table.insert(history, { role = "assistant", content = assistantMsg })
+    -- Обрезаем: каждая пара = 2 элемента, оставляем MAX_HISTORY пар
+    local maxItems = MAX_HISTORY * 2
+    while #history > maxItems do
+        table.remove(history, 1)
+    end
+end
+
+-- Возвращает таблицу истории для данного вызова.
+-- Если память выключена (MemoryEnabled=false) — возвращает nil.
+-- handleQueuedChat проверяет nil и не добавляет контекст.
 local function getHistory(settings, userId)
+    if not settings.MemoryEnabled then
+        return nil -- память выключена
+    end
     if settings.PerUserMemory then
+        -- Отдельная история для каждого игрока
         if not ChatHistory[userId] then ChatHistory[userId] = {} end
         return ChatHistory[userId]
     else
+        -- Одна общая история для всех
         if not ChatHistory["Global"] then ChatHistory["Global"] = {} end
         return ChatHistory["Global"]
     end
@@ -797,46 +819,40 @@ local function handleQueuedChat(item)
         return
     end
 
+    -- history = nil если память выключена
     local history = getHistory(settings, item.userId)
 
-    -- Prepare API payload
+    -- Собираем сообщения для API
     local apiMessages = {}
     table.insert(apiMessages, { role = "system", content = makeSystemPrompt(settings) })
 
-    for _, msg in ipairs(history) do
-        table.insert(apiMessages, msg)
+    -- Добавляем историю только если память включена
+    if history then
+        for _, msg in ipairs(history) do
+            table.insert(apiMessages, msg)
+        end
     end
 
-    -- Передаём только чистый текст без Username (@name): — это вызывало "I can't answer that"
-    -- потому что ИИ воспринимал это как скрипт/инструкцию
     table.insert(apiMessages, { role = "user", content = item.cleaned })
 
     local model = getModel(settings)
-    if model == "" then
-        -- Не пишем технические ошибки в игровой чат
-        return
-    end
+    if model == "" then return end
 
     local payload = {
-        model = model,
+        model       = model,
         temperature = tonumber(settings.Temperature) or 0.7,
-        max_tokens = tonumber(settings.MaxTokens) or 120,
-        messages = apiMessages,
+        max_tokens  = tonumber(settings.MaxTokens) or 512,
+        messages    = apiMessages,
     }
 
     local text, err = providerRouter:chatCompletions(payload)
-    if err then
-        -- НЕ пишем ошибки вида "400: Bad Request" в игровой чат
-        -- Только логируем молча. В директ-чате ошибки показываются отдельно.
+    if err or not text or text == "" then
         return
     end
 
-    -- Update History (Success)
-    table.insert(history, { role = "user", content = item.cleaned })
-    table.insert(history, { role = "assistant", content = text })
-
-    while #history > MAX_HISTORY do
-        table.remove(history, 1)
+    -- Сохраняем в историю только если память включена (history не nil)
+    if history then
+        appendHistory(history, item.cleaned, text)
     end
 
     sendBotMessage(text)
@@ -1005,14 +1021,16 @@ local function processChatMessage(player, rawMessage)
         return
     end
     
-    local queueKey = settings.PerUserMemory and player.UserId or "Global"
+    -- Ключ очереди всегда per-user: каждый игрок имеет свою очередь обработки
+    -- (независимо от настроек памяти — иначе сообщения разных игроков блокируют друг друга)
+    local queueKey = player.UserId
     local maxQueue = tonumber(settings.MaxQueuePerUser) or 3
     if maxQueue < 1 then maxQueue = 1 end
     local queued = enqueueChatItem(queueKey, {
-        userId = player.UserId,
+        userId      = player.UserId,
         displayName = player.DisplayName,
-        name = player.Name,
-        cleaned = cleaned,
+        name        = player.Name,
+        cleaned     = cleaned,
     }, maxQueue)
     if queued then
         runChatQueue(queueKey)
@@ -3299,13 +3317,32 @@ autoReplyToggle = makeToggleRow(
         updateChatListening()
     end
 )
+
+-- Тогл включения памяти (главный)
+makeToggleRow(
+    automation,
+    "Включить память",
+    "ИИ помнит предыдущие сообщения в разговоре. Если выключено — каждый ответ без контекста.",
+    ClientSettings.MemoryEnabled,
+    function(state)
+        ClientSettings.MemoryEnabled = state
+        -- При выключении — стираем старую историю чтобы не путать
+        if not state then
+            for k in pairs(ChatHistory) do ChatHistory[k] = nil end
+        end
+    end
+)
+
+-- Тогл режима памяти (работает только если память включена)
 makeToggleRow(
     automation,
     "Память по пользователям",
-    "Хранит отдельный контекст для каждого игрока.",
+    "Включено: отдельный контекст для каждого игрока. Выключено: один общий контекст для всех.",
     ClientSettings.PerUserMemory,
     function(state)
         ClientSettings.PerUserMemory = state
+        -- При смене режима — сбрасываем историю чтобы не мешать контексты
+        for k in pairs(ChatHistory) do ChatHistory[k] = nil end
     end
 )
 
@@ -3437,7 +3474,7 @@ end
 -- ── Температура и память ───────────────────────────────────
 local aiParamsSection = makeSectionCard(behaviorScroll, "Параметры генерации")
 
--- Температура (0.0 – 2.0, шаг 0.1)
+-- Температура (0.0 – 2.0)
 do
     local _, ctrl = makeRightControlRow(behaviorScroll, "Температура (0.0 – 2.0)", "Чем выше — тем более случайные ответы.", 80)
     
@@ -3452,16 +3489,36 @@ do
     end)
 end
 
--- Глубина памяти (сколько сообщений помнит)
+-- Макс. токенов ответа
 do
-    local _, ctrl = makeRightControlRow(behaviorScroll, "Глубина памяти (сообщений)", "Сколько последних сообщений помнит ИИ.", 60)
+    local initTok = tonumber(ClientSettings.MaxTokens) or 512
+    local _, ctrl = makeRightControlRow(behaviorScroll, "Макс. токенов ответа", "Ограничение длины ответа. 512+ для инструкций.", 70)
+
+    local tokDisp = makeTextLabel(ctrl, tostring(initTok), 13, "bold")
+    tokDisp.Size = UDim2.new(1, 0, 1, 0)
+    tokDisp.TextXAlignment = Enum.TextXAlignment.Center
+    tokDisp.TextColor3 = THEME.Accent
+
+    -- Слайдер: 64 – 4096 шагами по 64
+    local tokSteps = 64 -- шаг
+    local tokMin, tokMax = 1, 64 -- значения слайдера (умножаем на tokSteps)
+    makeSliderRow(behaviorScroll, "Токены ответа", tokMin, tokMax, math.floor(initTok / tokSteps), function(val)
+        local tokens = math.max(64, val * tokSteps)
+        ClientSettings.MaxTokens = tokens
+        tokDisp.Text = tostring(tokens)
+    end)
+end
+
+-- Глубина памяти (кол-во пар диалога)
+do
+    local _, ctrl = makeRightControlRow(behaviorScroll, "Глубина памяти (пар диалога)", "Сколько последних обменов помнит ИИ.", 60)
 
     local memDisp = makeTextLabel(ctrl, tostring(MAX_HISTORY or 10), 13, "bold")
     memDisp.Size = UDim2.new(1, 0, 1, 0)
     memDisp.TextXAlignment = Enum.TextXAlignment.Center
     memDisp.TextColor3 = THEME.Accent
 
-    makeSliderRow(behaviorScroll, "Глубина памяти", 2, 40, MAX_HISTORY or 10, function(val)
+    makeSliderRow(behaviorScroll, "Глубина памяти", 1, 30, MAX_HISTORY or 10, function(val)
         MAX_HISTORY = math.floor(val)
         memDisp.Text = tostring(MAX_HISTORY)
     end)
@@ -3487,11 +3544,10 @@ do
     btnResetAll.MouseEnter:Connect(function() tween(btnResetAll, TWEEN_FAST, { BackgroundTransparency = 0.1 }) end)
     btnResetAll.MouseLeave:Connect(function() tween(btnResetAll, TWEEN_FAST, { BackgroundTransparency = 0.3 }) end)
     btnResetAll.MouseButton1Click:Connect(function()
-        -- Сбрасываем всю историю игрового чата
+        -- Полный сброс: все ключи ChatHistory (Global + per-user)
         for k in pairs(ChatHistory) do ChatHistory[k] = nil end
-        -- Сбрасываем директ-чат
-        for k in pairs(DirectChatHistory) do DirectChatHistory[k] = nil end
-        -- Визуально подтверждаем
+        -- Сброс директ-чата
+        for i = #DirectChatHistory, 1, -1 do DirectChatHistory[i] = nil end
         btnResetAll.Text = "✓ Память очищена"
         task.delay(2, function()
             if btnResetAll and btnResetAll.Parent then
@@ -3518,7 +3574,7 @@ do
     btnResetDirect.MouseEnter:Connect(function() tween(btnResetDirect, TWEEN_FAST, { BackgroundTransparency = 0.1 }) end)
     btnResetDirect.MouseLeave:Connect(function() tween(btnResetDirect, TWEEN_FAST, { BackgroundTransparency = 0.3 }) end)
     btnResetDirect.MouseButton1Click:Connect(function()
-        for k in pairs(DirectChatHistory) do DirectChatHistory[k] = nil end
+        for i = #DirectChatHistory, 1, -1 do DirectChatHistory[i] = nil end
         btnResetDirect.Text = "✓ Директ-чат сброшен"
         task.delay(2, function()
             if btnResetDirect and btnResetDirect.Parent then
@@ -6553,8 +6609,8 @@ ctClearBtn.Parent = chatTestFrame
 makeCorner(ctClearBtn, 7)
 
 ctClearBtn.MouseButton1Click:Connect(function()
-    -- Очищаем историю директ-чата
-    for k in pairs(DirectChatHistory) do DirectChatHistory[k] = nil end
+    -- Очищаем историю директ-чата (массив, не словарь)
+    for i = #DirectChatHistory, 1, -1 do DirectChatHistory[i] = nil end
     -- Очищаем визуал
     for _, c in ipairs(ctLog:GetChildren()) do
         if not c:IsA("UILayout") and not c:IsA("UIPadding") then c:Destroy() end
@@ -6592,43 +6648,44 @@ local function ctDoSend()
 
     local settings = ClientSettings
     task.spawn(function()
-        -- Используем отдельную историю для директ-чата (всегда работает независимо от настроек)
-        local history = DirectChatHistory
+        -- Строим payload из DirectChatHistory
         local apiMsgs = {{ role = "system", content = makeSystemPrompt(settings) }}
-        for _, m in ipairs(history) do table.insert(apiMsgs, m) end
-        -- В директ-чате не указываем имя игрока — убираем подозрение на скрипт
+        for _, m in ipairs(DirectChatHistory) do
+            table.insert(apiMsgs, m)
+        end
         table.insert(apiMsgs, { role = "user", content = msg })
 
+        -- В директ-чате max_tokens берём из настроек но не ограничиваем как в игровом чате
+        -- Для инструкций нужно больше токенов
+        local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 200, 1024)
+
         local payload = {
-            model = getModel(settings),
+            model       = getModel(settings),
             temperature = tonumber(settings.Temperature) or 0.7,
-            max_tokens = tonumber(settings.MaxTokens) or 200,
-            messages = apiMsgs,
+            max_tokens  = directMaxTokens,
+            messages    = apiMsgs,
         }
         local text, err = providerRouter:chatCompletions(payload)
-        if text then
-            -- Сохраняем в историю директ-чата
-            table.insert(history, { role = "user", content = msg })
-            table.insert(history, { role = "assistant", content = text })
-            while #history > (MAX_HISTORY * 2) do table.remove(history, 1) end
+        if text and text ~= "" then
+            -- Сохраняем через единую функцию с правильным обрезанием
+            appendHistory(DirectChatHistory, msg, text)
         end
         if ChatTestCallback then
             if err then
-                -- В директ-чате показываем читаемые ошибки, не коды
                 local errLower = tostring(err):lower()
                 local friendlyErr
                 if errLower:find("contentfiltered") or errLower:find("emptyresponse") then
-                    friendlyErr = "🚫 Модель отказалась отвечать на этот запрос. Попробуй переформулировать."
+                    friendlyErr = "🚫 Модель отказалась отвечать. Попробуй переформулировать."
                 elseif errLower:find("429") or errLower:find("rate") then
-                    friendlyErr = "⚡ API ключ перегружен (rate limit). Подожди немного."
+                    friendlyErr = "⚡ Rate limit — подожди немного."
                 elseif errLower:find("401") or errLower:find("invalid_api_key") or errLower:find("missinggroqkey") then
-                    friendlyErr = "🔑 API ключ неверный или не указан. Проверь в настройках."
+                    friendlyErr = "🔑 API ключ неверный или не указан."
                 elseif errLower:find("400") or errLower:find("bad request") then
-                    friendlyErr = "⚠️ Эта модель не поддерживает такой запрос. Попробуй другую модель."
+                    friendlyErr = "⚠️ Модель не поддерживает этот запрос. Попробуй другую."
                 elseif errLower:find("timeout") or errLower:find("timed") then
-                    friendlyErr = "⏱️ Нет ответа — таймаут. Попробуй ещё раз."
+                    friendlyErr = "⏱️ Таймаут. Попробуй ещё раз."
                 else
-                    friendlyErr = "❌ Ошибка API. Попробуй другую модель или другой ключ."
+                    friendlyErr = "❌ Ошибка: " .. tostring(err)
                 end
                 ChatTestCallback(friendlyErr, true)
             else
