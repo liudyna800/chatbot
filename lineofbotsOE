@@ -5385,18 +5385,24 @@ local function switchTab(name)
         trackFrameTween(oldFrame, tOut)
     end
 
-    -- NEW Frame: сначала делаем visible но полностью прозрачным на 1 кадр,
-    -- ждём пока Roblox пересчитает AutomaticSize layout,
-    -- только потом запускаем fade — текст не "прыгает"
+    -- NEW Frame: visible+прозрачный, ждём 1 кадр (AutomaticSize пересчитывается),
+    -- затем fade in + scale 0.96→1 — текст уже на месте, анимация красивая
     if newFrame then
         cancelFrameTweens(newFrame)
         newFrame.ZIndex = 2
         newFrame.Position = basePos
         newFrame.GroupTransparency = 1
         newFrame.Visible = true
+        local scNew = getTabScale(newFrame)
+        if scNew then scNew.Scale = 1 end  -- сразу 1, не двигаем до defer
         task.defer(function()
+            -- Теперь AutomaticSize уже посчитан — запускаем анимацию
+            if scNew then scNew.Scale = 0.96 end
             local tIn = tween(newFrame, TWEEN_TAB, { GroupTransparency = 0 })
             trackFrameTween(newFrame, tIn)
+            if scNew then
+                tween(scNew, TWEEN_TAB, { Scale = 1 })
+            end
         end)
     end
 
