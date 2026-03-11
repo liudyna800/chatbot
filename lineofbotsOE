@@ -5249,13 +5249,29 @@ local function setTabButtonState(tabName, selected, instant)
         if label then label.TextColor3 = txtCol end
         if icon  then icon.ImageColor3  = iconCol end
     else
-        -- Плавный crossfade: только цвет и прозрачность, никакого scale
-        local btnInfo = TweenInfo.new(0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-        tween(btn, btnInfo, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
-        tween(label or Instance.new("Frame"), btnInfo, { TextColor3 = txtCol })
-        tween(icon  or Instance.new("Frame"), btnInfo, { ImageColor3 = iconCol })
-        if label then tween(label, btnInfo, { TextColor3 = txtCol }) end
-        if icon  then tween(icon,  btnInfo, { ImageColor3 = iconCol }) end
+        -- Плавная анимация самой кнопки: цвет + прозрачность
+        tween(btn, TWEEN_MED, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
+        if label then tween(label, TWEEN_MED, { TextColor3 = txtCol }) end
+        if icon  then tween(icon,  TWEEN_MED, { ImageColor3 = iconCol }) end
+        -- UIScale пульс на САМУ КНОПКУ (btn), не на container
+        -- Текст внутри не трогаем — только фон кнопки
+        local sc = btn:FindFirstChildOfClass("UIScale")
+        if not sc then
+            sc = Instance.new("UIScale")
+            sc.Scale = 1
+            sc.Parent = btn
+        end
+        if selected then
+            -- При выборе: кнопка слегка вырастает (1→1.04→1)
+            sc.Scale = 1
+            tween(sc, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.04 })
+            task.delay(0.12, function()
+                tween(sc, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.0 })
+            end)
+        else
+            -- При снятии выбора: возвращаемся к 1
+            tween(sc, TWEEN_MED, { Scale = 1.0 })
+        end
     end
 end
 
@@ -5376,41 +5392,42 @@ local function switchTab(name)
     isTabSwitching = true
     pendingTabName = nil
 
-    -- OLD Frame: чистый fade out — никакого scale, никакого slide
+    -- OLD Frame: fade out + чуть сжимается (уходит "вглубь")
     if oldFrame then
         cancelFrameTweens(oldFrame)
         oldFrame.Visible = true
         oldFrame.ZIndex = 1
         oldFrame.Position = basePos
         oldFrame.GroupTransparency = 0
-        -- Убеждаемся что UIScale = 1 (без изменений)
         local scOld = getTabScale(oldFrame)
         if scOld then scOld.Scale = 1 end
         local tOut = tween(oldFrame, TWEEN_TAB, { GroupTransparency = 1 })
         trackFrameTween(oldFrame, tOut)
+        if scOld then tween(scOld, TWEEN_TAB, { Scale = 0.94 }) end
     end
 
-    -- NEW Frame: Visible=true пока прозрачный — Roblox пересчитывает AutomaticSize
-    -- за 1 кадр (task.defer), текст встаёт на место ДО начала анимации → не прыгает
+    -- NEW Frame: fade in + вырастает из 0.94 до 1 ("выходит из глубины")
+    -- Visible=true + scale=0.94 ДО рендера, task.defer ждёт 1 кадр
+    -- (AutomaticSize пересчитывается пока scale=0.94 — текст не прыгает)
     if newFrame then
         cancelFrameTweens(newFrame)
         newFrame.ZIndex = 2
         newFrame.Position = basePos
         newFrame.GroupTransparency = 1
+        local sc = getTabScale(newFrame)
+        if sc then sc.Scale = 0.94 end
         newFrame.Visible = true
-        local scNew = getTabScale(newFrame)
-        if scNew then scNew.Scale = 1 end
         task.defer(function()
-            task.delay(TWEEN_TAB.Time * 0.3, function()
-                local tIn = tween(newFrame, TweenInfo.new(TWEEN_TAB.Time * 0.85,
-                    Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { GroupTransparency = 0 })
-                trackFrameTween(newFrame, tIn)
-            end)
+            local tIn = tween(newFrame, TWEEN_TAB, { GroupTransparency = 0 })
+            trackFrameTween(newFrame, tIn)
+            if sc then
+                tween(sc, TweenInfo.new(TWEEN_TAB.Time, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = 1 })
+            end
         end)
     end
 
     -- Cleanup
-    task.delay(TWEEN_TAB.Time * 1.3, function()
+    task.delay(TWEEN_TAB.Time + 0.05, function()
         if tabSwitchId ~= switchId then return end
         
         if oldFrame then
