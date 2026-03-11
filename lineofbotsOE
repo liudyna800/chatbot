@@ -87,8 +87,14 @@ end
 local function loadSettings()
     pcall(function()
         if not readfile then return end
-        local ok, data = pcall(readfile, LOB_SETTINGS_FILE)
-        if not ok or not data or data == "" then return end
+        -- Некоторые инжекторы: readfile возвращает nil если файл не найден (не бросает ошибку)
+        local data
+        local ok, result = pcall(readfile, LOB_SETTINGS_FILE)
+        if ok and type(result) == "string" and result ~= "" then
+            data = result
+        else
+            return -- файл не найден или пустой
+        end
         local cs = ClientSettings
         if not cs then return end
         local function getBool(key, default)
@@ -279,6 +285,7 @@ do
         ClientSettings.ApiKeys.groq = saved
     end
     loadSettings()
+    print("[LOB] after loadSettings: AutoReply=" .. tostring(ClientSettings.AutoReply) .. " WebSearch=" .. tostring(ClientSettings.WebSearch))
     local savedModel = loadModel()
     if savedModel then
         ClientSettings.Models = ClientSettings.Models or {}
