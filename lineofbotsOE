@@ -81,7 +81,9 @@ local function saveSettings()
             "StripHash="       .. b(cs.StripHash,       true),
             "FollowingEnabled=" .. b(cs.FollowingEnabled, true),
         }
-        writefile(LOB_SETTINGS_FILE, table.concat(lines, "\n"))
+        local data = table.concat(lines, "\n")
+        writefile(LOB_SETTINGS_FILE, data)
+        print("[LOB] saveSettings OK:\n" .. data)
     end)
 end
 local function loadSettings()
@@ -125,6 +127,10 @@ local function loadSettings()
         cs.FollowingEnabled = getBool("FollowingEnabled", true)
         local pid = getStr("PersonalityId", "Friendly")
         if pid and pid ~= "" then cs.PersonalityId = pid end
+        print("[LOB] loadSettings OK: AutoReply=" .. tostring(cs.AutoReply)
+            .. " Memory=" .. tostring(cs.MemoryEnabled)
+            .. " Actions=" .. tostring(cs.ActionsEnabled)
+            .. " WebSearch=" .. tostring(cs.WebSearch))
     end)
 end
 local function saveModel(model)
