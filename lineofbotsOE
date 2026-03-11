@@ -55,24 +55,29 @@ local function saveSettings()
     pcall(function()
         if not writefile then return end
         local cs = ClientSettings or {}
+        -- Хелпер: bool → "true"/"false", nil трактуется как дефолт
+        local function b(val, defaultTrue)
+            if val == nil then return defaultTrue and "true" or "false" end
+            return val and "true" or "false"
+        end
         local lines = {
-            "AutoReply="      .. tostring(cs.AutoReply      or false),
-            "MemoryEnabled="  .. tostring(cs.MemoryEnabled  ~= false),
-            "ActionsEnabled=" .. tostring(cs.ActionsEnabled ~= false),
-            "WebSearch="      .. tostring(cs.WebSearch      or false),
-            "WorldReactions=" .. tostring(cs.WorldReactions ~= false),
-            "AntiSpam="       .. tostring(cs.AntiSpam       ~= false),
-            "ReactToMention=" .. tostring(cs.ReactToMention ~= false),
-            "PlayerAwareness=".. tostring(cs.PlayerAwareness~= false),
-            "PlaceAwareness=" .. tostring(cs.PlaceAwareness ~= false),
-            "CameraLook="     .. tostring(cs.CameraLook     ~= false),
-            "UsePlayerName="  .. tostring(cs.UsePlayerName  ~= false),
-            "FollowConfirm="  .. tostring(cs.FollowConfirm  ~= false),
-            "TokenEconomy="   .. tostring(cs.TokenEconomy   or false),
-            "PerUserMemory="  .. tostring(cs.PerUserMemory  or false),
-            "Temperature="    .. tostring(cs.Temperature    or 0.7),
-            "MaxTokens="      .. tostring(cs.MaxTokens      or 1024),
-            "PersonalityId="  .. tostring(cs.PersonalityId  or "Friendly"),
+            "AutoReply="       .. b(cs.AutoReply,       false),
+            "MemoryEnabled="   .. b(cs.MemoryEnabled,   true),
+            "ActionsEnabled="  .. b(cs.ActionsEnabled,  true),
+            "WebSearch="       .. b(cs.WebSearch,       false),
+            "WorldReactions="  .. b(cs.WorldReactions,  true),
+            "AntiSpam="        .. b(cs.AntiSpam,        true),
+            "ReactToMention="  .. b(cs.ReactToMention,  true),
+            "PlayerAwareness=" .. b(cs.PlayerAwareness, true),
+            "PlaceAwareness="  .. b(cs.PlaceAwareness,  true),
+            "CameraLook="      .. b(cs.CameraLook,      true),
+            "UsePlayerName="   .. b(cs.UsePlayerName,   true),
+            "FollowConfirm="   .. b(cs.FollowConfirm,   true),
+            "TokenEconomy="    .. b(cs.TokenEconomy,    false),
+            "PerUserMemory="   .. b(cs.PerUserMemory,   false),
+            "Temperature="     .. tostring(tonumber(cs.Temperature) or 0.7),
+            "MaxTokens="       .. tostring(math.floor(tonumber(cs.MaxTokens) or 1024)),
+            "PersonalityId="   .. tostring(cs.PersonalityId or "Friendly"),
         }
         writefile(LOB_SETTINGS_FILE, table.concat(lines, "\n"))
     end)
@@ -3927,7 +3932,7 @@ local THEME = Themes[ClientSettings.Theme] or Themes.LineOfBots
 local TWEEN_FAST = TweenInfo.new(0.14, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
 local TWEEN_MED  = TweenInfo.new(0.26, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
 local TWEEN_SLOW = TweenInfo.new(0.40, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
-local TWEEN_TAB  = TweenInfo.new(0.22, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+local TWEEN_TAB  = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 local TWEEN_SPRING = TweenInfo.new(0.45, Enum.EasingStyle.Back,        Enum.EasingDirection.Out)
 local TWEEN_BOUNCE = TweenInfo.new(0.38, Enum.EasingStyle.Bounce,      Enum.EasingDirection.Out)
 
@@ -5244,23 +5249,28 @@ local function setTabButtonState(tabName, selected, instant)
         if label then label.TextColor3 = txtCol end
         if icon  then icon.ImageColor3  = iconCol end
     else
-        -- Быстрый цвет + небольшой scale-пульс при выборе
-        tween(btn, TWEEN_FAST, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
-        if label then tween(label, TWEEN_FAST, { TextColor3 = txtCol }) end
-        if icon  then tween(icon,  TWEEN_FAST, { ImageColor3 = iconCol }) end
-        -- Scale-пульс: при выборе кнопка быстро чуть вырастает и возвращается
-        if selected and container then
-            local sc = container:FindFirstChildOfClass("UIScale")
-            if not sc then
-                sc = Instance.new("UIScale")
-                sc.Scale = 1
-                sc.Parent = container
-            end
+        -- Плавная анимация самой кнопки: цвет + прозрачность
+        tween(btn, TWEEN_MED, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
+        if label then tween(label, TWEEN_MED, { TextColor3 = txtCol }) end
+        if icon  then tween(icon,  TWEEN_MED, { ImageColor3 = iconCol }) end
+        -- UIScale пульс на САМУ КНОПКУ (btn), не на container
+        -- Текст внутри не трогаем — только фон кнопки
+        local sc = btn:FindFirstChildOfClass("UIScale")
+        if not sc then
+            sc = Instance.new("UIScale")
             sc.Scale = 1
-            tween(sc, TweenInfo.new(0.10, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), { Scale = 1.12 })
-            task.delay(0.10, function()
-                tween(sc, TweenInfo.new(0.20, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.0 })
+            sc.Parent = btn
+        end
+        if selected then
+            -- При выборе: кнопка слегка вырастает (1→1.04→1)
+            sc.Scale = 1
+            tween(sc, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.04 })
+            task.delay(0.12, function()
+                tween(sc, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.0 })
             end)
+        else
+            -- При снятии выбора: возвращаемся к 1
+            tween(sc, TWEEN_MED, { Scale = 1.0 })
         end
     end
 end
@@ -5408,7 +5418,7 @@ local function switchTab(name)
         local tIn = tween(newFrame, TWEEN_TAB, { GroupTransparency = 0 })
         trackFrameTween(newFrame, tIn)
         if sc then
-            tween(sc, TweenInfo.new(TWEEN_TAB.Time, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 })
+            tween(sc, TweenInfo.new(TWEEN_TAB.Time, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = 1 })
         end
     end
 
