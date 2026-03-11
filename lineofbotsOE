@@ -5253,7 +5253,25 @@ local function setTabButtonState(tabName, selected, instant)
         tween(btn, TWEEN_MED, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
         if label then tween(label, TWEEN_MED, { TextColor3 = txtCol }) end
         if icon  then tween(icon,  TWEEN_MED, { ImageColor3 = iconCol }) end
-
+        -- UIScale пульс на САМУ КНОПКУ (btn), не на container
+        -- Текст внутри не трогаем — только фон кнопки
+        local sc = btn:FindFirstChildOfClass("UIScale")
+        if not sc then
+            sc = Instance.new("UIScale")
+            sc.Scale = 1
+            sc.Parent = btn
+        end
+        if selected then
+            -- При выборе: кнопка слегка вырастает (1→1.04→1)
+            sc.Scale = 1
+            tween(sc, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.04 })
+            task.delay(0.12, function()
+                tween(sc, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.0 })
+            end)
+        else
+            -- При снятии выбора: возвращаемся к 1
+            tween(sc, TWEEN_MED, { Scale = 1.0 })
+        end
     end
 end
 
@@ -5374,7 +5392,7 @@ local function switchTab(name)
     isTabSwitching = true
     pendingTabName = nil
 
-    -- OLD Frame: быстро уходит вверх + исчезает
+    -- OLD Frame: плавно исчезает на месте
     if oldFrame then
         cancelFrameTweens(oldFrame)
         oldFrame.Visible = true
@@ -5382,22 +5400,22 @@ local function switchTab(name)
         oldFrame.Position = basePos
         oldFrame.GroupTransparency = 0
         local tOut = tween(oldFrame,
-            TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
-            { GroupTransparency = 1, Position = UDim2.new(0, 0, 0, -20) })
+            TweenInfo.new(0.22, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+            { GroupTransparency = 1 })
         trackFrameTween(oldFrame, tOut)
     end
 
-    -- NEW Frame: приезжает снизу + появляется плавно
-    -- Visible пока прозрачный → AutomaticSize пересчитывается → текст не прыгает
+    -- NEW Frame: появляется справа и едет к центру + fade
+    -- Visible пока прозрачный → AutomaticSize успевает → текст не прыгает
     if newFrame then
         cancelFrameTweens(newFrame)
         newFrame.ZIndex = 2
         newFrame.GroupTransparency = 1
-        newFrame.Position = UDim2.new(0, 0, 0, 20)
+        newFrame.Position = UDim2.new(0.18, 0, 0, 0)
         newFrame.Visible = true
         task.defer(function()
             local tIn = tween(newFrame,
-                TweenInfo.new(0.40, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                TweenInfo.new(0.38, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
                 { GroupTransparency = 0, Position = basePos })
             trackFrameTween(newFrame, tIn)
         end)
