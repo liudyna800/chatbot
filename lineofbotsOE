@@ -43,7 +43,7 @@
 --  9773     §LAUNCH        createInterface() — точка запуска скрипта
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v19.0.0 LOADED")
+print("LOB VERSION: v19.4.9 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -91,7 +91,11 @@ local function loadSettings()
         local data
         local ok, result = pcall(readfile, LOB_SETTINGS_FILE)
         if ok and type(result) == "string" and result ~= "" then
-            data = result
+            data = result:gsub("
+", "
+"):gsub("
+", "
+") -- normalize line endings
         else
             return -- файл не найден или пустой
         end
