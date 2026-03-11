@@ -5392,30 +5392,32 @@ local function switchTab(name)
     isTabSwitching = true
     pendingTabName = nil
 
-    -- OLD Frame: только fade out, без scale
+    -- OLD Frame: fade out + уходит чуть вверх (эффект глубины без scale)
     if oldFrame then
         cancelFrameTweens(oldFrame)
         oldFrame.Visible = true
         oldFrame.ZIndex = 1
         oldFrame.Position = basePos
         oldFrame.GroupTransparency = 0
-        local scOld = getTabScale(oldFrame)
-        if scOld then scOld.Scale = 1 end
-        local tOut = tween(oldFrame, TWEEN_TAB, { GroupTransparency = 1 })
+        local tOut = tween(oldFrame, TWEEN_TAB, {
+            GroupTransparency = 1,
+            Position = UDim2.new(0, 0, 0, -6),
+        })
         trackFrameTween(oldFrame, tOut)
     end
 
-    -- NEW Frame: только fade in, без scale — текст не двигается вообще
+    -- NEW Frame: приходит снизу (6px) + fade in, без UIScale — текст не прыгает
     if newFrame then
         cancelFrameTweens(newFrame)
         newFrame.ZIndex = 2
-        newFrame.Position = basePos
         newFrame.GroupTransparency = 1
-        local sc = getTabScale(newFrame)
-        if sc then sc.Scale = 1 end  -- scale всегда 1, не трогаем
+        newFrame.Position = UDim2.new(0, 0, 0, 6)
         newFrame.Visible = true
         task.defer(function()
-            local tIn = tween(newFrame, TWEEN_TAB, { GroupTransparency = 0 })
+            local tIn = tween(newFrame, TWEEN_TAB, {
+                GroupTransparency = 0,
+                Position = basePos,
+            })
             trackFrameTween(newFrame, tIn)
         end)
     end
