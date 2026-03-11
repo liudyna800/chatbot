@@ -90,9 +90,11 @@ end
 local function loadSettings()
     local ok, err = pcall(function()
         if not readfile then print("[LOB] loadSettings FAIL: no readfile") return end
+        print("[LOB] loadSettings trying: " .. tostring(LOB_SETTINGS_FILE))
         local rok, data = pcall(readfile, LOB_SETTINGS_FILE)
-        if not rok then print("[LOB] loadSettings FAIL: file not found") return end
+        if not rok then print("[LOB] loadSettings FAIL: file not found - " .. tostring(data)) return end
         if not data or data == "" then print("[LOB] loadSettings FAIL: empty file") return end
+        print("[LOB] loadSettings READ: " .. tostring(#data) .. " bytes")
         local cs = ClientSettings
         if not cs then return end
         local function getBool(key, default)
