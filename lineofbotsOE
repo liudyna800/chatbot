@@ -78,6 +78,8 @@ local function saveSettings()
             "Temperature="     .. tostring(tonumber(cs.Temperature) or 0.7),
             "MaxTokens="       .. tostring(math.floor(tonumber(cs.MaxTokens) or 1024)),
             "PersonalityId="   .. tostring(cs.PersonalityId or "Friendly"),
+            "StripHash="       .. b(cs.StripHash,       true),
+            "FollowingEnabled=" .. b(cs.FollowingEnabled, true),
         }
         writefile(LOB_SETTINGS_FILE, table.concat(lines, "\n"))
     end)
@@ -119,6 +121,8 @@ local function loadSettings()
         cs.PerUserMemory   = getBool("PerUserMemory",   false)
         cs.Temperature     = getNum("Temperature",      0.7)
         cs.MaxTokens       = getNum("MaxTokens",        1024)
+        cs.StripHash       = getBool("StripHash",       true)
+        cs.FollowingEnabled = getBool("FollowingEnabled", true)
         local pid = getStr("PersonalityId", "Friendly")
         if pid and pid ~= "" then cs.PersonalityId = pid end
     end)
@@ -6330,6 +6334,7 @@ makeToggleRow(
     ClientSettings.StripHash ~= false,
     function(state)
         ClientSettings.StripHash = state
+        saveSettings()
     end
 )
 
@@ -6889,6 +6894,7 @@ do
     makeAdvancedHeader("Следование")
     local _ = makeToggleRow(advancedScroll, "Включить следование", "Позволять игрокам просить следовать за ними.", ClientSettings.FollowingEnabled, function(state)
         ClientSettings.FollowingEnabled = state
+        saveSettings()
         if not state then stopFollow() end
     end)
     makeToggleRow(advancedScroll, "Подтверждение следования", "Включено: выскакивает кнопка «Идти/Отказать» перед тем как идти. Выключено: бот идёт сразу без вопросов.", ClientSettings.FollowConfirm, function(state)
