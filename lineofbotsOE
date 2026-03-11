@@ -3929,12 +3929,12 @@ local Themes = {
 }
 local THEME = Themes[ClientSettings.Theme] or Themes.LineOfBots
 
-local TWEEN_FAST = TweenInfo.new(0.14, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
-local TWEEN_MED  = TweenInfo.new(0.26, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
-local TWEEN_SLOW = TweenInfo.new(0.40, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
-local TWEEN_TAB  = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-local TWEEN_SPRING = TweenInfo.new(0.45, Enum.EasingStyle.Back,        Enum.EasingDirection.Out)
-local TWEEN_BOUNCE = TweenInfo.new(0.38, Enum.EasingStyle.Bounce,      Enum.EasingDirection.Out)
+local TWEEN_FAST   = TweenInfo.new(0.20, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+local TWEEN_MED    = TweenInfo.new(0.35, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+local TWEEN_SLOW   = TweenInfo.new(0.55, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+local TWEEN_TAB    = TweenInfo.new(0.38, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+local TWEEN_SPRING = TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local TWEEN_BOUNCE = TweenInfo.new(0.50, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out)
 
 local function tween(o, info, props)
     local t = TweenService:Create(o, info, props)
@@ -5249,8 +5249,8 @@ local function setTabButtonState(tabName, selected, instant)
         if label then label.TextColor3 = txtCol end
         if icon  then icon.ImageColor3  = iconCol end
     else
-        local fadeInfo   = TweenInfo.new(0.20, Enum.EasingStyle.Sine,  Enum.EasingDirection.Out)
-        local slideInfo  = TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+        local fadeInfo   = TweenInfo.new(0.30, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+        local slideInfo  = TweenInfo.new(0.30, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
         -- Фон кнопки fade
         tween(btn, fadeInfo, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
         -- Текст и иконка
@@ -5387,7 +5387,7 @@ local function switchTab(name)
         oldFrame.ZIndex = 1
         oldFrame.Position = basePos
         oldFrame.GroupTransparency = 0
-        local tOut = tween(oldFrame, TWEEN_TAB, { GroupTransparency = 1, Position = UDim2.new(0, 0, 0, -8) })
+        local tOut = tween(oldFrame, TweenInfo.new(0.30, Enum.EasingStyle.Sine, Enum.EasingDirection.In), { GroupTransparency = 1, Position = UDim2.new(0, 0, 0, -14) })
         trackFrameTween(oldFrame, tOut)
     end
 
@@ -5395,11 +5395,11 @@ local function switchTab(name)
     if newFrame then
         cancelFrameTweens(newFrame)
         newFrame.ZIndex = 2
-        newFrame.Position = UDim2.new(0, 0, 0, 8)
+        newFrame.Position = UDim2.new(0, 0, 0, 14)
         newFrame.GroupTransparency = 1
         newFrame.Visible = true
         task.defer(function()
-            local tIn = tween(newFrame, TWEEN_TAB, { GroupTransparency = 0, Position = basePos })
+            local tIn = tween(newFrame, TweenInfo.new(0.42, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { GroupTransparency = 0, Position = basePos })
             trackFrameTween(newFrame, tIn)
         end)
     end
