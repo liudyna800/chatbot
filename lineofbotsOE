@@ -91,11 +91,7 @@ local function loadSettings()
         local data
         local ok, result = pcall(readfile, LOB_SETTINGS_FILE)
         if ok and type(result) == "string" and result ~= "" then
-            data = result:gsub("
-", "
-"):gsub("
-", "
-") -- normalize line endings
+            data = result:gsub("\r\n", "\n"):gsub("\r", "\n")
         else
             return -- файл не найден или пустой
         end
