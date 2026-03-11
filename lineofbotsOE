@@ -5235,20 +5235,27 @@ local function setTabButtonState(tabName, selected, instant)
         strip.BackgroundColor3 = THEME.Accent
     end
 
-    -- glowBg анимируется вместе с кнопкой ниже
+    if glowBg then
+        if instant then
+            glowBg.BackgroundTransparency = selected and 0.88 or 1
+        else
+            tween(glowBg, TWEEN_MED, { BackgroundTransparency = selected and 0.88 or 1 })
+        end
+    end
 
     if instant then
         btn.BackgroundTransparency = bgTrans
         btn.BackgroundColor3 = bgCol
         if label then label.TextColor3 = txtCol end
         if icon  then icon.ImageColor3  = iconCol end
-        if glowBg then glowBg.BackgroundTransparency = selected and 0.88 or 1 end
     else
-        local i = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-        tween(btn,   i, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
-        tween(glowBg or btn, i, { BackgroundTransparency = selected and 0.88 or 1 })
-        if label then tween(label, i, { TextColor3  = txtCol  }) end
-        if icon  then tween(icon,  i, { ImageColor3 = iconCol }) end
+        -- Плавный crossfade: только цвет и прозрачность, никакого scale
+        local btnInfo = TweenInfo.new(0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+        tween(btn, btnInfo, { BackgroundTransparency = bgTrans, BackgroundColor3 = bgCol })
+        tween(label or Instance.new("Frame"), btnInfo, { TextColor3 = txtCol })
+        tween(icon  or Instance.new("Frame"), btnInfo, { ImageColor3 = iconCol })
+        if label then tween(label, btnInfo, { TextColor3 = txtCol }) end
+        if icon  then tween(icon,  btnInfo, { ImageColor3 = iconCol }) end
     end
 end
 
@@ -5383,19 +5390,22 @@ local function switchTab(name)
         trackFrameTween(oldFrame, tOut)
     end
 
-    -- NEW Frame: Visible=true пока прозрачный → task.defer ждёт 1 кадр
-    -- (за этот кадр Roblox пересчитывает AutomaticSize — текст встаёт на место)
-    -- только потом запускаем crossfade — текст НЕ прыгает
+    -- NEW Frame: Visible=true пока прозрачный — Roblox пересчитывает AutomaticSize
+    -- за 1 кадр (task.defer), текст встаёт на место ДО начала анимации → не прыгает
     if newFrame then
         cancelFrameTweens(newFrame)
         newFrame.ZIndex = 2
         newFrame.Position = basePos
         newFrame.GroupTransparency = 1
         newFrame.Visible = true
+        local scNew = getTabScale(newFrame)
+        if scNew then scNew.Scale = 1 end
         task.defer(function()
-            local tIn = tween(newFrame, TweenInfo.new(TWEEN_TAB.Time,
-                Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { GroupTransparency = 0 })
-            trackFrameTween(newFrame, tIn)
+            task.delay(TWEEN_TAB.Time * 0.3, function()
+                local tIn = tween(newFrame, TweenInfo.new(TWEEN_TAB.Time * 0.85,
+                    Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { GroupTransparency = 0 })
+                trackFrameTween(newFrame, tIn)
+            end)
         end)
     end
 
