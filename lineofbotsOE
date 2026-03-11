@@ -5367,42 +5367,37 @@ local function switchTab(name)
             frame.GroupTransparency = 1
             frame.Position = basePos
             frame.ZIndex = 0
-            local sc = frame:FindFirstChild("TabScale")
-            if sc and sc:IsA("UIScale") then sc.Scale = 1 end
+            -- TabScale не используем — не трогаем
         end
     end
 
     isTabSwitching = true
     pendingTabName = nil
 
-    -- OLD Frame: fade out + чуть сжимается (уходит "вглубь")
+    -- OLD Frame: чистый fade out
     if oldFrame then
         cancelFrameTweens(oldFrame)
         oldFrame.Visible = true
         oldFrame.ZIndex = 1
         oldFrame.Position = basePos
         oldFrame.GroupTransparency = 0
-        local scOld = getTabScale(oldFrame)
-        if scOld then scOld.Scale = 1 end
         local tOut = tween(oldFrame, TWEEN_TAB, { GroupTransparency = 1 })
         trackFrameTween(oldFrame, tOut)
-        if scOld then tween(scOld, TWEEN_TAB, { Scale = 0.96 }) end
     end
 
-    -- NEW Frame: fade in + вырастает из 0.96 до 1
+    -- NEW Frame: сначала делаем visible но полностью прозрачным на 1 кадр,
+    -- ждём пока Roblox пересчитает AutomaticSize layout,
+    -- только потом запускаем fade — текст не "прыгает"
     if newFrame then
         cancelFrameTweens(newFrame)
-        newFrame.Visible = true
         newFrame.ZIndex = 2
         newFrame.Position = basePos
         newFrame.GroupTransparency = 1
-        local scNew = getTabScale(newFrame)
-        if scNew then scNew.Scale = 0.96 end
-        local tIn = tween(newFrame, TWEEN_TAB, { GroupTransparency = 0 })
-        trackFrameTween(newFrame, tIn)
-        if scNew then
-            tween(scNew, TWEEN_TAB, { Scale = 1 })
-        end
+        newFrame.Visible = true
+        task.defer(function()
+            local tIn = tween(newFrame, TWEEN_TAB, { GroupTransparency = 0 })
+            trackFrameTween(newFrame, tIn)
+        end)
     end
 
     -- Cleanup
@@ -10342,8 +10337,10 @@ task.defer(function()
         frame.Visible = false
         frame.GroupTransparency = 1
         frame.Position = basePos
-        local sc = getTabScale(frame)
-        if sc then sc.Scale = 1 end
+        -- Уничтожаем TabScale если остался от старых версий
+        local oldSc = frame:FindFirstChild("TabScale")
+        if oldSc then oldSc:Destroy() end
+        -- TabScale не используем
     end
     if tabFrames[currentTab] then
         tabFrames[currentTab].Visible = true
