@@ -96,7 +96,12 @@ local function loadSettings()
         if not data or data == "" then print("[LOB] loadSettings FAIL: empty file") return end
         print("[LOB] loadSettings READ: " .. tostring(#data) .. " bytes")
         local cs = ClientSettings
-        if not cs then return end
+        print("[LOB] cs type: " .. type(cs))
+        if not cs then
+            -- fallback: применим позже через task.defer
+            print("[LOB] loadSettings FAIL: cs is nil")
+            return
+        end
         local function getBool(key, default)
             local v = data:match(key .. "=(%a+)")
             if v == "true" then return true end
@@ -108,7 +113,8 @@ local function loadSettings()
             return v and tonumber(v) or default
         end
         local function getStr(key, default)
-            local v = data:match(key .. "=([^\n]+)")
+            local v = data:match(key .. "=([^
+]+)")
             return v and v:match("^%s*(.-)%s*$") or default
         end
         cs.AutoReply        = getBool("AutoReply",        false)
