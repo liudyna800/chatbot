@@ -217,7 +217,7 @@ end)
 
 -- Client-side settings storage (no server dependencies)
 -- §SETTINGS
-local ClientSettings = {
+ClientSettings = {
     Enabled = true,
     Debug = false,
     Theme = "LineOfBots",
