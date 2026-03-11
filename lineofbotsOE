@@ -92,6 +92,7 @@ local function loadSettings()
         local ok, result = pcall(readfile, LOB_SETTINGS_FILE)
         if ok and type(result) == "string" and result ~= "" then
             data = result:gsub("\r\n", "\n"):gsub("\r", "\n")
+            print("[LOB] file contents: [" .. data:sub(1, 200) .. "]")
         else
             return -- файл не найден или пустой
         end
