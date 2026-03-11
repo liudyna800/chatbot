@@ -51,46 +51,48 @@ local LOB_KEY_FILE    = "lob_apikey.txt"
 local LOB_GEMINI_FILE = "lob_geminikey.txt"
 local LOB_SETTINGS_FILE = "lob_settings.txt"
 local LOB_MODEL_FILE  = "lob_model.txt"
+-- helpers
+local function _boolStr(val, defaultTrue)
+    if val == nil then return defaultTrue and "true" or "false" end
+    return val and "true" or "false"
+end
 local function saveSettings()
-    pcall(function()
-        if not writefile then return end
+    local ok, err = pcall(function()
+        if not writefile then print("[LOB] saveSettings FAIL: no writefile") return end
         local cs = ClientSettings or {}
-        -- Хелпер: bool → "true"/"false", nil трактуется как дефолт
-        local function b(val, defaultTrue)
-            if val == nil then return defaultTrue and "true" or "false" end
-            return val and "true" or "false"
-        end
-        local lines = {
-            "AutoReply="       .. b(cs.AutoReply,       false),
-            "MemoryEnabled="   .. b(cs.MemoryEnabled,   true),
-            "ActionsEnabled="  .. b(cs.ActionsEnabled,  true),
-            "WebSearch="       .. b(cs.WebSearch,       false),
-            "WorldReactions="  .. b(cs.WorldReactions,  true),
-            "AntiSpam="        .. b(cs.AntiSpam,        true),
-            "ReactToMention="  .. b(cs.ReactToMention,  true),
-            "PlayerAwareness=" .. b(cs.PlayerAwareness, true),
-            "PlaceAwareness="  .. b(cs.PlaceAwareness,  true),
-            "CameraLook="      .. b(cs.CameraLook,      true),
-            "UsePlayerName="   .. b(cs.UsePlayerName,   true),
-            "FollowConfirm="   .. b(cs.FollowConfirm,   true),
-            "TokenEconomy="    .. b(cs.TokenEconomy,    false),
-            "PerUserMemory="   .. b(cs.PerUserMemory,   false),
-            "Temperature="     .. tostring(tonumber(cs.Temperature) or 0.7),
-            "MaxTokens="       .. tostring(math.floor(tonumber(cs.MaxTokens) or 1024)),
-            "PersonalityId="   .. tostring(cs.PersonalityId or "Friendly"),
-            "StripHash="       .. b(cs.StripHash,       true),
+        local b = _boolStr
+        local data = table.concat({
+            "AutoReply="        .. b(cs.AutoReply,        false),
+            "MemoryEnabled="    .. b(cs.MemoryEnabled,    true),
+            "ActionsEnabled="   .. b(cs.ActionsEnabled,   true),
+            "WebSearch="        .. b(cs.WebSearch,        false),
+            "WorldReactions="   .. b(cs.WorldReactions,   true),
+            "AntiSpam="         .. b(cs.AntiSpam,         true),
+            "ReactToMention="   .. b(cs.ReactToMention,   true),
+            "PlayerAwareness="  .. b(cs.PlayerAwareness,  true),
+            "PlaceAwareness="   .. b(cs.PlaceAwareness,   true),
+            "CameraLook="       .. b(cs.CameraLook,       true),
+            "UsePlayerName="    .. b(cs.UsePlayerName,    true),
+            "FollowConfirm="    .. b(cs.FollowConfirm,    true),
+            "TokenEconomy="     .. b(cs.TokenEconomy,     false),
+            "PerUserMemory="    .. b(cs.PerUserMemory,    false),
+            "StripHash="        .. b(cs.StripHash,        true),
             "FollowingEnabled=" .. b(cs.FollowingEnabled, true),
-        }
-        local data = table.concat(lines, "\n")
+            "Temperature="      .. tostring(tonumber(cs.Temperature) or 0.7),
+            "MaxTokens="        .. tostring(math.floor(tonumber(cs.MaxTokens) or 1024)),
+            "PersonalityId="    .. tostring(cs.PersonalityId or "Friendly"),
+        }, "\n")
         writefile(LOB_SETTINGS_FILE, data)
-        print("[LOB] saveSettings OK:\n" .. data)
+        print("[LOB] saveSettings OK: " .. data:gsub("\n", " | "))
     end)
+    if not ok then print("[LOB] saveSettings ERROR: " .. tostring(err)) end
 end
 local function loadSettings()
-    pcall(function()
-        if not readfile then return end
-        local ok, data = pcall(readfile, LOB_SETTINGS_FILE)
-        if not ok or not data or data == "" then return end
+    local ok, err = pcall(function()
+        if not readfile then print("[LOB] loadSettings FAIL: no readfile") return end
+        local rok, data = pcall(readfile, LOB_SETTINGS_FILE)
+        if not rok then print("[LOB] loadSettings FAIL: file not found") return end
+        if not data or data == "" then print("[LOB] loadSettings FAIL: empty file") return end
         local cs = ClientSettings
         if not cs then return end
         local function getBool(key, default)
@@ -107,31 +109,32 @@ local function loadSettings()
             local v = data:match(key .. "=([^\n]+)")
             return v and v:match("^%s*(.-)%s*$") or default
         end
-        cs.AutoReply       = getBool("AutoReply",       false)
-        cs.MemoryEnabled   = getBool("MemoryEnabled",   true)
-        cs.ActionsEnabled  = getBool("ActionsEnabled",  true)
-        cs.WebSearch       = getBool("WebSearch",       false)
-        cs.WorldReactions  = getBool("WorldReactions",  true)
-        cs.AntiSpam        = getBool("AntiSpam",        true)
-        cs.ReactToMention  = getBool("ReactToMention",  true)
-        cs.PlayerAwareness = getBool("PlayerAwareness", true)
-        cs.PlaceAwareness  = getBool("PlaceAwareness",  true)
-        cs.CameraLook      = getBool("CameraLook",      true)
-        cs.UsePlayerName   = getBool("UsePlayerName",   true)
-        cs.FollowConfirm   = getBool("FollowConfirm",   true)
-        cs.TokenEconomy    = getBool("TokenEconomy",    false)
-        cs.PerUserMemory   = getBool("PerUserMemory",   false)
-        cs.Temperature     = getNum("Temperature",      0.7)
-        cs.MaxTokens       = getNum("MaxTokens",        1024)
-        cs.StripHash       = getBool("StripHash",       true)
+        cs.AutoReply        = getBool("AutoReply",        false)
+        cs.MemoryEnabled    = getBool("MemoryEnabled",    true)
+        cs.ActionsEnabled   = getBool("ActionsEnabled",   true)
+        cs.WebSearch        = getBool("WebSearch",        false)
+        cs.WorldReactions   = getBool("WorldReactions",   true)
+        cs.AntiSpam         = getBool("AntiSpam",         true)
+        cs.ReactToMention   = getBool("ReactToMention",   true)
+        cs.PlayerAwareness  = getBool("PlayerAwareness",  true)
+        cs.PlaceAwareness   = getBool("PlaceAwareness",   true)
+        cs.CameraLook       = getBool("CameraLook",       true)
+        cs.UsePlayerName    = getBool("UsePlayerName",    true)
+        cs.FollowConfirm    = getBool("FollowConfirm",    true)
+        cs.TokenEconomy     = getBool("TokenEconomy",     false)
+        cs.PerUserMemory    = getBool("PerUserMemory",    false)
+        cs.StripHash        = getBool("StripHash",        true)
         cs.FollowingEnabled = getBool("FollowingEnabled", true)
+        cs.Temperature      = getNum("Temperature",       0.7)
+        cs.MaxTokens        = getNum("MaxTokens",         1024)
         local pid = getStr("PersonalityId", "Friendly")
         if pid and pid ~= "" then cs.PersonalityId = pid end
         print("[LOB] loadSettings OK: AutoReply=" .. tostring(cs.AutoReply)
             .. " Memory=" .. tostring(cs.MemoryEnabled)
-            .. " Actions=" .. tostring(cs.ActionsEnabled)
-            .. " WebSearch=" .. tostring(cs.WebSearch))
+            .. " WebSearch=" .. tostring(cs.WebSearch)
+            .. " Actions=" .. tostring(cs.ActionsEnabled))
     end)
+    if not ok then print("[LOB] loadSettings ERROR: " .. tostring(err)) end
 end
 local function saveModel(model)
     pcall(function() if writefile then writefile(LOB_MODEL_FILE, tostring(model or "")) end end)
