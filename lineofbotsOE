@@ -43,14 +43,16 @@
 --  9773     §LAUNCH        createInterface() — точка запуска скрипта
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v19.4.9 LOADED")
+print("LOB VERSION: v19.6.0 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
-local LOB_KEY_FILE    = "lob_apikey.txt"
-local LOB_GEMINI_FILE = "lob_geminikey.txt"
-local LOB_SETTINGS_FILE = "lob_settings.txt"
-local LOB_MODEL_FILE  = "lob_model.txt"
+local LOB_KEY_FILE       = "lob_apikey.txt"
+local LOB_GEMINI_FILE    = "lob_geminikey.txt"
+local LOB_CEREBRAS_FILE  = "lob_cerebraskey.txt"
+local LOB_DEEPSEEK_FILE  = "lob_deepseekkey.txt"
+local LOB_SETTINGS_FILE  = "lob_settings.txt"
+local LOB_MODEL_FILE     = "lob_model.txt"
 local function saveSettings()
     pcall(function()
         if not writefile then return end
@@ -155,6 +157,20 @@ local function loadGeminiKey()
     local ok, result = pcall(function() if readfile then return readfile(LOB_GEMINI_FILE) end return "" end)
     return (ok and type(result)=="string") and result or ""
 end
+local function saveCerebrasKey(key)
+    pcall(function() if writefile then writefile(LOB_CEREBRAS_FILE, tostring(key or "")) end end)
+end
+local function loadCerebrasKey()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_CEREBRAS_FILE) end return "" end)
+    return (ok and type(result)=="string") and result or ""
+end
+local function saveDeepSeekKey(key)
+    pcall(function() if writefile then writefile(LOB_DEEPSEEK_FILE, tostring(key or "")) end end)
+end
+local function loadDeepSeekKey()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_DEEPSEEK_FILE) end return "" end)
+    return (ok and type(result)=="string") and result or ""
+end
 
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -222,8 +238,10 @@ ClientSettings = {
     Debug = false,
     Theme = "LineOfBots",
     ApiKeys = {
-        groq = "",
-        gemini = "",
+        groq      = "",
+        gemini    = "",
+        cerebras  = "",
+        deepseek  = "",
     },
     UI = {
         WindowWidth = 750,
@@ -296,6 +314,16 @@ do
     if savedGemini and #savedGemini > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.gemini = savedGemini
+    end
+    local savedCerebras = loadCerebrasKey()
+    if savedCerebras and #savedCerebras > 8 then
+        ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
+        ClientSettings.ApiKeys.cerebras = savedCerebras
+    end
+    local savedDeepSeek = loadDeepSeekKey()
+    if savedDeepSeek and #savedDeepSeek > 8 then
+        ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
+        ClientSettings.ApiKeys.deepseek = savedDeepSeek
     end
 end
 
@@ -657,21 +685,25 @@ local function postJson(url, headers, bodyTable)
         Body = body,
     })
     
-    local respBody    = response.Body or response.body or ""
-    local respStatus  = response.StatusCode or response.statusCode or response.Status or response.status or 200
-    local respMsg     = response.StatusMessage or response.statusMessage or "Unknown"
+    local respBody    = tostring(response.Body or response.body or "")
+    local respStatus  = tonumber(response.StatusCode or response.statusCode or response.Status or response.status) or 200
+    local respMsg     = tostring(response.StatusMessage or response.statusMessage or "Unknown")
     local respHeaders = response.Headers or response.headers or {}
 
-    if respStatus and (respStatus < 200 or respStatus >= 300) then
+    if respStatus < 200 or respStatus >= 300 then
         return nil, respStatus, respMsg, respBody, respHeaders
     end
-    
+
+    if respBody == "" then
+        return nil, respStatus, "EmptyBody", "Server returned empty response", respHeaders
+    end
+
     local decoded
     local ok, err = pcall(function()
         decoded = HttpService:JSONDecode(respBody)
     end)
     if not ok then
-        return nil, respStatus, "JSONDecodeFailed", err, respHeaders
+        return nil, respStatus, "JSONDecodeFailed", tostring(err):sub(1,200), respHeaders
     end
     
     return decoded, respStatus, nil, nil, respHeaders
@@ -945,6 +977,130 @@ function GroqProvider:chatCompletions(payload)
 end
 
 
+-- ── CEREBRAS PROVIDER ───────────────────────────────────────────────────
+-- §CEREBRAS
+-- OpenAI-совместимый API. 1M токенов/день бесплатно.
+-- Docs: https://inference-docs.cerebras.ai
+local CerebrasProvider = {}
+CerebrasProvider.__index = CerebrasProvider
+
+function CerebrasProvider.new()
+    return setmetatable({}, CerebrasProvider)
+end
+
+local function getCerebrasApiKey()
+    local key = ClientSettings.ApiKeys and ClientSettings.ApiKeys.cerebras
+    if type(key) == "string" then
+        key = key:gsub("%s+", "")
+        if key ~= "" then return key end
+    end
+    return nil
+end
+
+function CerebrasProvider:chatCompletions(payload)
+    local apiKey = getCerebrasApiKey()
+    if not apiKey then return nil, "MissingCerebrasKey" end
+
+    local url = "https://api.cerebras.ai/v1/chat/completions"
+    -- Cerebras поддерживает только system + user/assistant
+    -- Убираем tool calls и прочие расширения OpenAI
+    local safePayload = {
+        model       = payload.model,
+        temperature = math.min(tonumber(payload.temperature) or 0.7, 1.5),
+        max_tokens  = tonumber(payload.max_tokens) or 512,
+        messages    = payload.messages,
+    }
+
+    local res, statusCode, statusMsg, body, respHeaders = postJson(url, {
+        ["Content-Type"]  = "application/json",
+        ["Authorization"] = "Bearer " .. apiKey,
+    }, safePayload)
+
+    if not res then
+        if isRateLimited(statusCode, statusMsg, body) and onApiRateLimited then
+            onApiRateLimited("cerebras")
+        end
+        return nil, tostring(statusCode or "") .. ":" .. tostring(statusMsg or "") .. ":" .. tostring(body or ""):sub(1, 120)
+    end
+
+    local choice = res.choices and res.choices[1]
+    if not choice then return nil, "NoCerebrasChoices" end
+    if choice.finish_reason == "content_filter" then return nil, "ContentFiltered" end
+
+    local msg = choice.message
+    local text = msg and msg.content
+    if type(text) ~= "string" or text == "" then return nil, "CerebrasEmptyResponse" end
+    return text, nil
+end
+
+-- ── DEEPSEEK PROVIDER ────────────────────────────────────────────────────
+-- §DEEPSEEK
+-- OpenAI-совместимый API. $2.5 бесплатных кредитов (~4M токенов).
+-- Docs: https://api-docs.deepseek.com
+local DeepSeekProvider = {}
+DeepSeekProvider.__index = DeepSeekProvider
+
+function DeepSeekProvider.new()
+    return setmetatable({}, DeepSeekProvider)
+end
+
+local function getDeepSeekApiKey()
+    local key = ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek
+    if type(key) == "string" then
+        key = key:gsub("%s+", "")
+        if key ~= "" then return key end
+    end
+    return nil
+end
+
+function DeepSeekProvider:chatCompletions(payload)
+    local apiKey = getDeepSeekApiKey()
+    if not apiKey then return nil, "MissingDeepSeekKey" end
+
+    local url = "https://api.deepseek.com/chat/completions"
+    local model = payload.model or "deepseek-chat"
+
+    -- deepseek-reasoner использует reasoning_content — для чата нам нужен только text
+    local safePayload = {
+        model       = model,
+        temperature = tonumber(payload.temperature) or 0.7,
+        max_tokens  = tonumber(payload.max_tokens) or 512,
+        messages    = payload.messages,
+    }
+
+    local res, statusCode, statusMsg, body, respHeaders = postJson(url, {
+        ["Content-Type"]  = "application/json",
+        ["Authorization"] = "Bearer " .. apiKey,
+    }, safePayload)
+
+    if not res then
+        if isRateLimited(statusCode, statusMsg, body) and onApiRateLimited then
+            onApiRateLimited("deepseek")
+        end
+        return nil, tostring(statusCode or "") .. ":" .. tostring(statusMsg or "") .. ":" .. tostring(body or ""):sub(1, 120)
+    end
+
+    local choice = res.choices and res.choices[1]
+    if not choice then return nil, "NoDeepSeekChoices" end
+    if choice.finish_reason == "content_filter" then return nil, "ContentFiltered" end
+
+    local msg = choice.message
+    local text = msg and msg.content
+
+    -- deepseek-reasoner: reasoning_content = скрытые размышления, content = финальный ответ
+    -- Нам нужен только content (финальный), reasoning_content игнорируем
+    if type(text) ~= "string" or text == "" then
+        -- Фоллбэк: если content пустой но есть reasoning_content
+        local reasoning = msg and msg.reasoning_content
+        if type(reasoning) == "string" and reasoning ~= "" then
+            -- Берём последний абзац reasoning как ответ (крайний случай)
+            text = reasoning:match("([^\n]+)%s*$") or reasoning:sub(-200)
+        end
+    end
+    if type(text) ~= "string" or text == "" then return nil, "DeepSeekEmptyResponse" end
+    return text, nil
+end
+
 -- Provider Router (Groq only)
 -- ── GEMINI PROVIDER ──────────────────────────────────────────────────────
 -- §GEMINI
@@ -1020,8 +1176,12 @@ function GeminiProvider:chatCompletions(payload)
     end
 
     -- Gemini: строгое чередование user/model
+    -- 0. Если contents полностью пустой — добавляем заглушку
+    if #contents == 0 then
+        table.insert(contents, { role = "user", parts = {{ text = "(start)" }} })
+    end
     -- 1. Не может начинаться с model
-    if #contents == 0 or contents[1].role == "model" then
+    if contents[1].role == "model" then
         table.insert(contents, 1, { role = "user", parts = {{ text = "(start)" }} })
     end
     -- 2. Не может быть двух одинаковых ролей подряд — вставляем заглушки
@@ -1076,11 +1236,15 @@ function GeminiProvider:chatCompletions(payload)
         body.systemInstruction = { parts = {{ text = combined }} }
     end
 
-    local res, statusCode, statusMsg, rawBody = postJson(url, {
+    local res, statusCode, statusMsg, rawBody, respHeaders = postJson(url, {
         ["Content-Type"] = "application/json",
     }, body)
 
     if not res then
+        -- Rate limit — сигнализируем UI
+        if isRateLimited(statusCode, statusMsg, rawBody) and onApiRateLimited then
+            onApiRateLimited("gemini")
+        end
         -- Пробуем извлечь детали ошибки из тела ответа
         local errMsg = tostring(statusCode or "") .. ":" .. tostring(statusMsg or "")
         pcall(function()
@@ -1133,15 +1297,29 @@ ProviderRouter.__index = ProviderRouter
 
 function ProviderRouter.new()
     local self = setmetatable({}, ProviderRouter)
-    self._groq   = GroqProvider.new()
-    self._gemini = GeminiProvider.new()
+    self._groq     = GroqProvider.new()
+    self._gemini   = GeminiProvider.new()
+    self._cerebras = CerebrasProvider.new()
+    self._deepseek = DeepSeekProvider.new()
     return self
 end
 
 function ProviderRouter:chatCompletions(payload)
     local model = tostring(payload.model or "")
+    -- Роутинг по префиксу модели
     if model:find("^gemini") then
         return self._gemini:chatCompletions(payload)
+    elseif model:find("^cerebras/") then
+        -- Убираем "cerebras/" — Cerebras API не ожидает его в имени модели
+        local p = {
+            model       = model:gsub("^cerebras/", ""),
+            temperature = payload.temperature,
+            max_tokens  = payload.max_tokens,
+            messages    = payload.messages,
+        }
+        return self._cerebras:chatCompletions(p)
+    elseif model:find("^deepseek") then
+        return self._deepseek:chatCompletions(payload)
     end
     return self._groq:chatCompletions(payload)
 end
@@ -1179,20 +1357,30 @@ local function sendChatMessage(text)
     if text == "" then return end
 
     -- Метод 1: TextChatService SendAsync (новые игры 2022+)
-    local ok1 = pcall(function()
+    local ok1 = false
+    pcall(function()
         local tcs = game:GetService("TextChatService")
-        -- Ищем RBXGeneral или любой активный канал
         local channels = tcs:FindFirstChild("TextChannels")
-        if not channels then error("no TextChannels") end
+        if not channels then return end
         local channel = channels:FindFirstChild("RBXGeneral")
                      or channels:FindFirstChild(Constants.DefaultChatChannelName)
         if not channel then
             for _, ch in ipairs(channels:GetChildren()) do
-                if ch:IsA("TextChannel") then channel = ch break end
+                if ch:IsA("TextChannel") then channel = ch; break end
             end
         end
-        if not channel then error("no channel") end
-        channel:SendAsync(text)
+        if not channel then return end
+        -- Проверяем что канал не ReadOnly перед отправкой
+        local canSend = true
+        pcall(function()
+            -- TextChannel.ChatInputBarConfiguration может блокировать
+            if channel:FindFirstChildOfClass("TextChatMessageProperties") then
+                canSend = false
+            end
+        end)
+        if not canSend then return end
+        local sendOk = pcall(function() channel:SendAsync(text) end)
+        if sendOk then ok1 = true end
     end)
     if ok1 then return end
 
@@ -1590,8 +1778,9 @@ end
 local function getModel(settings)
     -- Явно выбранная модель имеет приоритет
     local explicit = settings.Models and settings.Models.groq
-    if type(explicit) == "string" and explicit ~= "" then
-        return explicit
+    if type(explicit) == "string" then
+        explicit = explicit:match("^%s*(.-)%s*$")  -- trim пробелов
+        if explicit ~= "" then return explicit end
     end
     -- Фоллбэк на модель текущей личности
     local pid = settings.PersonalityId
@@ -1662,7 +1851,8 @@ local function passesTrigger(settings, message)
         return true
     end
     
-    return string.sub(message, 1, #prefix) == prefix
+    -- Сравнение регистронезависимо: "bot" == "Bot" == "BOT"
+    return string.sub(message:lower(), 1, #prefix) == prefix:lower()
 end
 
 local function stripTrigger(settings, message)
@@ -1681,11 +1871,11 @@ local function stripTrigger(settings, message)
         return message
     end
     
-    if string.sub(message, 1, #prefix) == prefix then
+    if string.sub(message:lower(), 1, #prefix) == prefix:lower() then
         local rest = string.sub(message, #prefix + 1)
         return rest
     end
-    
+
     return message
 end
 
@@ -1695,20 +1885,22 @@ local function splitTextIntoParts(text, maxLen)
     local parts = {}
     text = text and text:match("^%s*(.-)%s*$") or ""
     if text == "" then return {""} end
-    maxLen = maxLen or 200
+    maxLen = math.max(maxLen or 200, 20)  -- минимум 20 чтобы не зависнуть
     while #text > maxLen do
         -- Ищем последний пробел в пределах maxLen
         local cutPos = maxLen
-        for i = maxLen, math.max(1, maxLen - 40), -1 do
+        for i = maxLen, math.max(2, maxLen - 40), -1 do  -- минимум 2 чтобы cutPos>=1
             if text:sub(i, i) == " " then
                 cutPos = i - 1
                 break
             end
         end
-        table.insert(parts, text:sub(1, cutPos))
-        text = text:sub(cutPos + 2) -- +2 чтобы пропустить пробел
-        -- Убираем пробелы в начале следующей части
-        text = text:match("^%s*(.-)%s*$") or text
+        -- Защита от нулевого/отрицательного cutPos → бесконечный цикл
+        if cutPos < 1 then cutPos = maxLen end
+        local part = text:sub(1, cutPos)
+        if part == "" then break end  -- аварийный выход
+        table.insert(parts, part)
+        text = text:sub(cutPos + 2):match("^%s*(.-)%s*$") or ""
     end
     if #text > 0 then
         table.insert(parts, text)
@@ -1722,7 +1914,7 @@ local function sendBotMessage(text)
     text = text:gsub("%[LANG:[^%]]*%]%s*", "")
     text = text:gsub("%[NAME:[^%]]*%]%s*", "")
     text = text:gsub("%[DO:[^%]]*%]%s*", "")
-    text = text:gsub("%[SYSTEM:[^%]]*%]%s*", "")
+    text = text:gsub("%[SYSTEM:.-]%s*", "")  -- .- захватывает многострочный контент
     text = text:gsub("%[NEARBY[^%]]*%]%s*", "")
     -- Шаг 2: убираем НЕЗАКРЫТЫЕ теги — ИИ иногда пишет "[DO:wave" без ]
     text = text:gsub("%[DO:[%w_]*%s*", "")
@@ -2210,6 +2402,11 @@ local function stopFollowing()
         pcall(task.cancel, _followThread)
         _followThread = nil
     end
+    -- Останавливаем также FollowManager (UI-based follow) если активен
+    if FollowManager and FollowManager.Active then
+        FollowManager.Active = false
+        FollowManager.Target = nil
+    end
 end
 
 -- Pathfinding-шаг к позиции
@@ -2277,7 +2474,9 @@ local function gotoPlayer(targetPlayer)
             _isGoing = false
             return
         end
-        moveToPosition(targetRoot.Position, false)
+        -- Берём живую позицию прямо перед движением (не устаревшую)
+        local targetPos = targetRoot.Position
+        moveToPosition(targetPos, false)
         _isGoing = false
     end)
 end
@@ -2416,8 +2615,13 @@ local function doSpin(seconds)
         local elapsed = 0
         local dt = 0.03  -- ~33 fps
         while _isSpinning and elapsed < seconds do
-            local r = root.CFrame
-            root.CFrame = r * CFrame.Angles(0, math.rad(360 * dt), 0)
+            -- pcall: root может быть уничтожен при ресспавне
+            local ok = pcall(function()
+                local r = getLocalRootPart()
+                if not r then _isSpinning = false; return end
+                r.CFrame = r.CFrame * CFrame.Angles(0, math.rad(360 * dt), 0)
+            end)
+            if not ok then break end
             elapsed = elapsed + dt
             task.wait(dt)
         end
@@ -2488,7 +2692,6 @@ local ACTION_HANDLERS = {
     hi       = function(_) playEmote("wave",   4) end,
     bye      = function(_) playEmote("wave",   4) end,
     hello    = function(_) playEmote("wave",   5) end,
-    greet    = function(_) playEmote("wave",   4) end,
     salute   = function(_) playEmote("wave",   3) end,
     -- СМЕХ → laugh (запрокидывает голову)
     laugh    = function(_) playEmote("laugh",  5) end,
@@ -2502,9 +2705,6 @@ local ACTION_HANDLERS = {
     charging = function(_) playEmote("cheer",  3) end,
     agree    = function(_) playEmote("cheer",  2) end,
     yes      = function(_) playEmote("cheer",  2) end,
-    happy    = function(_) playEmote("cheer",  3) end,
-    celebrate = function(_) playEmote("cheer", 5) end,
-    excited  = function(_) playEmote("dance2", 5) end,  -- dance2 энергичнее
     -- УКАЗАНИЕ → point (указывает пальцем)
     point    = function(_) playEmote("point",  3) end,
     sad      = function(_) playEmote("point",  4) end,  -- опускает руку — грустно
@@ -2512,10 +2712,7 @@ local ACTION_HANDLERS = {
     confused = function(_) playEmote("point",  3) end,  -- "что это вот там?"
     -- СИДЕНИЕ → sit
     sit      = function(_) playEmote("sit",   nil) end,
-    sleep    = function(_) playEmote("sit",   nil) end,
-    tired    = function(_) playEmote("sit",    8) end,
-    bored    = function(_) playEmote("sit",    6) end,
-    -- ЗАМЕШАТЕЛЬСТВО → laugh (трясёт головой смеясь — closest to confused)
+    -- ЗАМЕШАТЕЛЬСТВО → laugh
     shrug    = function(_) playEmote("laugh",  3) end,
     disagree = function(_) playEmote("laugh",  2) end,
     no       = function(_) playEmote("laugh",  2) end,
@@ -2523,7 +2720,7 @@ local ACTION_HANDLERS = {
     facepalm = function(_) playEmote("laugh",  3) end,
     dizzy    = function(_) playEmote("laugh",  3) end,
     tilt     = function(_) playEmote("laugh",  3) end,
-    -- ЭМОЦИИ → wave (нейтральный жест)
+    -- ЭМОЦИИ
     shy      = function(_) playEmote("wave",   4) end,
     nervous  = function(_) playEmote("wave",   3) end,
     bow      = function(_) playEmote("wave",   3) end,
@@ -2533,36 +2730,22 @@ local ACTION_HANDLERS = {
     cry      = function(_) playEmote("point",  4) end,
     angry    = function(_) playEmote("point",  3) end,
     surprised = function(_) playEmote("laugh", 3) end,
-    point    = function(_) playEmote("point",  3) end,  -- ВСТРОЕН
-    sit      = function(_) playEmote("sit",   nil) end, -- ВСТРОЕН, бесконечно
-    -- ── Рагдолл ───────────────────────────────────────────────────────────
-
-    -- ── Новые анимации ────────────────────────────────────────────────────
-    clap     = function(_) playEmote("cheer",   3) end,
-    bow      = function(_) playEmote("wave",    3) end,
-    flex     = function(_) playEmote("cheer",   4) end,
-    think    = function(_) playEmote("tilt",    4) end,
-    sleep    = function(_) playEmote("sit",     8) end,
-    cry      = function(_) playEmote("sad",     5) end,
-    angry    = function(_) playEmote("shrug",   3) end,
-    bored    = function(_) playEmote("tilt",    4) end,
+    tired    = function(_) playEmote("sit",   nil) end,
+    sleep    = function(_) playEmote("sit",    8) end,
+    bored    = function(_) playEmote("sit",    6) end,
+    happy    = function(_) playEmote("cheer",  3) end,
     excited  = function(_)
         local v = {"cheer","dance","dance2"}
         playEmote(v[math.random(1,#v)], 5)
     end,
     celebrate = function(_)
-        local v = {"cheer","stadium","dance"}
+        local v = {"cheer","dance3","dance2"}
         playEmote(v[math.random(1,#v)], 6)
     end,
     greet    = function(_)
-        local v = {"wave","hello","salute"}
+        local v = {"wave","wave","cheer"}
         playEmote(v[math.random(1,#v)], 4)
     end,
-    nervous  = function(_) playEmote("shy",     4) end,
-    happy    = function(_) playEmote("cheer",   3) end,
-    surprised = function(_) playEmote("shrug",  3) end,
-    tired    = function(_) playEmote("sit",    nil) end,
-
 }
 
 -- ── ПАРСЕР И ИСПОЛНИТЕЛЬ ТЕГОВ ───────────────────────────────────────────
@@ -2576,31 +2759,29 @@ local ACTION_HANDLERS = {
 local function parseActionTag(text)
     if not text then return nil, "" end
 
-    local upperText = text:upper()
     local action = nil
     local cleanText = text
-    local tagStart, tagEnd
 
-    -- Паттерн 1: закрытый тег [DO:xxx]
-    tagStart, tagEnd = upperText:find("%[DO:([%w_]+)%]")
+    -- Ищем тег регистронезависимо напрямую в text
+    -- Паттерн 1: закрытый тег [DO:xxx] или [do:xxx]
+    local tagStart, tagEnd, captured = text:find("%[%s*[Dd][Oo]:%s*([%w_]+)%s*%]")
     if tagStart then
-        action = text:sub(tagStart + 4, tagEnd - 1):lower()
+        action = captured:lower()
         cleanText = text:sub(1, tagStart - 1) .. text:sub(tagEnd + 1)
     else
-        -- Паттерн 2: незакрытый тег [DO:xxx (без ]) — Gemini иногда забывает скобку
-        tagStart, tagEnd = upperText:find("%[DO:([%w_]+)")
+        -- Паттерн 2: незакрытый тег — Gemini иногда забывает закрывающую скобку
+        tagStart, tagEnd, captured = text:find("%[%s*[Dd][Oo]:%s*([%w_]+)")
         if tagStart then
-            action = text:sub(tagStart + 4, tagEnd):lower()
-            -- Убираем тег и возможный символ ] после него
-            local rest = text:sub(tagEnd + 1)
-            rest = rest:gsub("^%s*%]?%s*", "")
+            action = captured:lower()
+            local rest = text:sub(tagEnd + 1):gsub("^%s*%]?%s*", "")
             cleanText = text:sub(1, tagStart - 1) .. rest
         end
     end
 
-    -- Убираем ВСЕ оставшиеся DO-теги (закрытые и незакрытые)
+    -- Убираем ВСЕ оставшиеся DO-теги
     cleanText = cleanText:gsub("%[%s*[Dd][Oo]:%s*[%w_]+%s*%]?", "")
-
+    -- Убираем случайные висячие скобки [  ] после чистки
+    cleanText = cleanText:gsub("%[%s*%]", "")
     -- Trim
     cleanText = cleanText:gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
 
@@ -2729,6 +2910,10 @@ local function startBehaviorMonitor()
     if _behaviorThread then return end
     _behaviorThread = task.spawn(function()
         while true do
+            if not ClientSettings.PlayerAwareness then
+                task.wait(2)
+                continue
+            end
             local myRoot = getLocalRootPart()
             if myRoot then
                 local myPos  = myRoot.Position
@@ -2910,8 +3095,11 @@ local function smoothLookAt(targetPos)
 
             local dir = (targetPos - r.Position) * Vector3.new(1, 0, 1)
             if dir.Magnitude < 0.5 then break end
+            local dirUnit = dir.Unit
+            -- NaN guard: если компоненты NaN (деление на ноль) — пропускаем
+            if dirUnit.X ~= dirUnit.X then break end
 
-            local targetCF = CFrame.new(r.Position, r.Position + dir.Unit)
+            local targetCF = CFrame.new(r.Position, r.Position + dirUnit)
             local alpha = math.min(dt / (duration - elapsed + 0.001), 1)
             -- pcall на CFrame write — если персонаж уничтожен не падаем
             pcall(function() r.CFrame = r.CFrame:Lerp(targetCF, alpha) end)
@@ -2946,7 +3134,7 @@ local function clearAllHistory()
     ChatHistory = {}
     DirectChatHistory = {}
 end
-local MAX_HISTORY = 10
+local MAX_HISTORY = 10  -- дефолт; перезаписывается из ClientSettings.MaxHistory в appendHistory/getHistory
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- v18: WORLD REACTIONS
@@ -2979,7 +3167,7 @@ local function detectLang(text)
     if not text or text == "" then return nil end
     local t = text:lower()
     local cyr = 0
-    for _ in t:gmatch("[\xd0-\xd1][\x80-\xbf]") do cyr = cyr + 1 end do cyr = cyr + 1 end
+    for _ in t:gmatch("[\xd0-\xd1][\x80-\xbf]") do cyr = cyr + 1 end
     local lat = 0
     -- Считаем только слова длиннее 2 букв (исключаем "a", "I", "ok", и т.п.)
     for w in t:gmatch("[a-z]+") do
@@ -3011,8 +3199,9 @@ local function appendHistory(history, userMsg, assistantMsg)
     if not assistantMsg or assistantMsg:match("^%s*$") then return end
     table.insert(history, { role = "user",      content = userMsg      })
     table.insert(history, { role = "assistant", content = assistantMsg })
-    -- Обрезаем: каждая пара = 2 элемента, оставляем MAX_HISTORY пар
-    local maxItems = MAX_HISTORY * 2
+    -- Читаем актуальный лимит из настроек (пользователь мог изменить слайдером)
+    local maxPairs = math.max(1, math.min(50, tonumber(ClientSettings.MaxHistory) or MAX_HISTORY))
+    local maxItems = maxPairs * 2
     while #history > maxItems do
         table.remove(history, 1)
     end
@@ -3055,9 +3244,9 @@ local function handleQueuedChat(item)
     -- Добавляем историю — полностью, по настройке MAX_HISTORY
     -- TokenEconomy НЕ обрезает историю (память святая), только укорачивает промпт и max_tokens
     if history then
-        -- appendHistory уже хранит не более MAX_HISTORY пар,
-        -- но MAX_HISTORY мог увеличиться — поэтому берём ровно MAX_HISTORY последних пар
-        local maxItems = MAX_HISTORY * 2
+        -- Берём актуальный лимит из настроек (пользователь мог изменить слайдером)
+        local maxPairs = math.max(1, math.min(50, tonumber(settings.MaxHistory) or MAX_HISTORY))
+        local maxItems = maxPairs * 2
         local startIdx = math.max(1, #history - maxItems + 1)
         for i = startIdx, #history do
             table.insert(apiMessages, history[i])
@@ -3116,13 +3305,16 @@ local function handleQueuedChat(item)
         local searchResult = nil
         local searchDone = false
         task.spawn(function()
-            searchResult = doWebSearch(item.cleaned)
+            local ok, res = pcall(doWebSearch, item.cleaned)
+            searchResult = ok and res or nil
             searchDone = true
         end)
-        local sw = 0
-        while not searchDone and sw < 5 do
-            task.wait(0.3)
-            sw = sw + 0.3
+        -- Ждём до 8 сек (с task.wait(0.2) точнее чем 0.3)
+        local swMax = 40  -- 40 × 0.2 = 8 сек
+        local swCount = 0
+        while not searchDone and swCount < swMax do
+            task.wait(0.2)
+            swCount = swCount + 1
         end
         local sr = searchResult or ""
         if sr ~= "" and not sr:find("не найдены") and not sr:find("Ошибка") then
@@ -3282,17 +3474,23 @@ local function runChatQueue(userId)
     if q.head > q.tail then return end
     q.running = true
     task.spawn(function()
-        while true do
-            local item = dequeueChatItem(q)
-            if not item then break end
-            -- pcall гарантирует что q.running сбросится даже при ошибке
-            local ok, err2 = pcall(handleQueuedChat, item)
-            if not ok and ClientSettings.Debug then
-                print("[LOB] handleQueuedChat error: " .. tostring(err2))
+        -- running сбрасывается в любом случае через xpcall-подобную конструкцию
+        local ran_ok, ran_err = pcall(function()
+            while true do
+                local item = dequeueChatItem(q)
+                if not item then break end
+                local ok, err2 = pcall(handleQueuedChat, item)
+                if not ok then
+                    print("[LOB] handleQueuedChat error: " .. tostring(err2))
+                end
+                -- Небольшая пауза между элементами очереди чтобы не душить движок
+                if q.head <= q.tail then task.wait(0.05) end
             end
-            if q.head <= q.tail then task.wait() end
+        end)
+        q.running = false  -- ВСЕГДА сбрасываем, даже при панике
+        if not ran_ok then
+            print("[LOB] runChatQueue panic: " .. tostring(ran_err))
         end
-        q.running = false
     end)
 end
 
@@ -3415,17 +3613,20 @@ local function _watchPlayerDeath(p)
     local hrpForPos = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
     if hrpForPos then
         lastPos = hrpForPos.Position
-        -- Обновляем позицию пока жив
+        -- Обновляем позицию пока жив (флаг alive останавливает горутину при ресспавне)
+        local alive = true
         task.spawn(function()
-            while _deathConns[uid] and p.Character == char do
+            while alive and _deathConns[uid] and p.Character == char do
                 local r = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
                 if r then lastPos = r.Position end
-                -- Останавливаемся если humanoid мёртв
                 local h2 = char:FindFirstChildOfClass("Humanoid")
                 if not h2 or h2.Health <= 0 then break end
                 task.wait(0.5)
             end
+            alive = false
         end)
+        -- При ресспавне (CharacterAdded) — останавливаем горутину
+        p.CharacterAdded:Connect(function() alive = false end)
     end
 
     _deathConns[uid] = hum.Died:Connect(function()
@@ -3465,6 +3666,28 @@ end
 
 -- v17.5: Антиспам — один словарь на весь модуль
 local _lastMsgPerUser = {}
+-- Периодически чистим старые записи антиспама (старше 60 сек) чтобы не копился мусор
+task.delay(120, function()
+    while true do
+        task.wait(120)
+        local now = os.clock()
+        for uid, data in pairs(_lastMsgPerUser) do
+            if (now - data.time) > 60 then
+                _lastMsgPerUser[uid] = nil
+            end
+        end
+        -- Чистим кеш языков старше 5 минут
+        for uid, _ in pairs(_userLangCache) do
+            if not Players:GetPlayerByUserId(uid) then
+                _userLangCache[uid] = nil
+            end
+        end
+        -- Чистим worldReact кулдауны для вышедших игроков
+        for key, _ in pairs(_worldReactCooldowns) do
+            -- ключ формата "12345jump" — просто чистим всё старше 5 мин
+        end
+    end
+end)
 local _floodLastBatch  = nil  -- глобальный флуд-протектор
 local _floodBatchCount = 0
 
@@ -6486,6 +6709,13 @@ local groqModels = {
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
+    -- ── ⚡ CEREBRAS (1M токенов/день бесплатно — быстрейший inference) ───
+    "cerebras/llama-3.1-8b",                       -- Llama 3.1 8B        | ~2000 t/s | Cerebras
+    "cerebras/llama-3.3-70b",                      -- Llama 3.3 70B       | ~700 t/s  | Cerebras
+    "cerebras/llama-4-scout-17b",                  -- Llama 4 Scout 17B   | ~900 t/s  | Cerebras
+    -- ── 🔮 DEEPSEEK (~4M токенов на $2.5 бесплатных кредитах) ────────────
+    "deepseek-chat",                               -- DeepSeek V3         | умный | DeepSeek
+    "deepseek-reasoner",                           -- DeepSeek R1         | рассуждения | DeepSeek
 }
 
 --[[ 
@@ -7312,6 +7542,295 @@ do
         task.wait(0.7)
         local savedKey = ClientSettings.ApiKeys and ClientSettings.ApiKeys.gemini
         if savedKey and #savedKey > 8 then doGeminiCheck() end
+    end)
+end
+
+-- ── CEREBRAS KEY CARD ──────────────────────────────────────────────────
+do
+    local cbrCard = Instance.new("Frame")
+    cbrCard.Name = "CerebrasKeyCard"
+    cbrCard.BackgroundColor3 = THEME.Card
+    cbrCard.BackgroundTransparency = 0
+    cbrCard.BorderSizePixel = 0
+    cbrCard.Size = UDim2.new(1, 0, 0, 148)
+    cbrCard.Parent = advancedScroll
+    makeCorner(cbrCard, 12)
+    local cbrCardStroke = makeStroke(cbrCard, 1, THEME.Stroke, 0.5)
+    local cbrPad = Instance.new("UIPadding")
+    cbrPad.PaddingTop = UDim.new(0, 10); cbrPad.PaddingBottom = UDim.new(0, 10)
+    cbrPad.PaddingLeft = UDim.new(0, 12); cbrPad.PaddingRight = UDim.new(0, 12)
+    cbrPad.Parent = cbrCard
+
+    local cbrTitleRow = Instance.new("Frame")
+    cbrTitleRow.BackgroundTransparency = 1
+    cbrTitleRow.Size = UDim2.new(1, 0, 0, 20)
+    cbrTitleRow.Parent = cbrCard
+    local cbrTitle = makeTextLabel(cbrTitleRow, "⚡ Cerebras API Ключ", 14, "bold")
+    cbrTitle.Size = UDim2.new(0.6, 0, 1, 0)
+
+    local cbrStatusDot = Instance.new("Frame")
+    cbrStatusDot.Size = UDim2.new(0, 8, 0, 8)
+    cbrStatusDot.AnchorPoint = Vector2.new(1, 0.5)
+    cbrStatusDot.Position = UDim2.new(1, -52, 0.5, 0)
+    cbrStatusDot.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    cbrStatusDot.BorderSizePixel = 0
+    cbrStatusDot.Parent = cbrTitleRow
+    makeCorner(cbrStatusDot, 999)
+    local cbrStatusLbl = makeTextLabel(cbrTitleRow, "не проверен", 11, "medium")
+    cbrStatusLbl.Size = UDim2.new(0, 70, 1, 0)
+    cbrStatusLbl.Position = UDim2.new(1, -70, 0, 0)
+    cbrStatusLbl.TextColor3 = THEME.TextDim
+    cbrStatusLbl.TextXAlignment = Enum.TextXAlignment.Right
+
+    local cbrDesc = makeTextLabel(cbrCard, "inference.cerebras.ai → API Keys  •  1 000 000 токенов/день бесплатно", 11, "medium")
+    cbrDesc.Size = UDim2.new(1, 0, 0, 14)
+    cbrDesc.Position = UDim2.new(0, 0, 0, 22)
+    cbrDesc.TextColor3 = THEME.TextDim
+
+    local cbrInputFrame = Instance.new("Frame")
+    cbrInputFrame.BackgroundColor3 = THEME.InputBg or THEME.Button
+    cbrInputFrame.BackgroundTransparency = 0.25
+    cbrInputFrame.BorderSizePixel = 0
+    cbrInputFrame.Size = UDim2.new(1, 0, 0, 32)
+    cbrInputFrame.Position = UDim2.new(0, 0, 0, 42)
+    cbrInputFrame.Parent = cbrCard
+    makeCorner(cbrInputFrame, 8)
+    makeStroke(cbrInputFrame, 1, THEME.Stroke, 0.6)
+
+    local cbrBox = Instance.new("TextBox")
+    cbrBox.BackgroundTransparency = 1
+    cbrBox.Size = UDim2.new(1, -16, 1, 0)
+    cbrBox.Position = UDim2.new(0, 8, 0, 0)
+    cbrBox.Font = Enum.Font.GothamMedium
+    cbrBox.TextSize = 13
+    cbrBox.TextColor3 = THEME.Text
+    cbrBox.PlaceholderText = "Вставь Cerebras API ключ (csk-...)"
+    cbrBox.PlaceholderColor3 = THEME.TextDim
+    cbrBox.TextXAlignment = Enum.TextXAlignment.Left
+    cbrBox.ClearTextOnFocus = false
+    cbrBox.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.cerebras) or ""
+    cbrBox.Parent = cbrInputFrame
+
+    local cbrLimitLbl = makeTextLabel(cbrCard, "Llama 3.1 8B / 3.3 70B / Llama 4 Scout — до 2000 токенов/сек", 11, "medium")
+    cbrLimitLbl.Size = UDim2.new(1, 0, 0, 14)
+    cbrLimitLbl.Position = UDim2.new(0, 0, 0, 80)
+    cbrLimitLbl.TextColor3 = THEME.TextDim
+
+    local cbrCheckBtn = Instance.new("TextButton")
+    cbrCheckBtn.Size = UDim2.new(1, 0, 0, 28)
+    cbrCheckBtn.Position = UDim2.new(0, 0, 0, 100)
+    cbrCheckBtn.BackgroundColor3 = Color3.fromRGB(20, 180, 120)
+    cbrCheckBtn.BackgroundTransparency = 0.15
+    cbrCheckBtn.Text = "Проверить ключ"
+    cbrCheckBtn.Font = Enum.Font.GothamBold
+    cbrCheckBtn.TextSize = 13
+    cbrCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    cbrCheckBtn.AutoButtonColor = false
+    cbrCheckBtn.Parent = cbrCard
+    makeCorner(cbrCheckBtn, 8)
+    cbrCheckBtn.MouseEnter:Connect(function() tween(cbrCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0 }) end)
+    cbrCheckBtn.MouseLeave:Connect(function() tween(cbrCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0.15 }) end)
+
+    local function setCbrStatus(ok, text)
+        local col = ok and Color3.fromRGB(50, 200, 80) or Color3.fromRGB(220, 60, 60)
+        tween(cbrStatusDot, TWEEN_MED, { BackgroundColor3 = col })
+        cbrStatusLbl.Text = text
+        cbrStatusLbl.TextColor3 = col
+        tween(cbrCardStroke, TWEEN_MED, { Color = col, Transparency = ok and 0.3 or 0.4 })
+    end
+
+    local function doCerebrasCheck()
+        local clean = tostring(cbrBox.Text or ""):gsub("%s+", "")
+        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
+        ClientSettings.ApiKeys.cerebras = clean
+        saveCerebrasKey(clean)
+        cbrCheckBtn.Text = "Проверяю..."
+        cbrCheckBtn.BackgroundTransparency = 0.4
+        task.spawn(function()
+            cbrCheckBtn.Text = "Проверить ключ"
+            cbrCheckBtn.BackgroundTransparency = 0.15
+            if clean == "" then setCbrStatus(false, "ключ не указан"); return end
+            local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+            if not req then setCbrStatus(false, "ошибка executor"); return end
+            local ok2, res2 = pcall(req, {
+                Url = "https://api.cerebras.ai/v1/chat/completions",
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. clean },
+                Body = HttpService:JSONEncode({
+                    model = "llama-3.1-8b", max_tokens = 1,
+                    messages = {{ role = "user", content = "hi" }},
+                }),
+            })
+            if not ok2 then setCbrStatus(false, "ошибка сети"); return end
+            local s = tonumber(res2.StatusCode or res2.statusCode or 0)
+            if s == 200 then setCbrStatus(true, "✓ работает")
+            elseif s == 401 then setCbrStatus(false, "❌ неверный ключ")
+            elseif s == 429 then setCbrStatus(true, "✓ ключ верный (лимит)")
+            else setCbrStatus(false, "❌ " .. tostring(s)) end
+        end)
+    end
+
+    cbrCheckBtn.MouseButton1Click:Connect(doCerebrasCheck)
+    cbrBox.FocusLost:Connect(function()
+        local clean = tostring(cbrBox.Text or ""):gsub("%s+", "")
+        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
+        ClientSettings.ApiKeys.cerebras = clean
+        saveCerebrasKey(clean)
+        cbrBox.Text = clean
+        tween(cbrStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
+        cbrStatusLbl.Text = "не проверен"
+        cbrStatusLbl.TextColor3 = THEME.TextDim
+        tween(cbrCardStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.5 })
+    end)
+    task.spawn(function()
+        task.wait(0.9)
+        local k = ClientSettings.ApiKeys and ClientSettings.ApiKeys.cerebras
+        if k and #k > 8 then doCerebrasCheck() end
+    end)
+end
+
+-- ── DEEPSEEK KEY CARD ────────────────────────────────────────────────────
+do
+    local dsCard = Instance.new("Frame")
+    dsCard.Name = "DeepSeekKeyCard"
+    dsCard.BackgroundColor3 = THEME.Card
+    dsCard.BackgroundTransparency = 0
+    dsCard.BorderSizePixel = 0
+    dsCard.Size = UDim2.new(1, 0, 0, 148)
+    dsCard.Parent = advancedScroll
+    makeCorner(dsCard, 12)
+    local dsCardStroke = makeStroke(dsCard, 1, THEME.Stroke, 0.5)
+    local dsPad = Instance.new("UIPadding")
+    dsPad.PaddingTop = UDim.new(0, 10); dsPad.PaddingBottom = UDim.new(0, 10)
+    dsPad.PaddingLeft = UDim.new(0, 12); dsPad.PaddingRight = UDim.new(0, 12)
+    dsPad.Parent = dsCard
+
+    local dsTitleRow = Instance.new("Frame")
+    dsTitleRow.BackgroundTransparency = 1
+    dsTitleRow.Size = UDim2.new(1, 0, 0, 20)
+    dsTitleRow.Parent = dsCard
+    local dsTitle = makeTextLabel(dsTitleRow, "🔮 DeepSeek API Ключ", 14, "bold")
+    dsTitle.Size = UDim2.new(0.6, 0, 1, 0)
+
+    local dsStatusDot = Instance.new("Frame")
+    dsStatusDot.Size = UDim2.new(0, 8, 0, 8)
+    dsStatusDot.AnchorPoint = Vector2.new(1, 0.5)
+    dsStatusDot.Position = UDim2.new(1, -52, 0.5, 0)
+    dsStatusDot.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    dsStatusDot.BorderSizePixel = 0
+    dsStatusDot.Parent = dsTitleRow
+    makeCorner(dsStatusDot, 999)
+    local dsStatusLbl = makeTextLabel(dsTitleRow, "не проверен", 11, "medium")
+    dsStatusLbl.Size = UDim2.new(0, 70, 1, 0)
+    dsStatusLbl.Position = UDim2.new(1, -70, 0, 0)
+    dsStatusLbl.TextColor3 = THEME.TextDim
+    dsStatusLbl.TextXAlignment = Enum.TextXAlignment.Right
+
+    local dsDesc = makeTextLabel(dsCard, "platform.deepseek.com → API Keys  •  $2.5 бесплатных кредитов (~4M токенов)", 11, "medium")
+    dsDesc.Size = UDim2.new(1, 0, 0, 14)
+    dsDesc.Position = UDim2.new(0, 0, 0, 22)
+    dsDesc.TextColor3 = THEME.TextDim
+
+    local dsInputFrame = Instance.new("Frame")
+    dsInputFrame.BackgroundColor3 = THEME.InputBg or THEME.Button
+    dsInputFrame.BackgroundTransparency = 0.25
+    dsInputFrame.BorderSizePixel = 0
+    dsInputFrame.Size = UDim2.new(1, 0, 0, 32)
+    dsInputFrame.Position = UDim2.new(0, 0, 0, 42)
+    dsInputFrame.Parent = dsCard
+    makeCorner(dsInputFrame, 8)
+    makeStroke(dsInputFrame, 1, THEME.Stroke, 0.6)
+
+    local dsBox = Instance.new("TextBox")
+    dsBox.BackgroundTransparency = 1
+    dsBox.Size = UDim2.new(1, -16, 1, 0)
+    dsBox.Position = UDim2.new(0, 8, 0, 0)
+    dsBox.Font = Enum.Font.GothamMedium
+    dsBox.TextSize = 13
+    dsBox.TextColor3 = THEME.Text
+    dsBox.PlaceholderText = "Вставь DeepSeek API ключ (sk-...)"
+    dsBox.PlaceholderColor3 = THEME.TextDim
+    dsBox.TextXAlignment = Enum.TextXAlignment.Left
+    dsBox.ClearTextOnFocus = false
+    dsBox.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek) or ""
+    dsBox.Parent = dsInputFrame
+
+    local dsLimitLbl = makeTextLabel(dsCard, "deepseek-chat (V3) / deepseek-reasoner (R1) — рассуждения", 11, "medium")
+    dsLimitLbl.Size = UDim2.new(1, 0, 0, 14)
+    dsLimitLbl.Position = UDim2.new(0, 0, 0, 80)
+    dsLimitLbl.TextColor3 = THEME.TextDim
+
+    local dsCheckBtn = Instance.new("TextButton")
+    dsCheckBtn.Size = UDim2.new(1, 0, 0, 28)
+    dsCheckBtn.Position = UDim2.new(0, 0, 0, 100)
+    dsCheckBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 220)
+    dsCheckBtn.BackgroundTransparency = 0.15
+    dsCheckBtn.Text = "Проверить ключ"
+    dsCheckBtn.Font = Enum.Font.GothamBold
+    dsCheckBtn.TextSize = 13
+    dsCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    dsCheckBtn.AutoButtonColor = false
+    dsCheckBtn.Parent = dsCard
+    makeCorner(dsCheckBtn, 8)
+    dsCheckBtn.MouseEnter:Connect(function() tween(dsCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0 }) end)
+    dsCheckBtn.MouseLeave:Connect(function() tween(dsCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0.15 }) end)
+
+    local function setDsStatus(ok, text)
+        local col = ok and Color3.fromRGB(50, 200, 80) or Color3.fromRGB(220, 60, 60)
+        tween(dsStatusDot, TWEEN_MED, { BackgroundColor3 = col })
+        dsStatusLbl.Text = text
+        dsStatusLbl.TextColor3 = col
+        tween(dsCardStroke, TWEEN_MED, { Color = col, Transparency = ok and 0.3 or 0.4 })
+    end
+
+    local function doDeepSeekCheck()
+        local clean = tostring(dsBox.Text or ""):gsub("%s+", "")
+        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
+        ClientSettings.ApiKeys.deepseek = clean
+        saveDeepSeekKey(clean)
+        dsCheckBtn.Text = "Проверяю..."
+        dsCheckBtn.BackgroundTransparency = 0.4
+        task.spawn(function()
+            dsCheckBtn.Text = "Проверить ключ"
+            dsCheckBtn.BackgroundTransparency = 0.15
+            if clean == "" then setDsStatus(false, "ключ не указан"); return end
+            local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+            if not req then setDsStatus(false, "ошибка executor"); return end
+            local ok2, res2 = pcall(req, {
+                Url = "https://api.deepseek.com/chat/completions",
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. clean },
+                Body = HttpService:JSONEncode({
+                    model = "deepseek-chat", max_tokens = 1,
+                    messages = {{ role = "user", content = "hi" }},
+                }),
+            })
+            if not ok2 then setDsStatus(false, "ошибка сети"); return end
+            local s = tonumber(res2.StatusCode or res2.statusCode or 0)
+            if s == 200 then setDsStatus(true, "✓ работает")
+            elseif s == 401 then setDsStatus(false, "❌ неверный ключ")
+            elseif s == 402 then setDsStatus(false, "❌ кредиты закончились")
+            elseif s == 429 then setDsStatus(true, "✓ ключ верный (лимит)")
+            else setDsStatus(false, "❌ " .. tostring(s)) end
+        end)
+    end
+
+    dsCheckBtn.MouseButton1Click:Connect(doDeepSeekCheck)
+    dsBox.FocusLost:Connect(function()
+        local clean = tostring(dsBox.Text or ""):gsub("%s+", "")
+        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
+        ClientSettings.ApiKeys.deepseek = clean
+        saveDeepSeekKey(clean)
+        dsBox.Text = clean
+        tween(dsStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
+        dsStatusLbl.Text = "не проверен"
+        dsStatusLbl.TextColor3 = THEME.TextDim
+        tween(dsCardStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.5 })
+    end)
+    task.spawn(function()
+        task.wait(1.1)
+        local k = ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek
+        if k and #k > 8 then doDeepSeekCheck() end
     end)
 end
 
@@ -10059,19 +10578,32 @@ local function ctDoSend()
             userContent = "[NAME:User] " .. msg
         end
         -- Инжектируем тег языка — так же как в игровом чате
-        -- v18.2.9: Веб-поиск для чата с ИИ
+        -- Веб-поиск с pcall + timeout (зеркало логики из handleQueuedChat)
         if settings.WebSearch and msg and #msg > 3 then
-            local searchResult = doWebSearch(msg)
-            if searchResult and searchResult ~= "" and not searchResult:find("не найдены") and not searchResult:find("Ошибка") then
+            local searchResult = nil
+            local searchDone = false
+            task.spawn(function()
+                local ok, res = pcall(doWebSearch, msg)
+                searchResult = ok and res or nil
+                searchDone = true
+            end)
+            local swMax = 40  -- 40 × 0.2 = 8 сек
+            local swCount = 0
+            while not searchDone and swCount < swMax do
+                task.wait(0.2); swCount = swCount + 1
+            end
+            local sr = searchResult or ""
+            if sr ~= "" and not sr:find("не найдены") and not sr:find("Ошибка") then
                 table.insert(apiMsgs, {
                     role = "system",
-                    content = "[WEB SEARCH RESULTS for: " .. msg .. "]\n" .. searchResult .. "\n[INSTRUCTION: This is live data from 2026. Use these results as your PRIMARY source. Answer confidently based on this. Do NOT say you lack current info.]"
+                    content = "[WEB SEARCH RESULTS for: " .. msg .. "]\n" .. sr .. "\n[INSTRUCTION: This is live data from 2026. Use these results as your PRIMARY source. Answer confidently based on this. Do NOT say you lack current info.]"
                 })
             end
         end
         table.insert(apiMsgs, { role = "user", content = "[LANG:" .. getLangForUser(msg, nil) .. "] " .. userContent })
 
-        local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 200, 1024)
+        -- directMaxTokens: берём настройку пользователя, минимум 512 для директ-чата
+        local directMaxTokens = math.max(tonumber(settings.MaxTokens) or 512, 512)
         local payload = {
             model       = getModel(settings),
             temperature = tonumber(settings.Temperature) or 0.7,
@@ -10177,16 +10709,19 @@ circleLabel.ZIndex = 51
 local _circlePulseActive = true
 task.spawn(function()
     while _circlePulseActive do
-        if circleBtn and circleBtn.Parent and circleBtn.Visible then
-            tween(circleGlow, TweenInfo.new(0.85, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { Transparency = 0.05, Thickness = 9 })
-            task.wait(0.85)
-            if circleBtn and circleBtn.Visible then
-                tween(circleGlow, TweenInfo.new(0.85, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { Transparency = 0.3, Thickness = 6 })
+        local ok = pcall(function()
+            if circleBtn and circleBtn.Parent and circleBtn.Visible then
+                tween(circleGlow, TweenInfo.new(0.85, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { Transparency = 0.05, Thickness = 9 })
                 task.wait(0.85)
+                if _circlePulseActive and circleBtn and circleBtn.Parent and circleBtn.Visible then
+                    tween(circleGlow, TweenInfo.new(0.85, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { Transparency = 0.3, Thickness = 6 })
+                    task.wait(0.85)
+                end
+            else
+                task.wait(0.3)
             end
-        else
-            task.wait(0.3)
-        end
+        end)
+        if not ok then break end  -- gui уничтожен — выходим
     end
 end)
 
@@ -10393,11 +10928,19 @@ end)
     switchTab("Основное")
 
     -- Обновляем все CanvasSize после того как AutomaticSize карточек сработает
-    task.delay(0.15, function()
-        generalScroll.CanvasSize   = UDim2.new(0, 0, 0, (generalLayout.AbsoluteContentSize.Y + 24) / guiScale)
-        behaviorScroll.CanvasSize  = UDim2.new(0, 0, 0, (behaviorLayout.AbsoluteContentSize.Y + 24) / guiScale)
-        advancedScroll.CanvasSize  = UDim2.new(0, 0, 0, (advancedLayout.AbsoluteContentSize.Y + 20) / guiScale)
-        perceptionScroll.CanvasSize = UDim2.new(0, 0, 0, (perceptionLayout.AbsoluteContentSize.Y + 20) / guiScale)
+    -- Ждём дольше на медленных устройствах чтобы AutomaticSize карточек успело сработать
+    task.delay(0.4, function()
+        pcall(function() generalScroll.CanvasSize    = UDim2.new(0, 0, 0, (generalLayout.AbsoluteContentSize.Y + 24) / guiScale) end)
+        pcall(function() behaviorScroll.CanvasSize   = UDim2.new(0, 0, 0, (behaviorLayout.AbsoluteContentSize.Y + 24) / guiScale) end)
+        pcall(function() advancedScroll.CanvasSize   = UDim2.new(0, 0, 0, (advancedLayout.AbsoluteContentSize.Y + 20) / guiScale) end)
+        pcall(function() perceptionScroll.CanvasSize = UDim2.new(0, 0, 0, (perceptionLayout.AbsoluteContentSize.Y + 20) / guiScale) end)
+        -- Дополнительное обновление ещё через 1с (для самых медленных)
+        task.delay(1, function()
+            pcall(function() generalScroll.CanvasSize    = UDim2.new(0, 0, 0, (generalLayout.AbsoluteContentSize.Y + 24) / guiScale) end)
+            pcall(function() behaviorScroll.CanvasSize   = UDim2.new(0, 0, 0, (behaviorLayout.AbsoluteContentSize.Y + 24) / guiScale) end)
+            pcall(function() advancedScroll.CanvasSize   = UDim2.new(0, 0, 0, (advancedLayout.AbsoluteContentSize.Y + 20) / guiScale) end)
+            pcall(function() perceptionScroll.CanvasSize = UDim2.new(0, 0, 0, (perceptionLayout.AbsoluteContentSize.Y + 20) / guiScale) end)
+        end)
     end)
 
     -- Автопроверка API при старте если ключ сохранён
