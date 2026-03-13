@@ -43,7 +43,7 @@
 --  9773     §LAUNCH        createInterface() — точка запуска скрипта
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v19.6.0 LOADED")
+print("LOB VERSION: v19.6.4 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -81,7 +81,15 @@ local function saveSettings()
             "MaxTokens="       .. tostring(math.floor(tonumber(cs.MaxTokens) or 1024)),
             "PersonalityId="   .. tostring(cs.PersonalityId or "Friendly"),
             "StripHash="       .. b(cs.StripHash,       true),
-            "FollowingEnabled=" .. b(cs.FollowingEnabled, true),
+            "FollowingEnabled="         .. b(cs.FollowingEnabled, true),
+            "MaxHistory="               .. tostring(math.floor(tonumber(cs.MaxHistory) or 10)),
+            "CooldownSecondsPerUser="   .. tostring(tonumber(cs.CooldownSecondsPerUser) or 0),
+            "MaxMessagesPerSecond="     .. tostring(math.floor(tonumber(cs.MaxMessagesPerSecond) or 10)),
+            "MaxQueuePerUser="          .. tostring(math.floor(tonumber(cs.MaxQueuePerUser) or 10)),
+            "RangeEnabled="             .. b(cs.Range and cs.Range.Enabled, false),
+            "RangeStuds="               .. tostring(math.floor(tonumber(cs.Range and cs.Range.Studs) or 50)),
+            "RangeHeight="              .. tostring(math.floor(tonumber(cs.Range and cs.Range.Height) or 0)),
+            "RangeIgnoreWalls="         .. b(cs.Range and cs.Range.IgnoreWalls, false),
         }
         writefile(LOB_SETTINGS_FILE, table.concat(lines, "\n"))
     end)
@@ -94,7 +102,9 @@ local function loadSettings()
         local ok, result = pcall(readfile, LOB_SETTINGS_FILE)
         if ok and type(result) == "string" and result ~= "" then
             data = result:gsub("\r\n", "\n"):gsub("\r", "\n")
-            print("[LOB] file contents: [" .. data:sub(1, 200) .. "]")
+            if ClientSettings and ClientSettings.Debug then
+                print("[LOB] file contents: [" .. data:sub(1, 200) .. "]")
+            end
         else
             return -- файл не найден или пустой
         end
@@ -131,7 +141,16 @@ local function loadSettings()
         cs.Temperature     = getNum("Temperature",      0.7)
         cs.MaxTokens       = getNum("MaxTokens",        1024)
         cs.StripHash       = getBool("StripHash",       true)
-        cs.FollowingEnabled = getBool("FollowingEnabled", true)
+        cs.FollowingEnabled         = getBool("FollowingEnabled", true)
+        cs.MaxHistory               = getNum("MaxHistory", 10)
+        cs.CooldownSecondsPerUser   = getNum("CooldownSecondsPerUser", 0)
+        cs.MaxMessagesPerSecond     = getNum("MaxMessagesPerSecond", 10)
+        cs.MaxQueuePerUser          = getNum("MaxQueuePerUser", 10)
+        if not cs.Range then cs.Range = {} end
+        cs.Range.Enabled            = getBool("RangeEnabled", false)
+        cs.Range.Studs              = getNum("RangeStuds", 50)
+        cs.Range.Height             = getNum("RangeHeight", 0)
+        cs.Range.IgnoreWalls        = getBool("RangeIgnoreWalls", false)
         local pid = getStr("PersonalityId", "Friendly")
         if pid and pid ~= "" then cs.PersonalityId = pid end
     end)
@@ -304,7 +323,9 @@ do
         ClientSettings.ApiKeys.groq = saved
     end
     loadSettings()
-    print("[LOB] after loadSettings: AutoReply=" .. tostring(ClientSettings.AutoReply) .. " WebSearch=" .. tostring(ClientSettings.WebSearch))
+    if ClientSettings.Debug then
+        print("[LOB] after loadSettings: AutoReply=" .. tostring(ClientSettings.AutoReply) .. " WebSearch=" .. tostring(ClientSettings.WebSearch))
+    end
     local savedModel = loadModel()
     if savedModel then
         ClientSettings.Models = ClientSettings.Models or {}
@@ -678,13 +699,20 @@ local function postJson(url, headers, bodyTable)
         return nil, 500, "ExecutorHttpNotSupported", "This script requires an executor with a custom HTTP request function.", {}
     end
 
-    local response = httprequest({
+    local callOk, response = pcall(httprequest, {
         Url = url,
         Method = "POST",
         Headers = headers,
         Body = body,
     })
-    
+    if not callOk then
+        -- executor бросил ошибку (сеть, timeout, invalid URL)
+        return nil, 0, "RequestFailed", tostring(response):sub(1, 200), {}
+    end
+    if type(response) ~= "table" then
+        return nil, 0, "BadResponse", "httprequest returned non-table", {}
+    end
+
     local respBody    = tostring(response.Body or response.body or "")
     local respStatus  = tonumber(response.StatusCode or response.statusCode or response.Status or response.status) or 200
     local respMsg     = tostring(response.StatusMessage or response.statusMessage or "Unknown")
@@ -1006,12 +1034,12 @@ function CerebrasProvider:chatCompletions(payload)
     -- Убираем tool calls и прочие расширения OpenAI
     local safePayload = {
         model       = payload.model,
-        temperature = math.min(tonumber(payload.temperature) or 0.7, 1.5),
-        max_tokens  = tonumber(payload.max_tokens) or 512,
+        temperature = math.min(math.max(tonumber(payload.temperature) or 0.7, 0), 1.0),  -- Cerebras: 0..1.0
+        max_tokens  = math.min(tonumber(payload.max_tokens) or 512, 8192),  -- Cerebras free tier: max 8192
         messages    = payload.messages,
     }
 
-    local res, statusCode, statusMsg, body, respHeaders = postJson(url, {
+    local res, statusCode, statusMsg, body = postJson(url, {
         ["Content-Type"]  = "application/json",
         ["Authorization"] = "Bearer " .. apiKey,
     }, safePayload)
@@ -1060,20 +1088,27 @@ function DeepSeekProvider:chatCompletions(payload)
     local url = "https://api.deepseek.com/chat/completions"
     local model = payload.model or "deepseek-chat"
 
-    -- deepseek-reasoner использует reasoning_content — для чата нам нужен только text
+    -- deepseek-reasoner не поддерживает параметр temperature (вернёт 400)
+    local isReasoner = model == "deepseek-reasoner"
     local safePayload = {
-        model       = model,
-        temperature = tonumber(payload.temperature) or 0.7,
-        max_tokens  = tonumber(payload.max_tokens) or 512,
-        messages    = payload.messages,
+        model      = model,
+        max_tokens = tonumber(payload.max_tokens) or 512,
+        messages   = payload.messages,
     }
+    if not isReasoner then
+        safePayload.temperature = tonumber(payload.temperature) or 0.7
+    end
 
-    local res, statusCode, statusMsg, body, respHeaders = postJson(url, {
+    local res, statusCode, statusMsg, body = postJson(url, {
         ["Content-Type"]  = "application/json",
         ["Authorization"] = "Bearer " .. apiKey,
     }, safePayload)
 
     if not res then
+        local sc = tonumber(statusCode) or 0
+        if sc == 402 then
+            return nil, "DeepSeekNoCredits:402"  -- кредиты закончились
+        end
         if isRateLimited(statusCode, statusMsg, body) and onApiRateLimited then
             onApiRateLimited("deepseek")
         end
@@ -1158,6 +1193,9 @@ function GeminiProvider:chatCompletions(payload)
         elseif m.role == "assistant" then
             local aText = tostring(m.content or "")
             aText = aText:gsub("%[DO:[^%]]*%]%s*", "")
+            -- Убираем артефакты DeepSeek если история смешанная (смена провайдера в сессии)
+            aText = aText:gsub("<think>.-</think>%s*", "")
+            aText = aText:gsub("^%*%*[^%*]+%*%*:?%s*", "")
             aText = aText:match("^%s*(.-)%s*$") or aText
             if aText == "" then aText = "..." end
             table.insert(contents, { role = "model", parts = {{ text = aText }} })
@@ -1203,9 +1241,12 @@ function GeminiProvider:chatCompletions(payload)
     -- "low" = минимум (быстро), без него модель может думать очень долго
     -- thinking доступен в 2.5+ и 3.x preview моделях
     local isGemini3 = (model:find("^gemini%-3") or model:find("2%.5") or model:find("2%.0%-flash%-think")) ~= nil
+    -- Gemini 3.x / thinking моделям нужна temperature=1.0 (рекомендация Google)
+    -- Для остальных используем пользовательскую настройку
+    local geminiTemp = isGemini3 and 1.0 or (payload.temperature or 0.8)
     local genConfig = {
         maxOutputTokens = payload.max_tokens or 300,
-        temperature = payload.temperature or 0.8,
+        temperature     = geminiTemp,
     }
     if isGemini3 then
         -- thinkingBudget = 0 отключает reasoning (мгновенный ответ для чата)
@@ -1346,6 +1387,14 @@ function RateLimiter:allow(userId)
         return false
     end
     self._lastAt[userId] = now
+    -- Очистка устаревших записей раз в 60 сек
+    if (now - (self._lastClean or 0)) > 60 then
+        self._lastClean = now
+        local expiry = math.max(self._cooldownSeconds * 2, 30)
+        for uid, t in pairs(self._lastAt) do
+            if (now - t) > expiry then self._lastAt[uid] = nil end
+        end
+    end
     return true
 end
 
@@ -1370,13 +1419,10 @@ local function sendChatMessage(text)
             end
         end
         if not channel then return end
-        -- Проверяем что канал не ReadOnly перед отправкой
+        -- Проверяем ReadOnly напрямую через свойство TextChannel
         local canSend = true
         pcall(function()
-            -- TextChannel.ChatInputBarConfiguration может блокировать
-            if channel:FindFirstChildOfClass("TextChatMessageProperties") then
-                canSend = false
-            end
+            if channel.ReadOnly == true then canSend = false end
         end)
         if not canSend then return end
         local sendOk = pcall(function() channel:SendAsync(text) end)
@@ -1764,6 +1810,12 @@ local function makeSystemPrompt(settings)
             .. " Example: asked 'мемы тиктока 2026' → reply '2-3 названия мемов, коротко'. NOT a wall of text."
             .. " If you can't be brief, say the topic in 1 sentence and stop."
     end
+    -- deepseek-reasoner думает цепочками рассуждений (CoT) — финальный ответ должен быть коротким
+    if model == "deepseek-reasoner" then
+        system = system
+            .. "\n\nCRITICAL: You are a Roblox chat bot. Your FINAL response (after thinking) must be SHORT — 1-2 sentences max."
+            .. " Do NOT include reasoning steps in your reply. Only output the final chat message."
+    end
 
     -- Краткое напоминание в конце что нужно следовать кастомному промпту из начала
     if hasCustom then
@@ -1900,7 +1952,10 @@ local function splitTextIntoParts(text, maxLen)
         local part = text:sub(1, cutPos)
         if part == "" then break end  -- аварийный выход
         table.insert(parts, part)
-        text = text:sub(cutPos + 2):match("^%s*(.-)%s*$") or ""
+        -- cutPos указывает на пробел → начинаем с cutPos+2 (пропускаем пробел)
+        -- cutPos = maxLen (нет пробела) → начинаем с cutPos+1 (не теряем символ)
+        local skip = (text:sub(cutPos, cutPos) == " ") and 2 or 1
+        text = text:sub(cutPos + skip):match("^%s*(.-)%s*$") or ""
     end
     if #text > 0 then
         table.insert(parts, text)
@@ -1914,7 +1969,8 @@ local function sendBotMessage(text)
     text = text:gsub("%[LANG:[^%]]*%]%s*", "")
     text = text:gsub("%[NAME:[^%]]*%]%s*", "")
     text = text:gsub("%[DO:[^%]]*%]%s*", "")
-    text = text:gsub("%[SYSTEM:.-]%s*", "")  -- .- захватывает многострочный контент
+    -- [SYSTEM:...] — убираем до конца строки (DeepSeek иногда добавляет вложенные скобки)
+    text = text:gsub("%[SYSTEM:[^\n]*\n?", "")
     text = text:gsub("%[NEARBY[^%]]*%]%s*", "")
     -- Шаг 2: убираем НЕЗАКРЫТЫЕ теги — ИИ иногда пишет "[DO:wave" без ]
     text = text:gsub("%[DO:[%w_]*%s*", "")
@@ -2813,7 +2869,12 @@ local function executeAction(actionName, sourcePlayer, cleanText, originalUserMs
 
         local handler = ACTION_HANDLERS[actionName]
         if handler then
-            task.spawn(function() handler(sourcePlayer) end)
+            task.spawn(function()
+                local ok, err = pcall(handler, sourcePlayer)
+                if not ok and ClientSettings.Debug then
+                    print("[LOB] action error [" .. tostring(actionName) .. "]: " .. tostring(err))
+                end
+            end)
         end
     end
     return cleanText or ""
@@ -2908,6 +2969,14 @@ local _toxicAlerts = {}
 -- §BEHAVIOR
 local function startBehaviorMonitor()
     if _behaviorThread then return end
+    -- Очистка истории при уходе игрока
+    Players.PlayerRemoving:Connect(function(p)
+        _playerBehaviorHistory[p.UserId] = nil
+        _toxicAlerts[p.UserId] = nil
+        _lastMsgPerUser[p.UserId] = nil
+        _userLangCache[p.UserId] = nil
+        -- RateLimiter очищается сам по таймеру — не трогаем
+    end)
     _behaviorThread = task.spawn(function()
         while true do
             if not ClientSettings.PlayerAwareness then
@@ -3067,8 +3136,10 @@ end
 -- §CAM_LOOK
 local function smoothLookAt(targetPos)
     if not ClientSettings.CameraLook then return end
-    -- Проверяем ОБЕ системы движения: старую (_isFollowing) и новую (FollowManager)
+    -- Проверяем ОБЕ системы движения: старую (_isFollowing/_isGoing) и новую (FollowManager)
     if _isFollowing or _isGoing or _isJumping or _isSpinning then return end
+    -- FollowManager объявлен ниже — проверяем через глобал, не вызывает nil-crash
+    if type(FollowManager) == "table" and FollowManager.Active then return end
 
     local root = getLocalRootPart()
     if not root then return end
@@ -3146,12 +3217,23 @@ local _worldReactCooldowns = {}  -- [userId..type] → os.clock()
 local WORLD_REACT_COOLDOWN  = 60
 local WORLD_REACT_STARE_CD  = 45  -- взгляд чуть короче
 
+local _worldReactCleanAt = 0
 local function _canWorldReact(userId, reactType)
     local key = tostring(userId) .. (reactType or "")
+    local now = os.clock()
     local t = _worldReactCooldowns[key]
     local cd = (reactType == "stare") and WORLD_REACT_STARE_CD or WORLD_REACT_COOLDOWN
-    if t and (os.clock() - t) < cd then return false end
-    _worldReactCooldowns[key] = os.clock()
+    if t and (now - t) < cd then return false end
+    _worldReactCooldowns[key] = now
+    -- Очистка устаревших cooldown записей раз в 120 сек
+    if (now - _worldReactCleanAt) > 120 then
+        _worldReactCleanAt = now
+        for k, ts in pairs(_worldReactCooldowns) do
+            if (now - ts) > WORLD_REACT_COOLDOWN * 2 then
+                _worldReactCooldowns[k] = nil
+            end
+        end
+    end
     return true
 end
 -- (монитор запускается ниже после объявления runChatQueue)
@@ -3349,10 +3431,16 @@ local function handleQueuedChat(item)
     if model == "qwen/qwen3-32b" then
         payload.reasoning_effort = "none"
     end
+    -- deepseek-reasoner: API отклоняет запрос если передан temperature
+    if model == "deepseek-reasoner" then
+        payload.temperature = nil
+    end
     -- Веб-поиск через tool use
     -- compound-beta имеет встроенный поиск — не нужны tools
     -- Gemini не поддерживает OpenAI tool format
+    -- Cerebras и DeepSeek не поддерживают OpenAI function calling tools
     local skipTools = model:find("^gemini") or model:find("compound%-beta")
+                   or model:find("^cerebras/") or model:find("^deepseek")
     if settings.WebSearch and not skipTools then
         payload.tools = {
             {
@@ -3380,7 +3468,8 @@ local function handleQueuedChat(item)
     -- Gemini 2.5 flash/lite → 45 сек, Groq → 20 сек
     local isGemini = model:find("^gemini")
     local isGemini3x = model:find("^gemini%-3") or model:find("2%.5") or model:find("2%.5%-pro")
-    local timeoutSec = isGemini3x and 60 or (isGemini and 45 or 20)
+    local isDeepSeekReasoner = model == "deepseek-reasoner"
+    local timeoutSec = isGemini3x and 60 or (isGemini and 45 or (isDeepSeekReasoner and 60 or 20))
     local text, err
     do
         local done = false
@@ -3424,8 +3513,13 @@ local function handleQueuedChat(item)
     text = text:match("^%s*(.-)%s*$") or text
     text = text:gsub("%[NAME:[^%]]*%]%s*", "")
     -- compound-beta добавляет [Sources] блок в конце — убираем
-    text = text:gsub("%\n?%[Sources?%].-$", "")
-    text = text:gsub("%\n?Sources?:%s*%d+%..+$", "")
+    -- compound-beta: [Sources] / Sources: может быть многострочным → убираем всё после маркера
+    text = text:gsub("[\n]?%[Sources?%][%s%S]*$", "")
+    text = text:gsub("[\n]?Sources?:%s*%d+%.[%s%S]*$", "")
+    -- deepseek-reasoner иногда пропускает <think>...</think> в content — убираем
+    text = text:gsub("<think>.-</think>%s*", "")
+    -- убираем жирный markdown-заголовок который DeepSeek ставит первой строкой
+    text = text:gsub("^%*%*[^%*]+%*%*:?%s*", "")
     text = text:match("^%s*(.-)%s*$") or text
 
     -- v17: поворачиваемся к говорящему игроку (если CameraLook включён)
@@ -3737,6 +3831,16 @@ local function processChatMessage(player, rawMessage)
             return -- то же сообщение в течение 12 секунд — игнорируем
         end
         _lastMsgPerUser[player.UserId] = { text = msgLower, time = nowTime }
+        -- Периодическая очистка кеша (не при каждом сообщении)
+        if (now - (_lastAntiSpamClean or 0)) > 120 then
+            _lastAntiSpamClean = now
+            for uid, data in pairs(_lastMsgPerUser) do
+                if (now - data.time) > 60 then _lastMsgPerUser[uid] = nil end
+            end
+            for uid, _ in pairs(_userLangCache) do
+                if not Players:GetPlayerByUserId(uid) then _userLangCache[uid] = nil end
+            end
+        end
     end
 
     -- v17.5: ReactToMention — отвечаем даже без триггера если упомянули наш ник
@@ -3863,6 +3967,12 @@ local function handleTextChatService(textChatMessage)
     if not chatPlayer then return end
     local msg = textChatMessage.Text
     if type(msg) ~= "string" or msg == "" then return end
+    -- Убираем RichText теги которые TextChatService может добавлять автоматически
+    msg = msg:gsub("<font[^>]*>", ""):gsub("</font>", "")
+           :gsub("<b>", ""):gsub("</b>", "")
+           :gsub("<i>", ""):gsub("</i>", "")
+           :gsub("<u>", ""):gsub("</u>", "")
+           :gsub("<s>", ""):gsub("</s>", "")
     processChatMessage(chatPlayer, msg)
 end
 
@@ -4751,26 +4861,29 @@ trackConn(RunService.Heartbeat:Connect(function(dt)
 end))
 
 local rateLimitNoticeAt = 0
-local function handleRateLimitNotice(force)
+local _providerNames = {
+    groq     = "Groq",
+    gemini   = "Gemini",
+    cerebras = "Cerebras",
+    deepseek = "DeepSeek",
+}
+
+local function handleRateLimitNotice(provider, force)
     local now = os.clock()
-    if (not force) and (now - rateLimitNoticeAt) < 20 then
-        return
-    end
+    if (not force) and (now - rateLimitNoticeAt) < 20 then return end
     rateLimitNoticeAt = now
-    -- v18: НЕ отключаем AutoReply — токены Groq восстанавливаются за секунды.
-    -- Просто уведомляем пользователя, бот продолжит работу автоматически.
-    local title = "Rate limit"
-    local body = "Groq временно ограничил запросы. Бот автоматически продолжит через несколько секунд."
+    local name = _providerNames[provider] or tostring(provider or "API")
+    local title = "Rate limit — " .. name
+    local body = name .. " временно ограничил запросы. Бот автоматически продолжит через несколько секунд."
     if pushNotification then
         pushNotification(title, body, THEME and THEME.Accent or nil)
     end
     Logger:Add("warn", title .. ": " .. body)
 end
 
-onApiRateLimited = function()
-    -- Wrap in task.spawn to prevent blocking/lag
+onApiRateLimited = function(provider)
     task.spawn(function()
-        handleRateLimitNotice(false)
+        handleRateLimitNotice(provider, false)
     end)
 end
 
@@ -5399,11 +5512,30 @@ local dotModel, lblModel = makeSsRow(5)
 
 local function updateCtStatus()
     local s = ClientSettings
-    local key = getGroqApiKey and getGroqApiKey() or ""
-    local hasKey = type(key)=="string" and #key > 8 and key:sub(1,4) == "gsk_"
+    local model = getModel and getModel(s) or ""
+    -- Проверяем нужный ключ исходя из текущей модели
+    local hasKey = false
+    local apiName = "API"
+    if model:find("^gemini") then
+        local gk = s.ApiKeys and s.ApiKeys.gemini or ""
+        hasKey = type(gk)=="string" and #gk > 8
+        apiName = "Gemini"
+    elseif model:find("^cerebras/") then
+        local ck = s.ApiKeys and s.ApiKeys.cerebras or ""
+        hasKey = type(ck)=="string" and #ck > 8
+        apiName = "Cerebras"
+    elseif model:find("^deepseek") then
+        local dk = s.ApiKeys and s.ApiKeys.deepseek or ""
+        hasKey = type(dk)=="string" and #dk > 8
+        apiName = "DeepSeek"
+    else
+        local gk = getGroqApiKey and getGroqApiKey() or ""
+        hasKey = type(gk)=="string" and #gk > 8 and gk:sub(1,4) == "gsk_"
+        apiName = "Groq"
+    end
 
     dotApi.BackgroundColor3  = hasKey and Color3.fromRGB(80,220,120) or Color3.fromRGB(220,80,80)
-    lblApi.Text  = hasKey and "API: OK" or "API: нет ключа"
+    lblApi.Text  = hasKey and (apiName .. ": OK") or (apiName .. ": нет ключа")
 
     local on = s.Enabled and s.AutoReply
     dotBot.BackgroundColor3  = on and Color3.fromRGB(80,220,120) or Color3.fromRGB(220,80,80)
@@ -6514,7 +6646,9 @@ end
 updateRangeVisualizer()
 
 -- GENERAL TAB CONTENT (Populate)
-print("[LOB] UI toggles init: AutoReply=" .. tostring(ClientSettings.AutoReply) .. " WebSearch=" .. tostring(ClientSettings.WebSearch) .. " Memory=" .. tostring(ClientSettings.MemoryEnabled))
+if ClientSettings.Debug then
+    print("[LOB] UI toggles init: AutoReply=" .. tostring(ClientSettings.AutoReply) .. " WebSearch=" .. tostring(ClientSettings.WebSearch) .. " Memory=" .. tostring(ClientSettings.MemoryEnabled))
+end
 local automation = makeSectionCard(generalScroll, "Автоматизация", "")
 autoReplyToggle = makeToggleRow(
     automation,
@@ -6710,7 +6844,7 @@ local groqModels = {
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
     -- ── ⚡ CEREBRAS (1M токенов/день бесплатно — быстрейший inference) ───
-    "cerebras/llama-3.1-8b",                       -- Llama 3.1 8B        | ~2000 t/s | Cerebras
+    "cerebras/llama3.1-8b",                        -- Llama 3.1 8B        | ~2000 t/s | Cerebras
     "cerebras/llama-3.3-70b",                      -- Llama 3.3 70B       | ~700 t/s  | Cerebras
     "cerebras/llama-4-scout-17b",                  -- Llama 4 Scout 17B   | ~900 t/s  | Cerebras
     -- ── 🔮 DEEPSEEK (~4M токенов на $2.5 бесплатных кредитах) ────────────
@@ -7657,7 +7791,7 @@ do
                 Method = "POST",
                 Headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. clean },
                 Body = HttpService:JSONEncode({
-                    model = "llama-3.1-8b", max_tokens = 1,
+                    model = "llama3.1-8b", max_tokens = 1,
                     messages = {{ role = "user", content = "hi" }},
                 }),
             })
@@ -10613,6 +10747,10 @@ local function ctDoSend()
         if payload.model == "qwen/qwen3-32b" then
             payload.reasoning_effort = "none"
         end
+        -- deepseek-reasoner: API отклоняет запрос если передан temperature
+        if payload.model == "deepseek-reasoner" then
+            payload.temperature = nil
+        end
 
         local text, err = providerRouter:chatCompletions(payload)
 
@@ -10626,6 +10764,12 @@ local function ctDoSend()
             end
         end
 
+        if text and text ~= "" then
+            -- deepseek-reasoner / DeepSeek chat может содержать артефакты
+            text = text:gsub("<think>.-</think>%s*", "")
+            text = text:gsub("^%*%*[^%*]+%*%*:?%s*", "")
+            text = text:match("^%s*(.-)%s*$") or text
+        end
         if text and text ~= "" and settings.MemoryEnabled then
             appendHistory(DirectChatHistory, userContent, text)
         end
@@ -10637,8 +10781,12 @@ local function ctDoSend()
                     friendlyErr = "🚫 Модель отказалась отвечать. Попробуй переформулировать."
                 elseif errLower:find("429") or errLower:find("rate") then
                     friendlyErr = "⚡ Rate limit — подожди немного."
-                elseif errLower:find("401") or errLower:find("invalid_api_key") or errLower:find("missinggroqkey") then
-                    friendlyErr = "🔑 API ключ неверный или не указан."
+                elseif errLower:find("401") or errLower:find("invalid_api_key")
+                    or errLower:find("missinggroqkey") or errLower:find("missingcerebraskey")
+                    or errLower:find("missingdeepseekkey") then
+                    friendlyErr = "🔑 API ключ неверный или не указан. Проверь вкладку Настройки."
+                elseif errLower:find("deepseeknocredits") or errLower:find("nocredits") then
+                    friendlyErr = "💳 DeepSeek: кредиты закончились. Пополни баланс на platform.deepseek.com"
                 elseif errLower:find("400") or errLower:find("bad request") then
                     friendlyErr = "⚠️ Модель не поддерживает этот запрос. Попробуй другую."
                 elseif errLower:find("timeout") or errLower:find("timed") then
