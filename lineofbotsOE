@@ -43,7 +43,7 @@
 --  9773     §LAUNCH        createInterface() — точка запуска скрипта
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v19.6.8 LOADED")
+print("LOB VERSION: v19.6.9 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -2004,8 +2004,8 @@ Players.LocalPlayer.CharacterAdded:Connect(function(char)
         if not ClientSettings.WorldReactions or not ClientSettings.Enabled then return end
         task.delay(0.5, function()
             local msgs = {
-                "[SYSTEM: Ты только что умер. Скажи одну короткую фразу про это, оставайся в образе. / You just died. React in 1 short sentence, stay in character.]",
-                "[SYSTEM: Тебя устранили. Одна короткая фраза про гибель, в образе. / You were eliminated. Say something short about dying, in character.]",
+                "[SYSTEM: You just died. React in 1 short sentence, stay in character.]",
+                "[SYSTEM: You were eliminated. Say something short about dying, in character.]",
             }
             local fakeId = 0
             enqueueChatItem(fakeId, {
@@ -3560,8 +3560,8 @@ task.delay(5, function()
                 reacted = true
                 local name = p.DisplayName or p.Name
                 local msgs = {
-                    "[SYSTEM: "..name.." только что прыгнул рядом с тобой. Отреагируй одной фразой. / "..name.." just jumped near you. React naturally in 1 short sentence.]",
-                    "[SYSTEM: "..name.." прыгает рядом с тобой. Заметь это коротко. / "..name.." is jumping around next to you. Notice it briefly.]",
+                    "[SYSTEM: "..name.." just jumped near you. React naturally in 1 short sentence.]",
+                    "[SYSTEM: "..name.." is jumping around next to you. Notice it briefly.]",
                 }
                 enqueueChatItem(uid, {
                     player=p, userId=uid, name=p.Name,
@@ -3581,7 +3581,7 @@ task.delay(5, function()
                     if _canWorldReact(uid, "stare") then
                         local name = p.DisplayName or p.Name
                         local msgs = {
-                            "[SYSTEM: "..name.." пялится прямо на тебя. Отреагируй одной фразой, в образе. Не здоровайся снова если уже говорил. / "..name.." is staring right at you. React naturally in 1 short sentence, stay in character.]",
+                            "[SYSTEM: "..name.." is staring right at you. React naturally in 1 short sentence, stay in character.]",
                             "[SYSTEM: "..name.." keeps looking at you. React briefly, stay in character.]",
                         }
                         enqueueChatItem(uid, {
@@ -7701,7 +7701,7 @@ do
                     messages = {{ role = "user", content = "hi" }},
                 }),
             })
-            if not ok2 then setCbrStatus(false, "ошибка сети: " .. tostring(res2):sub(1,40)); return end
+            if not ok2 then setCbrStatus(false, "oshibka seti: " .. tostring(res2):sub(1,40)); return end
             local rawStatus = res2.StatusCode or res2.statusCode or res2.status or 0
             local s = tonumber(rawStatus) or 0
             local body = tostring(res2.Body or res2.body or "")
@@ -7711,17 +7711,17 @@ do
                 if extracted then s = tonumber(extracted) or 0 end
             end
             if s == 200 or body:find('"choices"') then
-                setCbrStatus(true, "✓ работает")
+                setCbrStatus(true, "+ rabotaet")
             elseif s == 401 or s == 403 or bodyLow:find("invalid api key") or bodyLow:find("unauthorized") then
-                setCbrStatus(false, "❌ неверный ключ")
+                setCbrStatus(false, "- neveryy klyuch")
             elseif s == 422 or bodyLow:find("invalid model") then
-                setCbrStatus(true, "✓ ключ верный")
+                setCbrStatus(true, "+ klyuch vernyy")
             elseif s == 429 then
-                setCbrStatus(true, "✓ ключ верный (лимит)")
+                setCbrStatus(true, "+ klyuch vernyy (limit)")
             elseif body ~= "" then
-                setCbrStatus(true, "✓ ключ верный (" .. tostring(s) .. ")")
+                setCbrStatus(true, "+ klyuch vernyy (" .. tostring(s) .. ")")
             else
-                setCbrStatus(false, "❌ нет ответа (s=" .. tostring(s) .. ")")
+                setCbrStatus(false, "- net otveta (s=" .. tostring(s) .. ")")
             end
         end)
     end
