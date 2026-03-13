@@ -43,7 +43,7 @@
 --  9773     §LAUNCH        createInterface() — точка запуска скрипта
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v19.7.2 LOADED")
+print("LOB VERSION: v19.7.4 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -1144,7 +1144,7 @@ function GeminiProvider:chatCompletions(payload)
     -- thinkingConfig нужен чтобы контролировать глубину reasoning
     -- "low" = минимум (быстро), без него модель может думать очень долго
     -- thinking доступен в 2.5+ и 3.x preview моделях
-    local isGemini3 = (model:find("^gemini%-3") or model:find("gemini%-2%.5")) ~= nil
+    local isGemini3 = (model:find("^gemini%-3") or model:find("gemini%-2%.5%-flash")) ~= nil
     -- Gemini 3.x / thinking моделям нужна temperature=1.0 (рекомендация Google)
     -- Для остальных используем пользовательскую настройку
     local geminiTemp = isGemini3 and 1.0 or (payload.temperature or 0.8)
@@ -1178,7 +1178,6 @@ function GeminiProvider:chatCompletions(payload)
     -- Объединяем все system тексты в один текстовый блок
     if #systemParts > 0 then
         local combined = table.concat(systemParts, "\n\n")
-        combined = combined .. "\n\nCRITICAL: [DO:xxx] tags are for internal use ONLY. NEVER write them as visible text in your reply. They must be invisible to the reader. Output them only if you intend to trigger an action, and place them at the very START of your reply."
         body.systemInstruction = { parts = {{ text = combined }} }
     end
 
@@ -3363,7 +3362,7 @@ local function handleQueuedChat(item)
     -- Таймаут: Gemini 3.x preview с thinking → 60 сек
     -- Gemini 2.5 flash/lite → 45 сек, Groq → 20 сек
     local isGemini = model:find("^gemini")
-    local isGemini3x = model:find("^gemini%-3") or model:find("gemini%-2%.5")
+    local isGemini3x = model:find("^gemini%-3") or model:find("gemini%-2%.5%-flash")
     local timeoutSec = isGemini3x and 60 or (isGemini and 45 or 20)
     local text, err
     do
@@ -6723,12 +6722,11 @@ local groqModels = {
     "moonshotai/kimi-k2-instruct-0905",            -- Kimi K2             | 200 t/s  | диалог
     "qwen/qwen3-32b",                              -- Qwen3 32B           | 400 t/s  | логика
     -- ── GEMINI (Google) ──────────────────────────────────────────────────
-    "gemini-2.5-flash",                            -- Gemini 2.5 Flash       | fast reasoning | Google
-    "gemini-2.5-flash-lite-preview-06-17",         -- Gemini 2.5 Flash Lite  | самый быстрый  | Google
-    "gemini-2.5-pro",                              -- Gemini 2.5 Pro         | умный          | Google
-    "gemini-3.0-flash-preview-0514",               -- Gemini 3.0 Flash       | новый          | Google
-    "gemini-3.0-flash-lite-preview-06-20",         -- Gemini 3.0 Flash Lite  | легкий         | Google
-    "gemini-3.1-flash-lite-preview-06-17",         -- Gemini 3.1 Flash Lite  | новейший лёгкий| Google
+    "gemini-2.5-flash",                            -- Gemini 2.5 Flash       | стабильный, быстрый
+    "gemini-2.5-flash-lite",                       -- Gemini 2.5 Flash Lite  | стабильный, лёгкий
+    "gemini-3-flash-preview",                      -- Gemini 3 Flash         | preview, бесплатный
+    "gemini-3.1-flash-lite-preview",               -- Gemini 3.1 Flash Lite  | preview, новейший лёгкий
+    "gemini-3.1-pro-preview",                      -- Gemini 3.1 Pro         | preview, умный
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
