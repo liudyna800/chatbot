@@ -43,14 +43,13 @@
 --  9773     §LAUNCH        createInterface() — точка запуска скрипта
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v19.6.7 LOADED")
+print("LOB VERSION: v19.6.8 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
 local LOB_KEY_FILE       = "lob_apikey.txt"
 local LOB_GEMINI_FILE    = "lob_geminikey.txt"
 local LOB_CEREBRAS_FILE  = "lob_cerebraskey.txt"
-local LOB_DEEPSEEK_FILE  = "lob_deepseekkey.txt"
 local LOB_SETTINGS_FILE  = "lob_settings.txt"
 local LOB_MODEL_FILE     = "lob_model.txt"
 local function saveSettings()
@@ -186,13 +185,6 @@ local function loadCerebrasKey()
     local ok, result = pcall(function() if readfile then return readfile(LOB_CEREBRAS_FILE) end return "" end)
     return (ok and type(result)=="string") and result or ""
 end
-local function saveDeepSeekKey(key)
-    pcall(function() if writefile then writefile(LOB_DEEPSEEK_FILE, tostring(key or "")) end end)
-end
-local function loadDeepSeekKey()
-    local ok, result = pcall(function() if readfile then return readfile(LOB_DEEPSEEK_FILE) end return "" end)
-    return (ok and type(result)=="string") and result or ""
-end
 
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -263,7 +255,6 @@ ClientSettings = {
         groq      = "",
         gemini    = "",
         cerebras  = "",
-        deepseek  = "",
     },
     UI = {
         WindowWidth = 750,
@@ -344,11 +335,6 @@ do
     if savedCerebras and #savedCerebras > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.cerebras = savedCerebras
-    end
-    local savedDeepSeek = loadDeepSeekKey()
-    if savedDeepSeek and #savedDeepSeek > 8 then
-        ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
-        ClientSettings.ApiKeys.deepseek = savedDeepSeek
     end
 end
 
@@ -1053,80 +1039,6 @@ function CerebrasProvider:chatCompletions(payload)
 end
 
 -- ── DEEPSEEK PROVIDER ────────────────────────────────────────────────────
--- §DEEPSEEK
--- OpenAI-совместимый API. $2.5 бесплатных кредитов (~4M токенов).
--- Docs: https://api-docs.deepseek.com
-local DeepSeekProvider = {}
-DeepSeekProvider.__index = DeepSeekProvider
-
-function DeepSeekProvider.new()
-    return setmetatable({}, DeepSeekProvider)
-end
-
-local function getDeepSeekApiKey()
-    local key = ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek
-    if type(key) == "string" then
-        key = key:gsub("%s+", "")
-        if key ~= "" then return key end
-    end
-    return nil
-end
-
-function DeepSeekProvider:chatCompletions(payload)
-    local apiKey = getDeepSeekApiKey()
-    if not apiKey then return nil, "MissingDeepSeekKey" end
-
-    local url = "https://api.deepseek.com/chat/completions"
-    local model = payload.model or "deepseek-chat"
-
-    -- deepseek-reasoner не поддерживает параметр temperature (вернёт 400)
-    local isReasoner = model == "deepseek-reasoner"
-    local safePayload = {
-        model      = model,
-        max_tokens = tonumber(payload.max_tokens) or 512,
-        messages   = payload.messages,
-    }
-    if not isReasoner then
-        safePayload.temperature = tonumber(payload.temperature) or 0.7
-    end
-
-    local res, statusCode, statusMsg, body = postJson(url, {
-        ["Content-Type"]  = "application/json",
-        ["Authorization"] = "Bearer " .. apiKey,
-    }, safePayload)
-
-    if not res then
-        local sc = tonumber(statusCode) or 0
-        if sc == 402 then
-            return nil, "DeepSeekNoCredits:402"  -- кредиты закончились
-        end
-        if isRateLimited(statusCode, statusMsg, body) and onApiRateLimited then
-            onApiRateLimited("deepseek")
-        end
-        return nil, tostring(statusCode or "") .. ":" .. tostring(statusMsg or "") .. ":" .. tostring(body or ""):sub(1, 120)
-    end
-
-    local choice = res.choices and res.choices[1]
-    if not choice then return nil, "NoDeepSeekChoices" end
-    if choice.finish_reason == "content_filter" then return nil, "ContentFiltered" end
-
-    local msg = choice.message
-    local text = msg and msg.content
-
-    -- deepseek-reasoner: reasoning_content = скрытые размышления, content = финальный ответ
-    -- Нам нужен только content (финальный), reasoning_content игнорируем
-    if type(text) ~= "string" or text == "" then
-        -- Фоллбэк: если content пустой но есть reasoning_content
-        local reasoning = msg and msg.reasoning_content
-        if type(reasoning) == "string" and reasoning ~= "" then
-            -- Берём последний абзац reasoning как ответ (крайний случай)
-            text = reasoning:match("([^\n]+)%s*$") or reasoning:sub(-200)
-        end
-    end
-    if type(text) ~= "string" or text == "" then return nil, "DeepSeekEmptyResponse" end
-    return text, nil
-end
-
 -- Provider Router (Groq only)
 -- ── GEMINI PROVIDER ──────────────────────────────────────────────────────
 -- §GEMINI
@@ -1332,7 +1244,6 @@ function ProviderRouter.new()
     self._groq     = GroqProvider.new()
     self._gemini   = GeminiProvider.new()
     self._cerebras = CerebrasProvider.new()
-    self._deepseek = DeepSeekProvider.new()
     return self
 end
 
@@ -1350,8 +1261,6 @@ function ProviderRouter:chatCompletions(payload)
             messages    = payload.messages,
         }
         return self._cerebras:chatCompletions(p)
-    elseif model:find("^deepseek") then
-        return self._deepseek:chatCompletions(payload)
     end
     return self._groq:chatCompletions(payload)
 end
@@ -1814,12 +1723,6 @@ local function makeSystemPrompt(settings)
             .. " NEVER paste article text, lists of facts, or long summaries."
             .. " Example: asked 'мемы тиктока 2026' → reply '2-3 названия мемов, коротко'. NOT a wall of text."
             .. " If you can't be brief, say the topic in 1 sentence and stop."
-    end
-    -- deepseek-reasoner думает цепочками рассуждений (CoT) — финальный ответ должен быть коротким
-    if model == "deepseek-reasoner" then
-        system = system
-            .. "\n\nCRITICAL: You are a Roblox chat bot. Your FINAL response (after thinking) must be SHORT — 1-2 sentences max."
-            .. " Do NOT include reasoning steps in your reply. Only output the final chat message."
     end
 
     -- Краткое напоминание в конце что нужно следовать кастомному промпту из начала
@@ -3446,15 +3349,12 @@ local function handleQueuedChat(item)
         payload.reasoning_effort = "none"
     end
     -- deepseek-reasoner: API отклоняет запрос если передан temperature
-    if model == "deepseek-reasoner" then
-        payload.temperature = nil
-    end
     -- Веб-поиск через tool use
     -- compound-beta имеет встроенный поиск — не нужны tools
     -- Gemini не поддерживает OpenAI tool format
     -- Cerebras и DeepSeek не поддерживают OpenAI function calling tools
     local skipTools = model:find("^gemini") or model:find("compound%-beta")
-                   or model:find("^cerebras/") or model:find("^deepseek")
+                   or model:find("^cerebras/")
     if settings.WebSearch and not skipTools then
         payload.tools = {
             {
@@ -3482,8 +3382,7 @@ local function handleQueuedChat(item)
     -- Gemini 2.5 flash/lite → 45 сек, Groq → 20 сек
     local isGemini = model:find("^gemini")
     local isGemini3x = model:find("^gemini%-3") or model:find("2%.5") or model:find("2%.5%-pro")
-    local isDeepSeekReasoner = model == "deepseek-reasoner"
-    local timeoutSec = isGemini3x and 60 or (isGemini and 45 or (isDeepSeekReasoner and 60 or 20))
+    local timeoutSec = isGemini3x and 60 or (isGemini and 45 or 20)
     local text, err
     do
         local done = false
@@ -4879,7 +4778,6 @@ local _providerNames = {
     groq     = "Groq",
     gemini   = "Gemini",
     cerebras = "Cerebras",
-    deepseek = "DeepSeek",
 }
 
 local function handleRateLimitNotice(provider, force)
@@ -5538,10 +5436,6 @@ local function updateCtStatus()
         local ck = s.ApiKeys and s.ApiKeys.cerebras or ""
         hasKey = type(ck)=="string" and #ck > 8
         apiName = "Cerebras"
-    elseif model:find("^deepseek") then
-        local dk = s.ApiKeys and s.ApiKeys.deepseek or ""
-        hasKey = type(dk)=="string" and #dk > 8
-        apiName = "DeepSeek"
     else
         local gk = getGroqApiKey and getGroqApiKey() or ""
         hasKey = type(gk)=="string" and #gk > 8 and gk:sub(1,4) == "gsk_"
@@ -6862,8 +6756,6 @@ local groqModels = {
     "cerebras/llama-3.3-70b",                      -- Llama 3.3 70B       | ~700 t/s  | Cerebras
     "cerebras/llama-4-scout-17b",                  -- Llama 4 Scout 17B   | ~900 t/s  | Cerebras
     -- ── 🔮 DEEPSEEK (~4M токенов на $2.5 бесплатных кредитах) ────────────
-    "deepseek-chat",                               -- DeepSeek V3         | умный | DeepSeek
-    "deepseek-reasoner",                           -- DeepSeek R1         | рассуждения | DeepSeek
 }
 
 --[[ 
@@ -7809,23 +7701,28 @@ do
                     messages = {{ role = "user", content = "hi" }},
                 }),
             })
-            if not ok2 then setCbrStatus(false, "ошибка сети"); return end
-            local s = tonumber(res2.StatusCode or res2.statusCode or res2.status or 0)
+            if not ok2 then setCbrStatus(false, "ошибка сети: " .. tostring(res2):sub(1,40)); return end
+            local rawStatus = res2.StatusCode or res2.statusCode or res2.status or 0
+            local s = tonumber(rawStatus) or 0
             local body = tostring(res2.Body or res2.body or "")
-            if s == 200 then setCbrStatus(true, "✓ работает")
-            elseif s == 401 or s == 403 then setCbrStatus(false, "❌ неверный ключ")
-            elseif s == 422 then setCbrStatus(false, "❌ неверный ключ (422)")
-            elseif s == 429 then setCbrStatus(true, "✓ ключ верный (лимит)")
-            elseif s == 0 then
-                -- executor не вернул статус — читаем body
-                if body:find("401") or body:lower():find("invalid") or body:lower():find("unauthorized") then
-                    setCbrStatus(false, "❌ неверный ключ")
-                elseif body:find('"id"') or body:find("choices") then
-                    setCbrStatus(true, "✓ работает")
-                else
-                    setCbrStatus(false, "❌ нет ответа (" .. body:sub(1,40) .. ")")
-                end
-            else setCbrStatus(false, "❌ " .. tostring(s)) end
+            local bodyLow = body:lower()
+            if s == 0 and body ~= "" then
+                local extracted = body:match('"status":%s*(%d+)') or body:match('"code":%s*(%d+)')
+                if extracted then s = tonumber(extracted) or 0 end
+            end
+            if s == 200 or body:find('"choices"') then
+                setCbrStatus(true, "✓ работает")
+            elseif s == 401 or s == 403 or bodyLow:find("invalid api key") or bodyLow:find("unauthorized") then
+                setCbrStatus(false, "❌ неверный ключ")
+            elseif s == 422 or bodyLow:find("invalid model") then
+                setCbrStatus(true, "✓ ключ верный")
+            elseif s == 429 then
+                setCbrStatus(true, "✓ ключ верный (лимит)")
+            elseif body ~= "" then
+                setCbrStatus(true, "✓ ключ верный (" .. tostring(s) .. ")")
+            else
+                setCbrStatus(false, "❌ нет ответа (s=" .. tostring(s) .. ")")
+            end
         end)
     end
 
@@ -7845,192 +7742,6 @@ do
         task.wait(0.9)
         local k = ClientSettings.ApiKeys and ClientSettings.ApiKeys.cerebras
         if k and #k > 8 then doCerebrasCheck() end
-    end)
-end
-
--- ── DEEPSEEK KEY CARD ────────────────────────────────────────────────────
-do
-    local dsCard = Instance.new("Frame")
-    dsCard.Name = "DeepSeekKeyCard"
-    dsCard.BackgroundColor3 = THEME.Card
-    dsCard.BackgroundTransparency = 0
-    dsCard.BorderSizePixel = 0
-    dsCard.Size = UDim2.new(1, 0, 0, 148)
-    dsCard.Parent = advancedScroll
-    makeCorner(dsCard, 12)
-    local dsCardStroke = makeStroke(dsCard, 1, THEME.Stroke, 0.5)
-    local dsPad = Instance.new("UIPadding")
-    dsPad.PaddingTop = UDim.new(0, 10); dsPad.PaddingBottom = UDim.new(0, 10)
-    dsPad.PaddingLeft = UDim.new(0, 12); dsPad.PaddingRight = UDim.new(0, 12)
-    dsPad.Parent = dsCard
-
-    local dsTitleRow = Instance.new("Frame")
-    dsTitleRow.BackgroundTransparency = 1
-    dsTitleRow.Size = UDim2.new(1, 0, 0, 20)
-    dsTitleRow.Parent = dsCard
-    local dsTitle = makeTextLabel(dsTitleRow, "🔮 DeepSeek API Ключ", 14, "bold")
-    dsTitle.Size = UDim2.new(0.6, 0, 1, 0)
-
-    local dsStatusDot = Instance.new("Frame")
-    dsStatusDot.Size = UDim2.new(0, 8, 0, 8)
-    dsStatusDot.AnchorPoint = Vector2.new(1, 0.5)
-    dsStatusDot.Position = UDim2.new(1, -52, 0.5, 0)
-    dsStatusDot.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-    dsStatusDot.BorderSizePixel = 0
-    dsStatusDot.Parent = dsTitleRow
-    makeCorner(dsStatusDot, 999)
-    local dsStatusLbl = makeTextLabel(dsTitleRow, "не проверен", 11, "medium")
-    dsStatusLbl.Size = UDim2.new(0, 70, 1, 0)
-    dsStatusLbl.Position = UDim2.new(1, -70, 0, 0)
-    dsStatusLbl.TextColor3 = THEME.TextDim
-    dsStatusLbl.TextXAlignment = Enum.TextXAlignment.Right
-
-    local dsDesc = makeTextLabel(dsCard, "platform.deepseek.com → API Keys  •  $2.5 бесплатных кредитов (~4M токенов)", 11, "medium")
-    dsDesc.Size = UDim2.new(1, 0, 0, 14)
-    dsDesc.Position = UDim2.new(0, 0, 0, 22)
-    dsDesc.TextColor3 = THEME.TextDim
-
-    local dsInputFrame = Instance.new("Frame")
-    dsInputFrame.BackgroundColor3 = THEME.InputBg or THEME.Button
-    dsInputFrame.BackgroundTransparency = 0.25
-    dsInputFrame.BorderSizePixel = 0
-    dsInputFrame.Size = UDim2.new(1, 0, 0, 32)
-    dsInputFrame.Position = UDim2.new(0, 0, 0, 42)
-    dsInputFrame.Parent = dsCard
-    makeCorner(dsInputFrame, 8)
-    makeStroke(dsInputFrame, 1, THEME.Stroke, 0.6)
-
-    local dsBox = Instance.new("TextBox")
-    dsBox.BackgroundTransparency = 1
-    dsBox.Size = UDim2.new(1, -16, 1, 0)
-    dsBox.Position = UDim2.new(0, 8, 0, 0)
-    dsBox.Font = Enum.Font.GothamMedium
-    dsBox.TextSize = 13
-    dsBox.TextColor3 = THEME.Text
-    dsBox.PlaceholderText = "Вставь DeepSeek API ключ (sk-...)"
-    dsBox.PlaceholderColor3 = THEME.TextDim
-    dsBox.TextXAlignment = Enum.TextXAlignment.Left
-    dsBox.ClearTextOnFocus = false
-    dsBox.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek) or ""
-    dsBox.Parent = dsInputFrame
-
-    local dsLimitLbl = makeTextLabel(dsCard, "deepseek-chat (V3) / deepseek-reasoner (R1) — рассуждения", 11, "medium")
-    dsLimitLbl.Size = UDim2.new(1, 0, 0, 14)
-    dsLimitLbl.Position = UDim2.new(0, 0, 0, 80)
-    dsLimitLbl.TextColor3 = THEME.TextDim
-
-    local dsCheckBtn = Instance.new("TextButton")
-    dsCheckBtn.Size = UDim2.new(1, 0, 0, 28)
-    dsCheckBtn.Position = UDim2.new(0, 0, 0, 100)
-    dsCheckBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 220)
-    dsCheckBtn.BackgroundTransparency = 0.15
-    dsCheckBtn.Text = "Проверить ключ"
-    dsCheckBtn.Font = Enum.Font.GothamBold
-    dsCheckBtn.TextSize = 13
-    dsCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    dsCheckBtn.AutoButtonColor = false
-    dsCheckBtn.Parent = dsCard
-    makeCorner(dsCheckBtn, 8)
-    dsCheckBtn.MouseEnter:Connect(function() tween(dsCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0 }) end)
-    dsCheckBtn.MouseLeave:Connect(function() tween(dsCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0.15 }) end)
-
-    local function setDsStatus(ok, text)
-        local col = ok and Color3.fromRGB(50, 200, 80) or Color3.fromRGB(220, 60, 60)
-        tween(dsStatusDot, TWEEN_MED, { BackgroundColor3 = col })
-        dsStatusLbl.Text = text
-        dsStatusLbl.TextColor3 = col
-        tween(dsCardStroke, TWEEN_MED, { Color = col, Transparency = ok and 0.3 or 0.4 })
-    end
-
-    local function doDeepSeekCheck()
-        local clean = tostring(dsBox.Text or ""):gsub("%s+", "")
-        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
-        ClientSettings.ApiKeys.deepseek = clean
-        saveDeepSeekKey(clean)
-        dsCheckBtn.Text = "Проверяю..."
-        dsCheckBtn.BackgroundTransparency = 0.4
-        task.spawn(function()
-            dsCheckBtn.Text = "Проверить ключ"
-            dsCheckBtn.BackgroundTransparency = 0.15
-            if clean == "" then setDsStatus(false, "ключ не указан"); return end
-            local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-            if not req then setDsStatus(false, "ошибка executor"); return end
-            -- DeepSeek: используем /user/balance для проверки ключа — не тратим токены
-            -- и не получаем ложный 402 от бонусного баланса
-            local ok2, res2 = pcall(req, {
-                Url = "https://api.deepseek.com/user/balance",
-                Method = "GET",
-                Headers = { ["Authorization"] = "Bearer " .. clean },
-            })
-            if not ok2 then
-                -- fallback: пробуем chat completions
-                ok2, res2 = pcall(req, {
-                    Url = "https://api.deepseek.com/chat/completions",
-                    Method = "POST",
-                    Headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. clean },
-                    Body = HttpService:JSONEncode({
-                        model = "deepseek-chat", max_tokens = 1,
-                        messages = {{ role = "user", content = "hi" }},
-                    }),
-                })
-                if not ok2 then setDsStatus(false, "ошибка сети"); return end
-            end
-            local s = tonumber(res2.StatusCode or res2.statusCode or res2.status or 0)
-            local body = tostring(res2.Body or res2.body or "")
-            if s == 200 then
-                -- Читаем баланс из ответа /user/balance
-                local totalBal = 0
-                pcall(function()
-                    local d = HttpService:JSONDecode(body)
-                    if d and d.balance_infos then
-                        for _, bi in ipairs(d.balance_infos) do
-                            totalBal = totalBal + (tonumber(bi.total_balance) or 0)
-                        end
-                    end
-                end)
-                if totalBal > 0 then
-                    setDsStatus(true, "✓ работает (баланс: $" .. string.format("%.2f", totalBal) .. ")")
-                else
-                    setDsStatus(true, "✓ ключ верный")
-                end
-            elseif s == 401 or s == 403 then
-                setDsStatus(false, "❌ неверный ключ")
-            elseif s == 402 then
-                -- 402 при бонусном балансе — ключ правильный, просто основной баланс пуст
-                -- бонусные кредиты ($2.5 при регистрации) всё равно работают
-                setDsStatus(true, "✓ ключ верный (бонусный баланс)")
-            elseif s == 429 then
-                setDsStatus(true, "✓ ключ верный (лимит)")
-            elseif s == 0 then
-                if body:lower():find("unauthorized") or body:lower():find("invalid") then
-                    setDsStatus(false, "❌ неверный ключ")
-                elseif body:find("balance_infos") or body:find('"id"') then
-                    setDsStatus(true, "✓ работает")
-                else
-                    setDsStatus(false, "❌ нет ответа")
-                end
-            else
-                setDsStatus(false, "❌ " .. tostring(s))
-            end
-        end)
-    end
-
-    dsCheckBtn.MouseButton1Click:Connect(doDeepSeekCheck)
-    dsBox.FocusLost:Connect(function()
-        local clean = tostring(dsBox.Text or ""):gsub("%s+", "")
-        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
-        ClientSettings.ApiKeys.deepseek = clean
-        saveDeepSeekKey(clean)
-        dsBox.Text = clean
-        tween(dsStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
-        dsStatusLbl.Text = "не проверен"
-        dsStatusLbl.TextColor3 = THEME.TextDim
-        tween(dsCardStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.5 })
-    end)
-    task.spawn(function()
-        task.wait(1.1)
-        local k = ClientSettings.ApiKeys and ClientSettings.ApiKeys.deepseek
-        if k and #k > 8 then doDeepSeekCheck() end
     end)
 end
 
@@ -10814,9 +10525,6 @@ local function ctDoSend()
             payload.reasoning_effort = "none"
         end
         -- deepseek-reasoner: API отклоняет запрос если передан temperature
-        if payload.model == "deepseek-reasoner" then
-            payload.temperature = nil
-        end
 
         local text, err = providerRouter:chatCompletions(payload)
 
@@ -10849,10 +10557,7 @@ local function ctDoSend()
                     friendlyErr = "⚡ Rate limit — подожди немного."
                 elseif errLower:find("401") or errLower:find("invalid_api_key")
                     or errLower:find("missinggroqkey") or errLower:find("missingcerebraskey")
-                    or errLower:find("missingdeepseekkey") then
                     friendlyErr = "🔑 API ключ неверный или не указан. Проверь вкладку Настройки."
-                elseif errLower:find("deepseeknocredits") or errLower:find("nocredits") then
-                    friendlyErr = "💳 DeepSeek: кредиты закончились. Пополни баланс на platform.deepseek.com"
                 elseif errLower:find("400") or errLower:find("bad request") then
                     friendlyErr = "⚠️ Модель не поддерживает этот запрос. Попробуй другую."
                 elseif errLower:find("timeout") or errLower:find("timed") then
