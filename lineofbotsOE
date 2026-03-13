@@ -43,7 +43,7 @@
 --  9773     §LAUNCH        createInterface() — точка запуска скрипта
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v19.7.5 LOADED")
+print("LOB VERSION: v19.7.6 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -1430,7 +1430,7 @@ local ChatQueue = {}
 local function getChatQueue(userId)
     local q = ChatQueue[userId]
     if not q then
-        q = { head = 1, tail = 0, items = {}, running = false }
+        q = { head = 1, tail = 0, items = {}, running = false, startedAt = 0 }
         ChatQueue[userId] = q
     end
     return q
@@ -3370,7 +3370,7 @@ local function handleQueuedChat(item)
     -- Gemini 2.5 flash/lite → 45 сек, Groq → 20 сек
     local isGemini = model:find("^gemini")
     local isGemini3x = model:find("^gemini%-3") or model:find("gemini%-2%.5%-flash")
-    local timeoutSec = isGemini3x and 60 or (isGemini and 45 or 20)
+    local timeoutSec = isGemini3x and 30 or (isGemini and 25 or 15)
     local text, err
     do
         local done = false
@@ -3468,26 +3468,47 @@ local function runChatQueue(userId)
     -- Очередь пуста — нечего делать
     if q.head > q.tail then return end
     q.running = true
+    q.startedAt = os.clock()
     task.spawn(function()
-        -- running сбрасывается в любом случае через xpcall-подобную конструкцию
         local ran_ok, ran_err = pcall(function()
             while true do
                 local item = dequeueChatItem(q)
                 if not item then break end
+                q.startedAt = os.clock()  -- обновляем при каждом новом item
                 local ok, err2 = pcall(handleQueuedChat, item)
                 if not ok then
                     print("[LOB] handleQueuedChat error: " .. tostring(err2))
                 end
-                -- Небольшая пауза между элементами очереди чтобы не душить движок
                 if q.head <= q.tail then task.wait(0.05) end
             end
         end)
-        q.running = false  -- ВСЕГДА сбрасываем, даже при панике
+        q.running = false
+        q.startedAt = 0
         if not ran_ok then
             print("[LOB] runChatQueue panic: " .. tostring(ran_err))
         end
     end)
 end
+
+-- §WATCHDOG — сброс зависших очередей
+-- Если очередь running > 45 сек — принудительно сбрасываем
+task.spawn(function()
+    while true do
+        task.wait(10)
+        local now = os.clock()
+        for uid, q in pairs(ChatQueue) do
+            if q.running and q.startedAt and q.startedAt > 0 then
+                if (now - q.startedAt) > 45 then
+                    print("[LOB] watchdog: reset stuck queue for " .. tostring(uid))
+                    q.running = false
+                    q.startedAt = 0
+                    -- Очищаем очередь чтобы не накапливались устаревшие сообщения
+                    q.head = 1; q.tail = 0; q.items = {}
+                end
+            end
+        end
+    end
+end)
 
 -- v18: WORLD REACTIONS монитор
 -- §WORLD_REACT
