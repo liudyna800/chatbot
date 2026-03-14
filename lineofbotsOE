@@ -43,7 +43,7 @@
 --  9773     §LAUNCH        createInterface() — точка запуска скрипта
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v19.8.6 LOADED")
+print("LOB VERSION: v19.8.7 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -957,7 +957,6 @@ function GroqProvider:chatCompletions(payload)
     
     if not res then
         if isRateLimited(statusCode, statusMsg, body) then
-            -- Переключаем на второй слот и повторяем запрос
             switchGroqSlot()
             local newKey = getGroqApiKey()
             if newKey and newKey ~= apiKey then
@@ -967,15 +966,20 @@ function GroqProvider:chatCompletions(payload)
                 }, payload)
                 if rh2 then parseRateLimitHeaders(rh2) end
                 if res2 then
-                    res = res2; statusCode = sc2; body = b2; respHeaders = rh2
-                    goto groq_process
+                    -- Повторный запрос успешен — обрабатываем res2
+                    local choice2 = res2.choices and res2.choices[1]
+                    if choice2 then
+                        local msg2 = choice2.message
+                        if msg2 and type(msg2.content) == "string" and msg2.content ~= "" then
+                            return msg2.content, nil
+                        end
+                    end
                 end
             end
             if onApiRateLimited then onApiRateLimited("groq") end
         end
         return nil, tostring(statusCode or "") .. ":" .. tostring(statusMsg or "") .. ":" .. tostring(body or "")
     end
-    ::groq_process::
     
     local choice = res.choices and res.choices[1]
     if not choice then 
@@ -1671,11 +1675,8 @@ end
 
 -- Разбить текст на части по MAX символов, стараясь резать по пробелу/знаку
 -- §SPLIT
--- UTF-8 aware длина строки (символы, не байты)
-local function utf8Len(s)
-    local ok, n = pcall(utf8.len, s)
-    if ok and n then return n end
-    -- фоллбэк: считаем не-continuation байты (0xC0+) + ASCII
+-- Подсчёт UTF-8 символов без utf8 библиотеки (совместимо с Lua 5.1/Delta)
+local function charLen(s)
     local count = 0
     for i = 1, #s do
         local b = s:byte(i)
@@ -1684,21 +1685,17 @@ local function utf8Len(s)
     return count
 end
 
--- UTF-8 aware sub: берёт первые n символов (не байтов)
-local function utf8Sub(s, n)
-    if n <= 0 then return "" end
-    local ok, pos = pcall(utf8.offset, s, n + 1)
-    if ok and pos then return s:sub(1, pos - 1) end
-    -- фоллбэк: обычный sub (для ASCII-only текста)
-    return s:sub(1, n)
-end
-
--- UTF-8 aware skip: убирает первые n символов
-local function utf8Skip(s, n)
-    if n <= 0 then return s end
-    local ok, pos = pcall(utf8.offset, s, n + 1)
-    if ok and pos then return s:sub(pos) end
-    return s:sub(n + 1)
+-- Возвращает байтовую позицию n-го символа в UTF-8 строке
+local function charOffset(s, n)
+    local count = 0
+    for i = 1, #s do
+        local b = s:byte(i)
+        if b < 0x80 or b >= 0xC0 then
+            count = count + 1
+            if count == n then return i end
+        end
+    end
+    return #s + 1
 end
 
 local function splitTextIntoParts(text, maxLen)
@@ -1706,39 +1703,32 @@ local function splitTextIntoParts(text, maxLen)
     text = text and text:match("^%s*(.-)%s*$") or ""
     if text == "" then return {""} end
     maxLen = math.max(maxLen or 200, 20)
-    -- maxLen трактуем как символы (Unicode codepoints), не байты
-    while utf8Len(text) > maxLen do
-        -- Ищем последний пробел в пределах maxLen символов
-        local cutChar = maxLen
-        local textHead = utf8Sub(text, maxLen)
-        -- Ищем пробел справа налево в textHead
+    while charLen(text) > maxLen do
+        -- Берём первые maxLen символов по байтовому смещению
+        local endByte = charOffset(text, maxLen + 1) - 1
+        if endByte < 1 then endByte = #text end
+        local head = text:sub(1, endByte)
+        -- Ищем последний пробел в head
         local spacePos = nil
-        for i = #textHead, math.max(1, #textHead - 80), -1 do
-            if textHead:sub(i, i) == " " then
+        for i = #head, math.max(1, #head - 80), -1 do
+            if head:sub(i, i) == " " then
                 spacePos = i
                 break
             end
         end
         local part, rest
         if spacePos then
-            part = textHead:sub(1, spacePos - 1)
+            part = head:sub(1, spacePos - 1)
             rest = text:sub(spacePos + 1)
         else
-            -- Нет пробела — режем строго по символам
-            part = textHead
-            rest = utf8Skip(text, maxLen)
+            part = head
+            rest = text:sub(endByte + 1)
         end
-        if part == "" then
-            -- Аварийный выход чтобы не зависнуть
-            table.insert(parts, textHead)
-            rest = utf8Skip(text, maxLen)
-            text = rest:match("^%s*(.-)%s*$") or ""
-            break
-        end
+        if part == "" then break end
         table.insert(parts, part)
         text = rest:match("^%s*(.-)%s*$") or ""
     end
-    if utf8Len(text) > 0 then
+    if charLen(text) > 0 then
         table.insert(parts, text)
     end
     return parts
