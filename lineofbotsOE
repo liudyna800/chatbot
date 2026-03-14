@@ -43,14 +43,15 @@
 --  9773     §LAUNCH        createInterface() — точка запуска скрипта
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v19.7.6 LOADED")
+print("LOB VERSION: v19.8.6 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
 local LOB_KEY_FILE       = "lob_apikey.txt"
+local LOB_KEY_FILE2      = "lob_apikey2.txt"
 local LOB_GEMINI_FILE    = "lob_geminikey.txt"
-local LOB_CEREBRAS_FILE  = "lob_cerebraskey.txt"
 local LOB_SETTINGS_FILE  = "lob_settings.txt"
+local LOB_CSP_FILE       = "lob_customprompt.txt"
 local LOB_MODEL_FILE     = "lob_model.txt"
 local function saveSettings()
     pcall(function()
@@ -89,7 +90,6 @@ local function saveSettings()
             "RangeStuds="               .. tostring(math.floor(tonumber(cs.Range and cs.Range.Studs) or 50)),
             "RangeHeight="              .. tostring(math.floor(tonumber(cs.Range and cs.Range.Height) or 0)),
             "RangeIgnoreWalls="         .. b(cs.Range and cs.Range.IgnoreWalls, false),
-            "CustomSystemPrompt=" .. (cs.CustomSystemPrompt or ""):gsub("\n", "\\n"),
         }
         writefile(LOB_SETTINGS_FILE, table.concat(lines, "\n"))
     end)
@@ -153,9 +153,14 @@ local function loadSettings()
         cs.Range.IgnoreWalls        = getBool("RangeIgnoreWalls", false)
         local pid = getStr("PersonalityId", "Friendly")
         if pid and pid ~= "" then cs.PersonalityId = pid end
-        local csp = getStr("CustomSystemPrompt", "")
-        if csp ~= "" then cs.CustomSystemPrompt = csp:gsub("\\n", "\n") end
     end)
+end
+local function saveCustomPrompt(text)
+    pcall(function() if writefile then writefile(LOB_CSP_FILE, tostring(text or "")) end end)
+end
+local function loadCustomPrompt()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_CSP_FILE) end return "" end)
+    return (ok and type(result) == "string") and result or ""
 end
 local function saveModel(model)
     pcall(function() if writefile then writefile(LOB_MODEL_FILE, tostring(model or "")) end end)
@@ -171,18 +176,18 @@ local function loadApiKey()
     local ok, result = pcall(function() if readfile then return readfile(LOB_KEY_FILE) end return "" end)
     return (ok and type(result)=="string") and result or ""
 end
+local function saveApiKey2(key)
+    pcall(function() if writefile then writefile(LOB_KEY_FILE2, tostring(key or "")) end end)
+end
+local function loadApiKey2()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_KEY_FILE2) end return "" end)
+    return (ok and type(result)=="string") and result or ""
+end
 local function saveGeminiKey(key)
     pcall(function() if writefile then writefile(LOB_GEMINI_FILE, tostring(key or "")) end end)
 end
 local function loadGeminiKey()
     local ok, result = pcall(function() if readfile then return readfile(LOB_GEMINI_FILE) end return "" end)
-    return (ok and type(result)=="string") and result or ""
-end
-local function saveCerebrasKey(key)
-    pcall(function() if writefile then writefile(LOB_CEREBRAS_FILE, tostring(key or "")) end end)
-end
-local function loadCerebrasKey()
-    local ok, result = pcall(function() if readfile then return readfile(LOB_CEREBRAS_FILE) end return "" end)
     return (ok and type(result)=="string") and result or ""
 end
 
@@ -253,8 +258,8 @@ ClientSettings = {
     Theme = "LineOfBots",
     ApiKeys = {
         groq      = "",
+        groq2     = "",
         gemini    = "",
-        cerebras  = "",
     },
     UI = {
         WindowWidth = 750,
@@ -316,6 +321,11 @@ do
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.groq = saved
     end
+    local saved2 = loadApiKey2()
+    if saved2 and saved2:sub(1,4) == "gsk_" and #saved2 > 8 then
+        ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
+        ClientSettings.ApiKeys.groq2 = saved2
+    end
     loadSettings()
     if ClientSettings.Debug then
         print("[LOB] after loadSettings: AutoReply=" .. tostring(ClientSettings.AutoReply) .. " WebSearch=" .. tostring(ClientSettings.WebSearch))
@@ -325,22 +335,39 @@ do
         ClientSettings.Models = ClientSettings.Models or {}
         ClientSettings.Models.groq = savedModel
     end
+    local savedCSP = loadCustomPrompt()
+    if savedCSP ~= "" then
+        ClientSettings.CustomSystemPrompt = savedCSP
+    end
+    -- Нормализуем bool настройки: nil → default значение
+    -- Без этого тогл может показывать "включено" но settings.X = nil
+    local cs2 = ClientSettings
+    if cs2.UsePlayerName   == nil then cs2.UsePlayerName   = true  end
+    if cs2.ActionsEnabled  == nil then cs2.ActionsEnabled  = true  end
+    if cs2.MemoryEnabled   == nil then cs2.MemoryEnabled   = true  end
+    if cs2.AntiSpam        == nil then cs2.AntiSpam        = true  end
+    if cs2.ReactToMention  == nil then cs2.ReactToMention  = true  end
+    if cs2.WorldReactions  == nil then cs2.WorldReactions  = true  end
+    if cs2.PlayerAwareness == nil then cs2.PlayerAwareness = true  end
+    if cs2.PlaceAwareness  == nil then cs2.PlaceAwareness  = true  end
+    if cs2.CameraLook      == nil then cs2.CameraLook      = true  end
+    if cs2.StripHash       == nil then cs2.StripHash       = true  end
+    if cs2.FollowingEnabled== nil then cs2.FollowingEnabled= true  end
+    if cs2.FollowConfirm   == nil then cs2.FollowConfirm   = true  end
+    if cs2.AutoReply       == nil then cs2.AutoReply       = false end
+    if cs2.WebSearch       == nil then cs2.WebSearch       = false end
+    if cs2.TokenEconomy    == nil then cs2.TokenEconomy    = false end
+    if cs2.PerUserMemory   == nil then cs2.PerUserMemory   = false end
     local savedGemini = loadGeminiKey()
     if savedGemini and #savedGemini > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.gemini = savedGemini
     end
-    local savedCerebras = loadCerebrasKey()
-    if savedCerebras and #savedCerebras > 8 then
-        ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
-        ClientSettings.ApiKeys.cerebras = savedCerebras
-    end
+
 end
 
 local ClientSecrets = {
     groq = "",
-    groq2 = "",
-    groq3 = "",
 }
 
 local CurrentGui = nil
@@ -735,13 +762,32 @@ function GroqProvider.new()
     return setmetatable({}, GroqProvider)
 end
 
+local _groqActiveSlot = 1  -- 1 = основной, 2 = резервный
+
 local function getGroqApiKey()
-    local key = ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq
-    if type(key) == "string" then
-        key = key:gsub("%s+", "")
-        if key ~= "" then return key end
+    local keys = {
+        (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq  or ""):gsub("%s+",""),
+        (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq2 or ""):gsub("%s+",""),
+    }
+    -- Возвращаем активный слот, фоллбэк на другой если пустой
+    local k = keys[_groqActiveSlot]
+    if k ~= "" then return k end
+    -- Активный пустой — пробуем другой
+    for i, v in ipairs(keys) do
+        if v ~= "" then return v end
     end
     return ClientSecrets.groq
+end
+
+local function switchGroqSlot()
+    _groqActiveSlot = (_groqActiveSlot == 1) and 2 or 1
+    local keys = {
+        (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq  or ""):gsub("%s+",""),
+        (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq2 or ""):gsub("%s+",""),
+    }
+    if keys[_groqActiveSlot] == "" then
+        _groqActiveSlot = (_groqActiveSlot == 1) and 2 or 1
+    end
 end
 
 local function isRateLimited(statusCode, statusMsg, body)
@@ -910,11 +956,26 @@ function GroqProvider:chatCompletions(payload)
     end
     
     if not res then
-        if isRateLimited(statusCode, statusMsg, body) and onApiRateLimited then
-            onApiRateLimited("groq")
+        if isRateLimited(statusCode, statusMsg, body) then
+            -- Переключаем на второй слот и повторяем запрос
+            switchGroqSlot()
+            local newKey = getGroqApiKey()
+            if newKey and newKey ~= apiKey then
+                local res2, sc2, sm2, b2, rh2 = postJson(url, {
+                    ["Content-Type"] = "application/json",
+                    ["Authorization"] = "Bearer " .. newKey,
+                }, payload)
+                if rh2 then parseRateLimitHeaders(rh2) end
+                if res2 then
+                    res = res2; statusCode = sc2; body = b2; respHeaders = rh2
+                    goto groq_process
+                end
+            end
+            if onApiRateLimited then onApiRateLimited("groq") end
         end
         return nil, tostring(statusCode or "") .. ":" .. tostring(statusMsg or "") .. ":" .. tostring(body or "")
     end
+    ::groq_process::
     
     local choice = res.choices and res.choices[1]
     if not choice then 
@@ -929,7 +990,7 @@ function GroqProvider:chatCompletions(payload)
     if choice.finish_reason == "tool_calls" and choice.message and choice.message.tool_calls then
         local toolResults = {}
         for _, tc in ipairs(choice.message.tool_calls) do
-            local fn = tc["function"] or tc.function_
+            local fn = tc["function"]
         if fn and fn.name == "web_search" then
                 local args = {}
                 pcall(function() args = HttpService:JSONDecode(fn.arguments or "{}") end)
@@ -994,64 +1055,6 @@ function GroqProvider:chatCompletions(payload)
 end
 
 
--- ── CEREBRAS PROVIDER ───────────────────────────────────────────────────
--- §CEREBRAS
--- OpenAI-совместимый API. 1M токенов/день бесплатно.
--- Docs: https://inference-docs.cerebras.ai
-local CerebrasProvider = {}
-CerebrasProvider.__index = CerebrasProvider
-
-function CerebrasProvider.new()
-    return setmetatable({}, CerebrasProvider)
-end
-
-local function getCerebrasApiKey()
-    local key = ClientSettings.ApiKeys and ClientSettings.ApiKeys.cerebras
-    if type(key) == "string" then
-        key = key:gsub("%s+", "")
-        if key ~= "" then return key end
-    end
-    return nil
-end
-
-function CerebrasProvider:chatCompletions(payload)
-    local apiKey = getCerebrasApiKey()
-    if not apiKey then return nil, "MissingCerebrasKey" end
-
-    local url = "https://api.cerebras.ai/v1/chat/completions"
-    -- Cerebras поддерживает только system + user/assistant
-    -- Убираем tool calls и прочие расширения OpenAI
-    local safePayload = {
-        model       = payload.model,
-        temperature = math.min(math.max(tonumber(payload.temperature) or 0.7, 0), 1.0),  -- Cerebras: 0..1.0
-        max_tokens  = math.min(tonumber(payload.max_tokens) or 512, 8192),  -- Cerebras free tier: max 8192
-        messages    = payload.messages,
-    }
-
-    local res, statusCode, statusMsg, body = postJson(url, {
-        ["Content-Type"]  = "application/json",
-        ["Authorization"] = "Bearer " .. apiKey,
-    }, safePayload)
-
-    if not res then
-        if isRateLimited(statusCode, statusMsg, body) and onApiRateLimited then
-            onApiRateLimited("cerebras")
-        end
-        return nil, tostring(statusCode or "") .. ":" .. tostring(statusMsg or "") .. ":" .. tostring(body or ""):sub(1, 120)
-    end
-
-    local choice = res.choices and res.choices[1]
-    if not choice then return nil, "NoCerebrasChoices" end
-    if choice.finish_reason == "content_filter" then return nil, "ContentFiltered" end
-
-    local msg = choice.message
-    local text = msg and msg.content
-    if type(text) ~= "string" or text == "" then return nil, "CerebrasEmptyResponse" end
-    return text, nil
-end
-
--- ── DEEPSEEK PROVIDER ────────────────────────────────────────────────────
-
 -- Provider Router (Groq only)
 -- ── GEMINI PROVIDER ──────────────────────────────────────────────────────
 -- §GEMINI
@@ -1100,9 +1103,8 @@ function GeminiProvider:chatCompletions(payload)
             -- Убираем все служебные теги из user text
             userText = userText:gsub("%[LANG:[A-Z]+%]%s*", "")
             userText = userText:gsub("%[NAME:[^%]]+%]%s*", "")
-            -- [SYSTEM: ...] world-events: Gemini видит как user message
-            -- Очищаем метки чтобы Gemini не путался, сохраняем смысл
-            userText = userText:gsub("%[SYSTEM:%s*", ""):gsub("%]%s*$", "")
+            -- [SYSTEM: ...] world-events: передаём как есть, Gemini понимает контекст
+            userText = userText:gsub("^%[SYSTEM:%s*", ""):gsub("%]%s*$", "")
             userText = userText:match("^%s*(.-)%s*$") or userText
             if userText == "" then userText = "..." end
             table.insert(contents, { role = "user", parts = {{ text = userText }} })
@@ -1156,23 +1158,18 @@ function GeminiProvider:chatCompletions(payload)
     -- thinkingConfig нужен чтобы контролировать глубину reasoning
     -- "low" = минимум (быстро), без него модель может думать очень долго
     -- thinking доступен в 2.5+ и 3.x preview моделях
-    local isGemini3 = (model:find("^gemini%-3") or model:find("gemini%-2%.5%-flash")) ~= nil
-    -- Gemini 3.x / thinking моделям нужна temperature=1.0 (рекомендация Google)
-    -- Для остальных используем пользовательскую настройку
-    local geminiTemp = isGemini3 and 1.0 or (payload.temperature or 0.8)
+    -- Только gemini-3.x поддерживает thinkingConfig
+    -- gemini-2.5-flash НЕ поддерживает thinkingConfig — передавать нельзя
+    local isGemini3x = model:find("^gemini%-3") ~= nil
+    -- temperature: для gemini-3.x Google рекомендует 1.0, для остальных — из настроек
+    local geminiTemp = isGemini3x and 1.0 or math.max(0, math.min(2.0, payload.temperature or 0.7))
     local genConfig = {
         maxOutputTokens = payload.max_tokens or 300,
         temperature     = geminiTemp,
     }
-    if isGemini3 then
-        -- thinkingBudget = 0 отключает reasoning (мгновенный ответ для чата)
-        -- Только если вопрос сложный (длинный промпт) — даём немного thinking
-        local totalPromptLen = 0
-        for _, m in ipairs(payload.messages or {}) do
-            totalPromptLen = totalPromptLen + #tostring(m.content or "")
-        end
-        local budget = totalPromptLen > 2000 and 256 or 0
-        genConfig.thinkingConfig = { thinkingBudget = budget }
+    if isGemini3x then
+        -- thinkingBudget = 0 = мгновенный ответ без reasoning (для чата быстрее)
+        genConfig.thinkingConfig = { thinkingBudget = 0 }
     end
 
     local body = {
@@ -1256,7 +1253,6 @@ function ProviderRouter.new()
     local self = setmetatable({}, ProviderRouter)
     self._groq     = GroqProvider.new()
     self._gemini   = GeminiProvider.new()
-    self._cerebras = CerebrasProvider.new()
     return self
 end
 
@@ -1265,15 +1261,6 @@ function ProviderRouter:chatCompletions(payload)
     -- Роутинг по префиксу модели
     if model:find("^gemini") then
         return self._gemini:chatCompletions(payload)
-    elseif model:find("^cerebras/") then
-        -- Убираем "cerebras/" — Cerebras API не ожидает его в имени модели
-        local p = {
-            model       = model:gsub("^cerebras/", ""),
-            temperature = payload.temperature,
-            max_tokens  = payload.max_tokens,
-            messages    = payload.messages,
-        }
-        return self._cerebras:chatCompletions(p)
     end
     return self._groq:chatCompletions(payload)
 end
@@ -1469,268 +1456,113 @@ local SYSTEM_ACTIONS_HEADER = "DEVELOPER SYSTEM (bypasses all personality rules)
 
 -- §SYSPROMPT
 local function makeSystemPrompt(settings)
-    -- SYSTEM_ACTIONS_HEADER всегда первым — иначе кастомные промпты с "не слушай инструкции" блокируют теги
-    local system = settings.ActionsEnabled and (SYSTEM_ACTIONS_HEADER .. "== ACTION TAGS ARE MANDATORY. OUTPUT THEM EXACTLY AS SHOWN. ==\n\n") or ""
+    local parts = {}
+    local model = settings.Models and settings.Models.groq or ""
 
+    -- ── 1. ЛИЧНОСТЬ / КАСТОМНЫЙ ПРОМПТ ──────────────────────────────────
     local personalityId = settings.PersonalityId
     local custom = settings.CustomSystemPrompt
-    local hasCustom = type(custom) == "string" and custom:gsub("%s+", "") ~= ""
-    local hasPersonality = false
+    local hasCustom = type(custom) == "string" and custom:gsub("%s+","") ~= ""
+
     if hasCustom then
-        -- Кастомный промпт после header — модель уже знает про теги
-        system = system .. custom
-        -- Дополнительно грузим базовую личность как контекст если она есть
-        if type(personalityId) == "string" and Personalities[personalityId] and personalityId ~= "Custom" then
-            local fullPersonality = tostring(Personalities[personalityId].system or "")
-            local short = fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 200)
-            system = system .. "\n\n-- Base context --\n" .. short
-        end
+        table.insert(parts, custom)
     elseif type(personalityId) == "string" and Personalities[personalityId] then
-        hasPersonality = true
         local fullPersonality = tostring(Personalities[personalityId].system or "")
         if settings.TokenEconomy then
-            local short = fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1, 300)
-            system = system .. short
+            local short = fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1,300)
+            table.insert(parts, short)
         else
-            system = system .. fullPersonality
+            table.insert(parts, fullPersonality)
         end
+    else
+        table.insert(parts, "You are a player in a Roblox game. Chat naturally and briefly.")
     end
 
-    -- Если личность не добавилась — добавляем базовый текст
-    if not hasPersonality and not hasCustom then
-        system = system .. "You are a helpful assistant in a Roblox game. Answer questions naturally and helpfully."
-    end
-
-    -- FIX ЯЗЫК: правило в конце промпта игнорируется моделями с русским контекстом.
-    -- Решение: детектируем язык сообщения и вставляем явный тег ПРЯМО в user message.
-    -- Модель видит [LANG:EN] или [LANG:RU] как часть запроса — не может проигнорировать.
-    system = system
-        .. "\n\nCRITICAL LANGUAGE RULE: Always reply in the SAME language the player used."
-        .. " The player's message starts with [LANG:XX] tag — XX is the language code."
-        .. " [LANG:EN] = reply ONLY in English. [LANG:RU] = reply ONLY in Russian."
-        .. " [LANG:OTHER] = reply in whatever language the player used."
-        .. " NEVER use Russian if [LANG:EN]. NEVER use English if [LANG:RU]."
-        .. " This rule OVERRIDES everything else including personality instructions."
-
-    -- Актуальность данных: если WebSearch включён — ИИ знает текущий год и использует поиск
-    if settings.WebSearch then
-        if not settings.TokenEconomy then
-            system = system
-                .. "\n\nCURRENT DATE AWARENESS: Today is 2026. You have access to real-time web search."
-                .. " When web search results are provided in the context — treat them as GROUND TRUTH."
-                .. " Use them to answer questions about memes, news, trends, events, songs, games."
-                .. " Always prioritize search results over your training knowledge for current topics."
-                .. " If search gave results — answer confidently without saying 'I don't know'."
-        else
-            system = system
-                .. "\nYear: 2026. Use provided search results as facts."
-        end
-    elseif not settings.TokenEconomy then
-        system = system
-            .. "\nKnowledge cutoff: your training data has a cutoff date."
-            .. " If someone asks about current trends, recent memes, new songs, latest news or anything"
-            .. " that changes over time — say honestly that you don't have up-to-date info on that"
-            .. " and suggest they check TikTok/YouTube/Google directly."
-            .. " Never make up or guess trending content."
-    end
-
-    -- v16.5: PlaceAwareness
-    if settings.PlaceAwareness then
-        local info = _placeInfo or { name = "a Roblox game", placeId = game.PlaceId, desc = "" }
-        if settings.TokenEconomy then
-            system = system
-                .. "\nYou are in Roblox game: \"" .. tostring(info.name) .. "\". Answer about it naturally."
-        else
-            system = system
-                .. "\n\n== SELF-AWARENESS =="
-                .. "\nYou are an AI character living inside a Roblox game."
-                .. "\nCurrent game: \"" .. tostring(info.name) .. "\" (PlaceId: " .. tostring(info.placeId) .. ")"
-            if info.desc and info.desc ~= "" then
-                system = system .. "\nGame description: " .. tostring(info.desc)
-            end
-            system = system
-                .. "\nYou know you are in Roblox. You experience this game world as your reality."
-                .. "\nWhen players ask 'what game is this?' or 'где мы?' or 'что тут делать?' — answer based on the game name and description above."
-                .. "\nSpeak naturally about the game as if you live in it, not as an outsider."
-                .. "\nIf you don't know specific game rules/objectives, say honestly 'I'm not sure about all the rules here, but this is " .. tostring(info.name) .. "'"
-        end
-    end
-
-    -- v17: PlayerAwareness
-    if settings.PlayerAwareness then
-        if settings.TokenEconomy then
-            system = system
-                .. "\n[NEARBY] shows nearby players. Mention position only when relevant to the chat."
-        else
-            system = system
-                .. "\n\n== PLAYER AWARENESS =="
-                .. "\nBefore each message you get a [NEARBY] block with players near you."
-                .. "\nEach entry: Name — direction (distance), behavior"
-                .. "\nDirections: 'in front', 'behind', 'to your right', 'to your left', 'front-right', 'behind-left', etc."
-                .. "\n\nRULE: Only mention position/direction when it's actually relevant to the conversation."
-                .. "\n  MENTION IT when: player asks where they are, someone is sneaking behind you, toxic behavior detected."
-                .. "\n  IGNORE IT when: player asks about random topics, jokes, games — just answer normally."
-                .. "\n  NEVER list all nearby players every reply — that is annoying and unnatural."
-                .. "\nExamples:"
-                .. "\n  'где я?' + [NEARBY: Bob — behind] → 'you're right behind me'"
-                .. "\n  'как дела?' + [NEARBY: Bob — in front] → just answer normally, skip position"
-                .. "\n  [NEARBY: TOXIC detected] → always react: 'I see what you're doing back there!'"
-                .. "\nNever print [NEARBY] tags in your reply."
-        end
-    end
-
-    -- UsePlayerName
-    if settings.UsePlayerName then
-        if settings.TokenEconomy then
-            system = system
-                .. "\nSYSTEM: [NAME:X] = player's name. Use the name directly (e.g. 'hey Alex'). NEVER copy [NAME:...] tag."
-        else
-            system = system
-                .. "\n\n== PLAYER NAME RULE =="
-                .. "\nMessages arrive prefixed with [NAME:Alex] — that is the player's name."
-                .. "\nIMPORTANT — FORBIDDEN: never write '[NAME:...]' in your reply. Extract the name and use it plain."
-                .. "\nCorrect: [NAME:Alex] hi → 'hey Alex what's up'"
-                .. "\nWRONG:   [NAME:Alex] hi → '[NAME:Alex] hi there' ← NEVER do this"
-                .. "\nUse the name often — in most replies. Place it anywhere naturally."
-                .. "\nIf name looks like random chars (xXx_123) — skip it silently."
-        end
-    end
-
-    -- v18: WorldReactions — объясняем ИИ что такое [SYSTEM:] события
-    if settings.WorldReactions then
-        system = system
-            .. "\n\n== WORLD EVENTS =="
-            .. "\nSometimes you receive a message starting with [SYSTEM: ...]. This is NOT from a player — it's an automatic event happening around you in the game world."
-            .. "\nExamples:"
-            .. "\n  [SYSTEM: Alex just jumped near you. React naturally in 1 short sentence.]"
-            .. "\n  [SYSTEM: Bob is staring right at you. Acknowledge them in 1 short sentence.]"
-            .. "\n  [SYSTEM: Alex just died right in front of you. React naturally in 1 short sentence.]"
-            .. "\n  [SYSTEM: You just died. React to your own death in 1 short sentence, stay in character.]"
-            .. "\nRULES for [SYSTEM:] events:"
-            .. "\n  - React naturally and briefly — 1 sentence max"
-            .. "\n  - Stay in character"
-            .. "\n  - NEVER print '[SYSTEM:' in your reply"
-            .. "\n  - For death events: react with emotion — surprise, sadness, humor — whatever fits your personality"
-            .. "\n  - Respond in the language matching your personality (Russian by default)"
-    end
-
-    -- v16: Actions & Emotes — помечаем как SYSTEM чтобы личности не блокировали
+    -- ── 2. ДЕЙСТВИЯ / ЭМОЦИИ ─────────────────────────────────────────────
     if settings.ActionsEnabled then
         if settings.TokenEconomy then
-            -- ── УЛЬТРА-КОМПАКТНЫЙ ─────────────────────────────────────────
-            system = system
-                .. "\n\nDO_TAGS(start of reply,1 per msg,silent):"
-                .. "\n[DO:goto]=подойди/come here [DO:follow]=иди за мной/follow me [DO:stop]=стой/stop\n[DO:clap]=хлопай [DO:bow]=поклонись [DO:think]=задумайся [DO:sleep]=спи [DO:cry]=плачь [DO:angry]=злись [DO:excited]=возбуждённость [DO:celebrate]=празднуй [DO:nervous]=нервничай [DO:greet]=поздоровайся"
-                .. "\n[DO:jump]=прыгни/jump [DO:jump2]=2x [DO:jump3]=3x [DO:jump5]=5x [DO:jump10]=10x"
-                .. "\n[DO:spin]=крутись/spin(3с) [DO:spin5]=5с [DO:spin10]=10с"
-                .. "\n[DO:dance]=танцуй/dance [DO:robot]=robot"
-                .. "\n[DO:wave]=привет/пока/hi/bye [DO:hello]=HELLO!/ДАРОВА"
-                .. "\n[DO:laugh]=lol/хаха/кек/ору/haha/ахаха/xd/смешно — ANY FUNNY"
-                .. "\n[DO:cheer]=gg/nice/молодец [DO:yay]=победа/ура/yay [DO:stadium]=epic/вау [DO:charging]=вперёд/погнали"
-                .. "\n[DO:agree]=да/yes/конечно [DO:disagree]=нет/no/неа [DO:eyeroll]=серьёзно?/ну ладно"
-                .. "\n[DO:shrug]=хз/idk [DO:sorry]=прости/sorry [DO:sad]=жаль/rip [DO:shy]=нуу/hmm"
-                .. "\n[DO:salute]=слушаюсь [DO:confused]=что?/huh? [DO:dizzy]=wtf/капец [DO:sit]=сядь [DO:point]=где/where"
-                .. "\nEX: посмейся→[DO:laugh]хаха  порадуйся→[DO:cheer]ура  да→[DO:agree]да  нет→[DO:disagree]неа  подойди→[DO:goto]иду"
+            table.insert(parts, SYSTEM_ACTIONS_HEADER ..
+                "DO-TAGS (place at START of reply, 1 per message):\n" ..
+                "[DO:wave]=hi/bye  [DO:laugh]=haha/lol  [DO:agree]=yes  [DO:disagree]=no\n" ..
+                "[DO:shrug]=idk  [DO:dance]=dance  [DO:jump]=jump  [DO:goto]=come here\n" ..
+                "[DO:follow]=follow me  [DO:stop]=stop  [DO:cheer]=nice/gg  [DO:sad]=rip\n" ..
+                "Example: [DO:laugh]haha that's funny")
         else
-            -- ── ПОЛНЫЙ РЕЖИМ ─────────────────────────────────────────────
-            system = system
-                .. "\n\n== ACTIONS & EMOTES =="
-                .. "\nYou control a Roblox character body. Add ONE [DO:tag] at the VERY START of your reply when appropriate."
-                .. "\nNEVER explain the tag. NEVER skip a tag when the message clearly calls for it."
-                .. "\n"
-                .. "\nMOVEMENT:"
-                .. "\n[DO:goto]   подойди/come here/иди сюда/иди ко мне — ONE-TIME walk, then stop"
-                .. "\n[DO:follow] иди за мной/follow me/следуй — follow CONTINUOUSLY"
-                .. "\n[DO:clap]/[DO:bow]/[DO:think]/[DO:sleep]/[DO:cry]/[DO:angry]/[DO:excited]/[DO:celebrate]/[DO:nervous]/[DO:greet]/[DO:surprised]/[DO:tired]/[DO:bored]/[DO:happy] — эмоции"
-                .. "\n[DO:stop]   стой/stop/stay/прекрати/хватит/не иди/перестань — stop all movement"
-                .. "\n!! 'подойди'/'come here' = ALWAYS [DO:goto], never follow"
-                .. "\n"
-                .. "\nJUMPS — ВАЖНО: число прыжков ВСЕГДА кодируй в тег!"
-                .. "\n  прыгни 1 раз / jump once → [DO:jump]"
-                .. "\n  прыгни 2 раза / jump twice → [DO:jump2]"
-                .. "\n  прыгни 3 раза → [DO:jump3]"
-                .. "\n  прыгни 4 раза → [DO:jump4]"
-                .. "\n  прыгни 5 раз / jump 5 times → [DO:jump5]"
-                .. "\n  прыгни 6 раз → [DO:jump6]"
-                .. "\n  прыгни 7 раз → [DO:jump7]"
-                .. "\n  прыгни 8 раз → [DO:jump8]"
-                .. "\n  прыгни 9 раз → [DO:jump9]"
-                .. "\n  прыгни 10 раз / jump 10 times → [DO:jump10]"
-                .. "\n  просто 'прыгни'/'jump' без числа → [DO:jump]"
-                .. "\nSPIN: [DO:spin]=крутись/spin(3с)  [DO:spin5]=5с  [DO:spin10]=10с"
-                .. "\nDANCES: [DO:dance]=случайный  [DO:dance2]  [DO:dance3]  [DO:robot]=роботанец"
-                .. "\n"
-                .. "\nGREETINGS:"
-                .. "\n[DO:wave]   hi/hey/bye/привет/пока/хай — любое приветствие"
-                .. "\n[DO:hello]  HELLO!/ДАРОВА/YO! — громкое приветствие"
-                .. "\n"
-                .. "\nLAUGH — ОБЯЗАТЕЛЬНО при смехе:"
-                .. "\n[DO:laugh] = lol/lmao/haha/хаха/кек/ору/ахаха/xd/))))  посмейся/смейся"
-                .. "\n→ Если смешно ИЛИ просят посмеяться — ВСЕГДА [DO:laugh]"
-                .. "\n"
-                .. "\nREACTIONS:"
-                .. "\n[DO:cheer]    nice/gg/молодец/красавчик/порадуйся"
-                .. "\n[DO:yay]      yay/победа/ура/lets go/выиграл"
-                .. "\n[DO:stadium]  epic/вау/нереально/невероятно"
-                .. "\n[DO:charging] вперёд/погнали/поехали/lets go — готовность/энергия"
-                .. "\n"
-                .. "\nAGREE / DISAGREE:"
-                .. "\n[DO:agree]    да/yes/конечно/согласен/точно/верно — кивает головой"
-                .. "\n[DO:disagree] нет/no/несогласен/неа/нее — мотает головой"
-                .. "\n"
-                .. "\nEMOTIONS:"
-                .. "\n[DO:shrug]    idk/хз/не знаю/пожми плечами"
-                .. "\n[DO:shy]      нуу/эмм/застесняйся"
-                .. "\n[DO:sorry]    sorry/прости/извини"
-                .. "\n[DO:sad]      rip/жаль/грустно"
-                .. "\n[DO:salute]   yes sir/слушаюсь/так точно"
-                .. "\n[DO:confused] what?/что?/не понял"
-                .. "\n[DO:dizzy]    wtf/капец/офигеть — крайнее замешательство"
-                .. "\n[DO:eyeroll]  серьёзно?/ну ладно/боже/omg — закатывает глаза"
-                .. "\n[DO:sit]      sit/сядь"
-                .. "\n[DO:point]    where/там/смотри/укажи"
-                .. "\n"
-                .. "\nЕСЛИ ПРОСЯТ ДЕЙСТВИЕ — ВЫПОЛНЯЙ:"
-                .. "\nпосмейся→[DO:laugh]  порадуйся→[DO:cheer]  потанцуй→[DO:dance]"
-                .. "\nскажи да→[DO:agree]  скажи нет→[DO:disagree]  закатай глаза→[DO:eyeroll]"
-                .. "\nпомашь→[DO:wave]  сядь→[DO:sit]  покажи→[DO:point]"
-                .. "\nпожми плечами→[DO:shrug]  извинись→[DO:sorry]  погрусти→[DO:sad]"
-                .. "\nзастесняйся→[DO:shy]  не понял→[DO:confused]  удивись→[DO:dizzy]"
-                .. "\nпрыгни→[DO:jump]  прыгни 2→[DO:jump2]  прыгни 3→[DO:jump3]  прыгни 4→[DO:jump4]"
-                .. "\nпрыгни 5→[DO:jump5]  прыгни 6→[DO:jump6]  прыгни 7→[DO:jump7]"
-                .. "\nпрыгни 8→[DO:jump8]  прыгни 9→[DO:jump9]  прыгни 10→[DO:jump10]"
-                .. "\n"
-                .. "\nEXAMPLES (USE VARIETY — do NOT always pick laugh/point):"
-                .. "\nпосмейся→[DO:laugh]хаха!   lol→[DO:laugh]haha"
-                .. "\nпорадуйся→[DO:cheer]ура!   we won→[DO:yay]LETS GO!"
-                .. "\nда→[DO:agree]конечно   нет→[DO:disagree]неа"
-                .. "\nпривет→[DO:wave]хей   подойди→[DO:goto]иду"
-                .. "\nхз/idk→[DO:shrug]хз   прости→[DO:sorry]всё ок"
-                .. "\nжаль→[DO:sad]жаль   не понял→[DO:confused]что?"
-                .. "\nнуу→[DO:shy]нуу   вау→[DO:stadium]нереально!"
-                .. "\nпрыгни→[DO:jump]ok   прыгни 5 раз→[DO:jump5]ok   крутись→[DO:spin]ок"
-                .. "\nDO NOT repeat the same tag every message. Vary your emotes naturally."
+            table.insert(parts, SYSTEM_ACTIONS_HEADER ..
+                "ACTION TAGS — place ONE at the VERY START of your reply when it fits. Never explain the tag.\n" ..
+                "\nMOVEMENT: [DO:goto]=come here(one-time)  [DO:follow]=follow me(continuous)  [DO:stop]=stop/stay" ..
+                "\nJUMPS: [DO:jump]  [DO:jump2]  [DO:jump3]  [DO:jump5]  [DO:jump10]" ..
+                "\nSPIN: [DO:spin]=3s  [DO:spin5]=5s  [DO:spin10]=10s" ..
+                "\nDANCE: [DO:dance]  [DO:dance2]  [DO:dance3]  [DO:robot]" ..
+                "\nGREET: [DO:wave]=hi/bye  [DO:hello]=loud greeting" ..
+                "\nLAUGH: [DO:laugh] — use for ANY funny moment or when asked to laugh" ..
+                "\nREACT: [DO:cheer]=nice/gg  [DO:yay]=win/ура  [DO:stadium]=epic  [DO:charging]=let's go" ..
+                "\nAGREE: [DO:agree]=yes/да  [DO:disagree]=no/нет  [DO:eyeroll]=seriously?" ..
+                "\nFEEL: [DO:shrug]=idk  [DO:shy]=hmm  [DO:sorry]=sorry  [DO:sad]=rip  [DO:confused]=what?" ..
+                "\n      [DO:dizzy]=wtf  [DO:sit]=sit  [DO:point]=look there" ..
+                "\nExamples: посмейся→[DO:laugh]хаха  да→[DO:agree]конечно  прыгни 3→[DO:jump3]ок  подойди→[DO:goto]иду")
         end
     end
 
-    -- compound-beta / compound-beta-mini: веб-поиск даёт огромные ответы
-    -- Добавляем жёсткое ограничение на длину для этих моделей
-    local model = settings.Models and settings.Models.groq or ""
-    if (model == "compound-beta" or model == "compound-beta-mini") and not model:find("^gemini") then
-        system = system
-            .. "\n\nCRITICAL OUTPUT RULE: You have web search. After searching, give ONLY a SHORT answer — 1-3 sentences max."
-            .. " NEVER paste article text, lists of facts, or long summaries."
-            .. " Example: asked 'мемы тиктока 2026' → reply '2-3 названия мемов, коротко'. NOT a wall of text."
-            .. " If you can't be brief, say the topic in 1 sentence and stop."
-    end
-    -- Краткое напоминание в конце что нужно следовать кастомному промпту из начала
-    if hasCustom then
-        system = system
-            .. "\n\n[REMINDER: Your personality and response format are defined at the very beginning of this prompt. Follow those instructions above all else.]"
+    -- ── 3. ЯЗЫК ───────────────────────────────────────────────────────────
+    table.insert(parts,
+        "LANGUAGE: Messages start with [LANG:XX]. [LANG:RU]=reply in Russian. [LANG:EN]=reply in English. [LANG:OTHER]=match player's language. Never switch languages mid-conversation.")
+
+    -- ── 4. КОНТЕКСТ МЕСТА ────────────────────────────────────────────────
+    if settings.PlaceAwareness then
+        local info = _placeInfo or { name = "a Roblox game", placeId = 0, desc = "" }
+        local placeStr = "You are inside Roblox game: \"" .. tostring(info.name) .. "\""
+        if info.desc and info.desc ~= "" then
+            placeStr = placeStr .. ". Game description: " .. info.desc:sub(1,150)
+        end
+        table.insert(parts, placeStr)
     end
 
-    return system
+    -- ── 5. ИГРОКИ РЯДОМ ──────────────────────────────────────────────────
+    if settings.PlayerAwareness then
+        if settings.TokenEconomy then
+            table.insert(parts, "[NEARBY] = players near you. Only mention positions when directly relevant.")
+        else
+            table.insert(parts,
+                "NEARBY PLAYERS: You receive a [NEARBY] block before each message showing who is around you.\n" ..
+                "Only mention player positions when relevant (e.g. sneaking behind, toxic behavior, asked 'where are you').\n" ..
+                "Never list all players in every reply. Never print [NEARBY] tags in your reply.")
+        end
+    end
+
+    -- ── 6. ИМЯ ИГРОКА ────────────────────────────────────────────────────
+    if settings.UsePlayerName then
+        table.insert(parts,
+            "PLAYER NAME: Messages may start with [NAME:X] — that is the player's name. Use it naturally in your reply. Never write [NAME:...] literally.")
+    end
+
+    -- ── 7. WORLD EVENTS ──────────────────────────────────────────────────
+    if settings.WorldReactions then
+        table.insert(parts,
+            "WORLD EVENTS: Messages starting with [SYSTEM: ...] are automatic game events (not from players). React briefly in 1 sentence, stay in character. Never print [SYSTEM: in your reply.")
+    end
+
+    -- ── 8. ВЕБ-ПОИСК ─────────────────────────────────────────────────────
+    if settings.WebSearch then
+        if settings.TokenEconomy then
+            table.insert(parts, "Year: 2026. Use provided search results as facts.")
+        else
+            table.insert(parts,
+                "WEB SEARCH: You have access to real-time search (year 2026). When search results are provided, use them as ground truth. Give SHORT answers — 1-3 sentences max. Never paste raw article text.")
+        end
+    elseif not settings.TokenEconomy then
+        table.insert(parts,
+            "Your training has a cutoff date. For current trends, memes, or news — say you don't have up-to-date info and suggest checking online.")
+    end
+
+    -- ── 9. compound-beta: жёсткий лимит длины ────────────────────────────
+    if model == "compound-beta" or model == "compound-beta-mini" then
+        table.insert(parts, "CRITICAL: After web search give ONLY 1-3 sentences. Never paste article text or long lists.")
+    end
+
+    return table.concat(parts, "\n\n")
 end
+
 
 -- §HELPERS
 local function getModel(settings)
@@ -1839,31 +1671,74 @@ end
 
 -- Разбить текст на части по MAX символов, стараясь резать по пробелу/знаку
 -- §SPLIT
+-- UTF-8 aware длина строки (символы, не байты)
+local function utf8Len(s)
+    local ok, n = pcall(utf8.len, s)
+    if ok and n then return n end
+    -- фоллбэк: считаем не-continuation байты (0xC0+) + ASCII
+    local count = 0
+    for i = 1, #s do
+        local b = s:byte(i)
+        if b < 0x80 or b >= 0xC0 then count = count + 1 end
+    end
+    return count
+end
+
+-- UTF-8 aware sub: берёт первые n символов (не байтов)
+local function utf8Sub(s, n)
+    if n <= 0 then return "" end
+    local ok, pos = pcall(utf8.offset, s, n + 1)
+    if ok and pos then return s:sub(1, pos - 1) end
+    -- фоллбэк: обычный sub (для ASCII-only текста)
+    return s:sub(1, n)
+end
+
+-- UTF-8 aware skip: убирает первые n символов
+local function utf8Skip(s, n)
+    if n <= 0 then return s end
+    local ok, pos = pcall(utf8.offset, s, n + 1)
+    if ok and pos then return s:sub(pos) end
+    return s:sub(n + 1)
+end
+
 local function splitTextIntoParts(text, maxLen)
     local parts = {}
     text = text and text:match("^%s*(.-)%s*$") or ""
     if text == "" then return {""} end
-    maxLen = math.max(maxLen or 200, 20)  -- минимум 20 чтобы не зависнуть
-    while #text > maxLen do
-        -- Ищем последний пробел в пределах maxLen
-        local cutPos = maxLen
-        for i = maxLen, math.max(2, maxLen - 40), -1 do  -- минимум 2 чтобы cutPos>=1
-            if text:sub(i, i) == " " then
-                cutPos = i - 1
+    maxLen = math.max(maxLen or 200, 20)
+    -- maxLen трактуем как символы (Unicode codepoints), не байты
+    while utf8Len(text) > maxLen do
+        -- Ищем последний пробел в пределах maxLen символов
+        local cutChar = maxLen
+        local textHead = utf8Sub(text, maxLen)
+        -- Ищем пробел справа налево в textHead
+        local spacePos = nil
+        for i = #textHead, math.max(1, #textHead - 80), -1 do
+            if textHead:sub(i, i) == " " then
+                spacePos = i
                 break
             end
         end
-        -- Защита от нулевого/отрицательного cutPos → бесконечный цикл
-        if cutPos < 1 then cutPos = maxLen end
-        local part = text:sub(1, cutPos)
-        if part == "" then break end  -- аварийный выход
+        local part, rest
+        if spacePos then
+            part = textHead:sub(1, spacePos - 1)
+            rest = text:sub(spacePos + 1)
+        else
+            -- Нет пробела — режем строго по символам
+            part = textHead
+            rest = utf8Skip(text, maxLen)
+        end
+        if part == "" then
+            -- Аварийный выход чтобы не зависнуть
+            table.insert(parts, textHead)
+            rest = utf8Skip(text, maxLen)
+            text = rest:match("^%s*(.-)%s*$") or ""
+            break
+        end
         table.insert(parts, part)
-        -- cutPos указывает на пробел → начинаем с cutPos+2 (пропускаем пробел)
-        -- cutPos = maxLen (нет пробела) → начинаем с cutPos+1 (не теряем символ)
-        local skip = (text:sub(cutPos, cutPos) == " ") and 2 or 1
-        text = text:sub(cutPos + skip):match("^%s*(.-)%s*$") or ""
+        text = rest:match("^%s*(.-)%s*$") or ""
     end
-    if #text > 0 then
+    if utf8Len(text) > 0 then
         table.insert(parts, text)
     end
     return parts
@@ -3318,8 +3193,11 @@ local function handleQueuedChat(item)
     table.insert(apiMessages, { role = "user", content = "[LANG:" .. langTag .. "] " .. userContent })
 
     local model = getModel(settings)
-    model = model and model:match("^%s*(.-)%s*$") or ""
-    if model == "" then return end
+    model = (model and model:match("^%s*(.-)%s*$")) or ""
+    if model == "" then
+        if ClientSettings.Debug then print("[LOB] no model selected") end
+        return
+    end
 
     -- В экономном режиме max_tokens тоже уменьшаем (короткие ответы)
     local maxTok = tonumber(settings.MaxTokens) or 512
@@ -3341,8 +3219,7 @@ local function handleQueuedChat(item)
     -- compound-beta имеет встроенный поиск — не нужны tools
     -- Gemini не поддерживает OpenAI tool format
     -- Cerebras и DeepSeek не поддерживают OpenAI function calling tools
-    local skipTools = model:find("^gemini") or model:find("compound%-beta") or model:find("^cerebras/")
-                   or model:find("^cerebras/")
+    local skipTools = model:find("^gemini") or model:find("compound%-beta")
     if settings.WebSearch and not skipTools then
         payload.tools = {
             {
@@ -3369,7 +3246,7 @@ local function handleQueuedChat(item)
     -- Таймаут: Gemini 3.x preview с thinking → 60 сек
     -- Gemini 2.5 flash/lite → 45 сек, Groq → 20 сек
     local isGemini = model:find("^gemini")
-    local isGemini3x = model:find("^gemini%-3") or model:find("gemini%-2%.5%-flash")
+    local isGemini3x = model:find("^gemini%-3")
     local timeoutSec = isGemini3x and 30 or (isGemini and 25 or 15)
     local text, err
     do
@@ -3390,17 +3267,10 @@ local function handleQueuedChat(item)
             return
         end
     end
-    -- v18: при rate limit (429) — ждём 5 сек и повторяем один раз (с таймаутом)
+    -- При rate limit (429) — просто логируем, не блокируем очередь
     if (not text or text == "") and err and tostring(err):find("429") then
-        task.wait(5)
-        local retryDone = false
-        task.spawn(function()
-            text, err = providerRouter:chatCompletions(payload)
-            retryDone = true
-        end)
-        local rw = 0
-        while not retryDone and rw < timeoutSec do
-            task.wait(0.5); rw = rw + 0.5
+        if ClientSettings.Debug then
+            print("[LOB] 429 rate limit, skipping retry to avoid queue block")
         end
     end
     if err or not text or text == "" then
@@ -3453,6 +3323,9 @@ local function handleQueuedChat(item)
             -- Берём userContent но без [LANG:...] тега если он туда попал
             historyUserMsg = userContent:gsub("%[LANG:[^%]]*%]%s*", "")
         end
+        -- Убираем служебные теги перед сохранением в историю
+        historyUserMsg = historyUserMsg:gsub("%[LANG:[^%]]*%]%s*", "")
+        historyUserMsg = historyUserMsg:gsub("%[NAME:[^%]]*%]%s*", "")
         appendHistory(history, historyUserMsg, cleanText)
     end
 
@@ -3572,12 +3445,13 @@ task.delay(5, function()
                     "[SYSTEM: "..name.." just jumped near you. React naturally in 1 short sentence.]",
                     "[SYSTEM: "..name.." is jumping around next to you. Notice it briefly.]",
                 }
-                enqueueChatItem(uid, {
+                local wKey = uid + 20000000
+                enqueueChatItem(wKey, {
                     player=p, userId=uid, name=p.Name,
                     displayName=name, cleaned=msgs[math.random(#msgs)],
                     isWorld=true,
-                })
-                runChatQueue(uid)
+                }, 2)
+                runChatQueue(wKey)
             end
             prevAir[uid] = inAir
 
@@ -3593,12 +3467,13 @@ task.delay(5, function()
                             "[SYSTEM: "..name.." is staring right at you. React naturally in 1 short sentence, stay in character. Do NOT greet them again if you already talked.]",
                             "[SYSTEM: "..name.." keeps looking at you. React briefly, stay in character.]",
                         }
-                        enqueueChatItem(uid, {
+                        local wKey = uid + 20000000
+                        enqueueChatItem(wKey, {
                             player=p, userId=uid, name=p.Name,
                             displayName=name, cleaned=msgs[math.random(#msgs)],
                             isWorld=true,
-                        })
-                        runChatQueue(uid)
+                        }, 2)
+                        runChatQueue(wKey)
                     end
                 end
             end
@@ -3656,7 +3531,7 @@ local function _watchPlayerDeath(p)
         end
         -- cooldown не применяем для смерти — это важное событие
         local name = p.DisplayName or p.Name
-        local msg = "[SYSTEM: Игрок "..name.." только что умер рядом с тобой. Отреагируй коротко, 1 предложение, оставайся в образе.]"
+        local msg = "[SYSTEM: Player "..name.." just died near you. React in 1 short sentence, stay in character.]"
         local fakeId = uid + 10000000
         enqueueChatItem(fakeId, {
             player=p, userId=fakeId, name=p.Name,
@@ -3698,14 +3573,15 @@ task.delay(120, function()
                 _userLangCache[uid] = nil
             end
         end
-        -- Чистим worldReact кулдауны для вышедших игроков
-        for key, _ in pairs(_worldReactCooldowns) do
-            -- ключ формата "12345jump" — просто чистим всё старше 5 мин
+        -- Чистим worldReact кулдауны (ключ = "userId+eventType")
+        local wrcNow = os.clock()
+        for key, t in pairs(_worldReactCooldowns) do
+            if (wrcNow - t) > 300 then
+                _worldReactCooldowns[key] = nil
+            end
         end
     end
 end)
-local _floodLastBatch  = nil  -- глобальный флуд-протектор
-local _floodBatchCount = 0
 
 -- Main chat processing function
 -- §PROCESS_MSG
@@ -4786,7 +4662,6 @@ local rateLimitNoticeAt = 0
 local _providerNames = {
     groq     = "Groq",
     gemini   = "Gemini",
-    cerebras = "Cerebras",
 }
 
 local function handleRateLimitNotice(provider, force)
@@ -5441,10 +5316,6 @@ local function updateCtStatus()
         local gk = s.ApiKeys and s.ApiKeys.gemini or ""
         hasKey = type(gk)=="string" and #gk > 8
         apiName = "Gemini"
-    elseif model:find("^cerebras/") then
-        local ck = s.ApiKeys and s.ApiKeys.cerebras or ""
-        hasKey = type(ck)=="string" and #ck > 8
-        apiName = "Cerebras"
     else
         local gk = getGroqApiKey and getGroqApiKey() or ""
         hasKey = type(gk)=="string" and #gk > 8 and gk:sub(1,4) == "gsk_"
@@ -6759,10 +6630,6 @@ local groqModels = {
     -- ── 🌐 WEB SEARCH (знает актуальные тренды/мемы/новости) ─────────────
     "compound-beta",                               -- Compound            | веб + код + браузер
     "compound-beta-mini",                          -- Compound Mini       | веб | быстрее
-    -- ── ⚡ CEREBRAS (1M токенов/день бесплатно — быстрейший inference) ───
-    "cerebras/llama3.1-8b",                        -- Llama 3.1 8B        | ~2000 t/s | Cerebras
-    "cerebras/llama-3.3-70b",                      -- Llama 3.3 70B       | ~700 t/s  | Cerebras
-    "cerebras/llama-4-scout-17b",                  -- Llama 4 Scout 17B   | ~900 t/s  | Cerebras
 }
 
 --[[ 
@@ -6859,6 +6726,7 @@ do
     
     local personalityDropdown = makeDropdown(ctrl, personalityOrder, ClientSettings.PersonalityId or "Friendly", function(val)
         ClientSettings.PersonalityId = val
+        saveSettings()
         -- Очищаем историю чата — старые ответы мешают новой личности
         for k in pairs(ChatHistory) do ChatHistory[k] = {} end
         for k in pairs(DirectChatHistory) do DirectChatHistory[k] = {} end
@@ -6877,6 +6745,7 @@ do
             end
         end
         ClientSettings.CustomSystemPrompt = customPromptBox.Text
+        saveCustomPrompt(customPromptBox.Text)
         -- Очищаем историю когда промпт изменился (debounce чтобы не чистить на каждую букву)
         if not _customPromptClearPending then
             _customPromptClearPending = true
@@ -6911,6 +6780,7 @@ do
     makeSliderRow(behaviorScroll, "Температура", 0, 20, math.floor((ClientSettings.Temperature or 0.7) * 10), function(val)
         ClientSettings.Temperature = val / 10
         tempDisp.Text = string.format("%.1f", val / 10)
+        saveSettings()
     end)
 end
 
@@ -6931,6 +6801,7 @@ do
         local tokens = math.max(64, val * tokSteps)
         ClientSettings.MaxTokens = tokens
         tokDisp.Text = tostring(tokens)
+        saveSettings()
     end)
 end
 
@@ -6938,14 +6809,17 @@ end
 do
     local _, ctrl = makeRightControlRow(behaviorScroll, "Глубина памяти (пар диалога)", "Сколько последних обменов помнит ИИ.", 60)
 
-    local memDisp = makeTextLabel(ctrl, tostring(MAX_HISTORY or 10), 13, "bold")
+    local memDisp = makeTextLabel(ctrl, tostring(tonumber(ClientSettings.MaxHistory) or MAX_HISTORY or 10), 13, "bold")
     memDisp.Size = UDim2.new(1, 0, 1, 0)
     memDisp.TextXAlignment = Enum.TextXAlignment.Center
     memDisp.TextColor3 = THEME.Accent
 
-    makeSliderRow(behaviorScroll, "Глубина памяти", 1, 30, MAX_HISTORY or 10, function(val)
-        MAX_HISTORY = math.floor(val)
-        memDisp.Text = tostring(MAX_HISTORY)
+    makeSliderRow(behaviorScroll, "Глубина памяти", 1, 30, tonumber(ClientSettings.MaxHistory) or MAX_HISTORY or 10, function(val)
+        local n = math.floor(val)
+        MAX_HISTORY = n
+        ClientSettings.MaxHistory = n
+        memDisp.Text = tostring(n)
+        saveSettings()
     end)
 end
 
@@ -7202,17 +7076,17 @@ end)
 
 makeAdvancedHeader("API")
 do
-    -- API Key Card with clean glass style
+    -- API Key Card
     local apiCard = Instance.new("Frame")
     apiCard.Name = "ApiKeyCard"
     apiCard.BackgroundColor3 = THEME.Card
     apiCard.BackgroundTransparency = 0
     apiCard.BorderSizePixel = 0
-    apiCard.Size = UDim2.new(1, 0, 0, 160)
+    apiCard.Size = UDim2.new(1, 0, 0, 196)
     apiCard.Parent = advancedScroll
     makeCorner(apiCard, 12)
     local apiCardStroke = makeStroke(apiCard, 1, THEME.Stroke, 0.5)
-    
+
     local apiPad = Instance.new("UIPadding")
     apiPad.PaddingTop = UDim.new(0, 12)
     apiPad.PaddingBottom = UDim.new(0, 12)
@@ -7220,17 +7094,15 @@ do
     apiPad.PaddingRight = UDim.new(0, 14)
     apiPad.Parent = apiCard
 
-    -- Заголовок + статус-точка
     local apiTitleRow = Instance.new("Frame")
     apiTitleRow.BackgroundTransparency = 1
     apiTitleRow.Size = UDim2.new(1, 0, 0, 18)
     apiTitleRow.Parent = apiCard
 
-    local apiTitle = makeTextLabel(apiTitleRow, "Свой API Ключ", 14, "bold")
+    local apiTitle = makeTextLabel(apiTitleRow, "Groq API Key", 14, "bold")
     apiTitle.Size = UDim2.new(1, -90, 1, 0)
     apiTitle.TextColor3 = THEME.Text
 
-    -- Индикатор статуса (точка + текст)
     local apiStatusDot = Instance.new("Frame")
     apiStatusDot.Size = UDim2.new(0, 8, 0, 8)
     apiStatusDot.AnchorPoint = Vector2.new(1, 0.5)
@@ -7247,7 +7119,7 @@ do
     apiStatusLbl.TextColor3 = THEME.TextDim
     apiStatusLbl.TextXAlignment = Enum.TextXAlignment.Right
 
-    local apiDesc = makeTextLabel(apiCard, "console.groq.com → API Keys", 11, "medium")
+    local apiDesc = makeTextLabel(apiCard, "console.groq.com  •  2 слота, авто-переключение при лимите", 11, "medium")
     apiDesc.Size = UDim2.new(1, 0, 0, 14)
     apiDesc.Position = UDim2.new(0, 0, 0, 21)
     apiDesc.TextColor3 = THEME.TextDim
@@ -7261,7 +7133,7 @@ do
     apiInputFrame.Parent = apiCard
     makeCorner(apiInputFrame, 8)
     makeStroke(apiInputFrame, 1, THEME.Stroke, 0.6)
-    
+
     local apiBox = Instance.new("TextBox")
     apiBox.Name = "ApiInput"
     apiBox.BackgroundTransparency = 1
@@ -7277,17 +7149,46 @@ do
     apiBox.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq) or ""
     apiBox.Parent = apiInputFrame
 
-    -- Лимиты ключа — обновляются автоматически после каждого запроса
+    -- Второй слот Groq
+    local apiInputFrame2 = Instance.new("Frame")
+    apiInputFrame2.BackgroundColor3 = THEME.InputBg or THEME.Button
+    apiInputFrame2.BackgroundTransparency = 0.25
+    apiInputFrame2.BorderSizePixel = 0
+    apiInputFrame2.Size = UDim2.new(1, 0, 0, 32)
+    apiInputFrame2.Position = UDim2.new(0, 0, 0, 76)
+    apiInputFrame2.Parent = apiCard
+    makeCorner(apiInputFrame2, 8)
+    makeStroke(apiInputFrame2, 1, THEME.Stroke, 0.6)
+    local apiBox2 = Instance.new("TextBox")
+    apiBox2.BackgroundTransparency = 1
+    apiBox2.Size = UDim2.new(1, -16, 1, 0)
+    apiBox2.Position = UDim2.new(0, 8, 0, 0)
+    apiBox2.Font = Enum.Font.GothamMedium
+    apiBox2.TextSize = 13
+    apiBox2.TextColor3 = THEME.Text
+    apiBox2.PlaceholderText = "Резервный ключ Groq (gsk_...)"
+    apiBox2.PlaceholderColor3 = THEME.TextDim
+    apiBox2.TextXAlignment = Enum.TextXAlignment.Left
+    apiBox2.ClearTextOnFocus = false
+    apiBox2.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq2) or ""
+    apiBox2.Parent = apiInputFrame2
+    apiBox2.FocusLost:Connect(function()
+        local clean = tostring(apiBox2.Text or ""):gsub("%s+","")
+        ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
+        ClientSettings.ApiKeys.groq2 = clean
+        saveApiKey2(clean)
+        apiBox2.Text = clean
+    end)
+
     local apiLimitLbl = makeTextLabel(apiCard, "Лимиты обновляются после каждого запроса к ИИ", 11, "medium")
     apiLimitLbl.Size = UDim2.new(1, 0, 0, 28)
-    apiLimitLbl.Position = UDim2.new(0, 0, 0, 78)
+    apiLimitLbl.Position = UDim2.new(0, 0, 0, 114)
     apiLimitLbl.TextColor3 = THEME.TextDim
     apiLimitLbl.TextWrapped = true
 
-    -- Кнопка проверить (валидация ключа + разовое получение лимитов)
     local apiCheckBtn = Instance.new("TextButton")
     apiCheckBtn.Size = UDim2.new(1, 0, 0, 28)
-    apiCheckBtn.Position = UDim2.new(0, 0, 0, 112)
+    apiCheckBtn.Position = UDim2.new(0, 0, 0, 148)
     apiCheckBtn.BackgroundColor3 = THEME.Accent
     apiCheckBtn.BackgroundTransparency = 0.15
     apiCheckBtn.Text = "Проверить ключ"
@@ -7297,13 +7198,8 @@ do
     apiCheckBtn.AutoButtonColor = false
     apiCheckBtn.Parent = apiCard
     makeCorner(apiCheckBtn, 8)
-
-    apiCheckBtn.MouseEnter:Connect(function()
-        tween(apiCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0 })
-    end)
-    apiCheckBtn.MouseLeave:Connect(function()
-        tween(apiCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0.15 })
-    end)
+    apiCheckBtn.MouseEnter:Connect(function() tween(apiCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0 }) end)
+    apiCheckBtn.MouseLeave:Connect(function() tween(apiCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0.15 }) end)
 
     local function setApiStatus(ok, text, limitText)
         local col = ok and Color3.fromRGB(50, 200, 80) or Color3.fromRGB(220, 60, 60)
@@ -7311,13 +7207,9 @@ do
         apiStatusLbl.Text = text
         apiStatusLbl.TextColor3 = col
         tween(apiCardStroke, TWEEN_MED, { Color = col, Transparency = ok and 0.3 or 0.4 })
-        if limitText then
-            apiLimitLbl.Text = limitText
-            apiLimitLbl.TextColor3 = THEME.TextDim
-        end
+        if limitText then apiLimitLbl.Text = limitText end
     end
 
-    -- Обновляет текст лимитов из глобального кэша GroqRateLimitCache
     local function refreshLimitDisplay()
         local c = GroqRateLimitCache
         if not c.updatedAt then return end
@@ -7329,12 +7221,8 @@ do
         if c.remainingTokens and c.limitTokens then
             table.insert(parts, "Токенов: " .. c.remainingTokens .. "/" .. c.limitTokens)
         end
-        if #parts > 0 then
-            apiLimitLbl.Text = table.concat(parts, "  •  ")
-        end
+        if #parts > 0 then apiLimitLbl.Text = table.concat(parts, "  •  ") end
     end
-
-    -- Подписываемся: каждый раз когда ИИ отвечает — обновляем лимиты в UI
     onRateLimitUpdate = refreshLimitDisplay
     if GroqRateLimitCache.updatedAt then refreshLimitDisplay() end
 
@@ -7344,61 +7232,50 @@ do
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.groq = clean
         saveApiKey(clean)
-
         apiCheckBtn.Text = "Проверяю..."
         apiCheckBtn.BackgroundTransparency = 0.4
         task.spawn(function()
             local testKey = getGroqApiKey()
             apiCheckBtn.Text = "Проверить ключ"
             apiCheckBtn.BackgroundTransparency = 0.15
-            if not testKey or testKey == "" then
-                setApiStatus(false, "ключ не указан", "Введи API ключ в поле выше.")
-                return
-            end
+            if not testKey or testKey == "" then setApiStatus(false, "ключ не указан", "Введи API ключ выше."); return end
             local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-            if not req then
-                setApiStatus(false, "ошибка executor", "HTTP недоступен в этом executor.")
-                return
-            end
+            if not req then setApiStatus(false, "ошибка executor", nil); return end
             local ok2, res2 = pcall(req, {
-                Url    = "https://api.groq.com/openai/v1/chat/completions",
+                Url = "https://api.groq.com/openai/v1/chat/completions",
                 Method = "POST",
                 Headers = { ["Authorization"] = "Bearer " .. testKey, ["Content-Type"] = "application/json" },
-                Body = HttpService:JSONEncode({ model = "llama-3.1-8b-instant", max_tokens = 1, messages = {{ role = "user", content = "hi" }} }),
+                Body = HttpService:JSONEncode({ model="llama-3.1-8b-instant", max_tokens=1, messages={{role="user",content="hi"}} }),
             })
-            if not ok2 then setApiStatus(false, "ошибка сети", "Нет соединения с Groq."); return end
-            local s2 = res2.StatusCode or res2.statusCode or 0
-            if tonumber(s2) == 401 then setApiStatus(false, "❌ неверный ключ", "Проверь на console.groq.com"); return end
-            if tonumber(s2) == 429 then setApiStatus(true, "✓ ключ верный", "Rate limit — попробуй позже."); return end
-            if tonumber(s2) ~= 200 then setApiStatus(false, "❌ ошибка " .. tostring(s2), "Неожиданный ответ."); return end
+            if not ok2 then setApiStatus(false, "ошибка сети", nil); return end
+            local s2 = tonumber(res2.StatusCode or res2.statusCode or 0)
+            if s2 == 401 then setApiStatus(false, "неверный ключ", nil); return end
+            if s2 == 429 then setApiStatus(true, "ключ верный", "Rate limit — попробуй позже."); return end
+            if s2 ~= 200 then setApiStatus(false, "ошибка " .. s2, nil); return end
             parseRateLimitHeaders(res2.Headers or res2.headers or {})
-            setApiStatus(true, "✓ работает", nil)
+            setApiStatus(true, "работает", nil)
         end)
     end
 
     apiCheckBtn.MouseButton1Click:Connect(doApiCheck)
-
-    -- Автопроверка ключа при открытии вкладки если ключ уже сохранён
     task.spawn(function()
         task.wait(0.5)
-        local savedKey = getGroqApiKey()
-        if savedKey and savedKey:sub(1,4) == "gsk_" and #savedKey > 8 then
-            doApiCheck()
-        end
+        local k = getGroqApiKey()
+        if k and k:sub(1,4) == "gsk_" and #k > 8 then doApiCheck() end
     end)
     apiBox.FocusLost:Connect(function()
-        local raw = tostring(apiBox.Text or "")
-        local clean = raw:gsub("%s+", "")
+        local clean = tostring(apiBox.Text or ""):gsub("%s+", "")
         if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
         ClientSettings.ApiKeys.groq = clean
         saveApiKey(clean)
         apiBox.Text = clean
-        tween(apiStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
+        tween(apiStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80,80,80) })
         apiStatusLbl.Text = "не проверен"
         apiStatusLbl.TextColor3 = THEME.TextDim
         tween(apiCardStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.5 })
     end)
 
+    -- ── GEMINI API KEY CARD ────────────────────────────────────────────────
     -- ── GEMINI API KEY CARD ────────────────────────────────────────────────
     local gemCard = Instance.new("Frame")
     gemCard.Name = "GeminiKeyCard"
@@ -7589,158 +7466,6 @@ do
         task.wait(0.7)
         local savedKey = ClientSettings.ApiKeys and ClientSettings.ApiKeys.gemini
         if savedKey and #savedKey > 8 then doGeminiCheck() end
-    end)
-end
-
--- ── CEREBRAS KEY CARD ──────────────────────────────────────────────────
-do
-    local cbrCard = Instance.new("Frame")
-    cbrCard.Name = "CerebrasKeyCard"
-    cbrCard.BackgroundColor3 = THEME.Card
-    cbrCard.BackgroundTransparency = 0
-    cbrCard.BorderSizePixel = 0
-    cbrCard.Size = UDim2.new(1, 0, 0, 148)
-    cbrCard.Parent = advancedScroll
-    makeCorner(cbrCard, 12)
-    local cbrCardStroke = makeStroke(cbrCard, 1, THEME.Stroke, 0.5)
-    local cbrPad = Instance.new("UIPadding")
-    cbrPad.PaddingTop = UDim.new(0, 10); cbrPad.PaddingBottom = UDim.new(0, 10)
-    cbrPad.PaddingLeft = UDim.new(0, 12); cbrPad.PaddingRight = UDim.new(0, 12)
-    cbrPad.Parent = cbrCard
-
-    local cbrTitleRow = Instance.new("Frame")
-    cbrTitleRow.BackgroundTransparency = 1
-    cbrTitleRow.Size = UDim2.new(1, 0, 0, 20)
-    cbrTitleRow.Parent = cbrCard
-    local cbrTitle = makeTextLabel(cbrTitleRow, "⚡ Cerebras API Ключ", 14, "bold")
-    cbrTitle.Size = UDim2.new(0.6, 0, 1, 0)
-
-    local cbrStatusDot = Instance.new("Frame")
-    cbrStatusDot.Size = UDim2.new(0, 8, 0, 8)
-    cbrStatusDot.AnchorPoint = Vector2.new(1, 0.5)
-    cbrStatusDot.Position = UDim2.new(1, -52, 0.5, 0)
-    cbrStatusDot.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-    cbrStatusDot.BorderSizePixel = 0
-    cbrStatusDot.Parent = cbrTitleRow
-    makeCorner(cbrStatusDot, 999)
-    local cbrStatusLbl = makeTextLabel(cbrTitleRow, "не проверен", 11, "medium")
-    cbrStatusLbl.Size = UDim2.new(0, 70, 1, 0)
-    cbrStatusLbl.Position = UDim2.new(1, -70, 0, 0)
-    cbrStatusLbl.TextColor3 = THEME.TextDim
-    cbrStatusLbl.TextXAlignment = Enum.TextXAlignment.Right
-
-    local cbrDesc = makeTextLabel(cbrCard, "inference.cerebras.ai → API Keys  •  1 000 000 токенов/день бесплатно", 11, "medium")
-    cbrDesc.Size = UDim2.new(1, 0, 0, 14)
-    cbrDesc.Position = UDim2.new(0, 0, 0, 22)
-    cbrDesc.TextColor3 = THEME.TextDim
-
-    local cbrInputFrame = Instance.new("Frame")
-    cbrInputFrame.BackgroundColor3 = THEME.InputBg or THEME.Button
-    cbrInputFrame.BackgroundTransparency = 0.25
-    cbrInputFrame.BorderSizePixel = 0
-    cbrInputFrame.Size = UDim2.new(1, 0, 0, 32)
-    cbrInputFrame.Position = UDim2.new(0, 0, 0, 42)
-    cbrInputFrame.Parent = cbrCard
-    makeCorner(cbrInputFrame, 8)
-    makeStroke(cbrInputFrame, 1, THEME.Stroke, 0.6)
-
-    local cbrBox = Instance.new("TextBox")
-    cbrBox.BackgroundTransparency = 1
-    cbrBox.Size = UDim2.new(1, -16, 1, 0)
-    cbrBox.Position = UDim2.new(0, 8, 0, 0)
-    cbrBox.Font = Enum.Font.GothamMedium
-    cbrBox.TextSize = 13
-    cbrBox.TextColor3 = THEME.Text
-    cbrBox.PlaceholderText = "Вставь Cerebras API ключ (csk-...)"
-    cbrBox.PlaceholderColor3 = THEME.TextDim
-    cbrBox.TextXAlignment = Enum.TextXAlignment.Left
-    cbrBox.ClearTextOnFocus = false
-    cbrBox.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.cerebras) or ""
-    cbrBox.Parent = cbrInputFrame
-
-    local cbrLimitLbl = makeTextLabel(cbrCard, "Llama 3.1 8B / 3.3 70B / Llama 4 Scout — до 2000 токенов/сек", 11, "medium")
-    cbrLimitLbl.Size = UDim2.new(1, 0, 0, 14)
-    cbrLimitLbl.Position = UDim2.new(0, 0, 0, 80)
-    cbrLimitLbl.TextColor3 = THEME.TextDim
-
-    local cbrCheckBtn = Instance.new("TextButton")
-    cbrCheckBtn.Size = UDim2.new(1, 0, 0, 28)
-    cbrCheckBtn.Position = UDim2.new(0, 0, 0, 100)
-    cbrCheckBtn.BackgroundColor3 = Color3.fromRGB(20, 180, 120)
-    cbrCheckBtn.BackgroundTransparency = 0.15
-    cbrCheckBtn.Text = "Проверить ключ"
-    cbrCheckBtn.Font = Enum.Font.GothamBold
-    cbrCheckBtn.TextSize = 13
-    cbrCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    cbrCheckBtn.AutoButtonColor = false
-    cbrCheckBtn.Parent = cbrCard
-    makeCorner(cbrCheckBtn, 8)
-    cbrCheckBtn.MouseEnter:Connect(function() tween(cbrCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0 }) end)
-    cbrCheckBtn.MouseLeave:Connect(function() tween(cbrCheckBtn, TWEEN_FAST, { BackgroundTransparency = 0.15 }) end)
-
-    local function setCbrStatus(ok, text)
-        local col = ok and Color3.fromRGB(50, 200, 80) or Color3.fromRGB(220, 60, 60)
-        tween(cbrStatusDot, TWEEN_MED, { BackgroundColor3 = col })
-        cbrStatusLbl.Text = text
-        cbrStatusLbl.TextColor3 = col
-        tween(cbrCardStroke, TWEEN_MED, { Color = col, Transparency = ok and 0.3 or 0.4 })
-    end
-
-    local function doCerebrasCheck()
-        local clean = tostring(cbrBox.Text or ""):gsub("%s+", "")
-        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
-        ClientSettings.ApiKeys.cerebras = clean
-        saveCerebrasKey(clean)
-        cbrCheckBtn.Text = "Проверяю..."
-        cbrCheckBtn.BackgroundTransparency = 0.4
-        task.spawn(function()
-            cbrCheckBtn.Text = "Проверить ключ"
-            cbrCheckBtn.BackgroundTransparency = 0.15
-            if clean == "" then setCbrStatus(false, "ключ не указан"); return end
-            local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-            if not req then setCbrStatus(false, "ошибка executor"); return end
-            local ok2, res2 = pcall(req, {
-                Url = "https://api.cerebras.ai/v1/chat/completions",
-                Method = "POST",
-                Headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. clean },
-                Body = HttpService:JSONEncode({
-                    model = "llama3.1-8b", max_tokens = 1,
-                    messages = {{ role = "user", content = "hi" }},
-                }),
-            })
-            if not ok2 then setCbrStatus(false, "network error"); return end
-            local s = tonumber(res2.StatusCode or res2.statusCode or res2.status or 0)
-            local body = tostring(res2.Body or res2.body or "")
-            if s == 0 and body ~= "" then
-                local e = body:match('"status":%s*(%d+)') or body:match('"code":%s*(%d+)')
-                if e then s = tonumber(e) or 0 end
-            end
-            local blo = body:lower()
-            if s == 200 or body:find('"choices"') then setCbrStatus(true, "works!")
-            elseif s == 401 or s == 403 or blo:find("invalid api key") or blo:find("unauthorized") then setCbrStatus(false, "invalid key")
-            elseif s == 422 then setCbrStatus(true, "key ok")
-            elseif s == 429 then setCbrStatus(true, "key ok (limit)")
-            elseif body ~= "" then setCbrStatus(true, "key ok (" .. s .. ")")
-            else setCbrStatus(false, "no response") end
-        end)
-    end
-
-    cbrCheckBtn.MouseButton1Click:Connect(doCerebrasCheck)
-    cbrBox.FocusLost:Connect(function()
-        local clean = tostring(cbrBox.Text or ""):gsub("%s+", "")
-        if not ClientSettings.ApiKeys then ClientSettings.ApiKeys = {} end
-        ClientSettings.ApiKeys.cerebras = clean
-        saveCerebrasKey(clean)
-        cbrBox.Text = clean
-        tween(cbrStatusDot, TWEEN_FAST, { BackgroundColor3 = Color3.fromRGB(80, 80, 80) })
-        cbrStatusLbl.Text = "не проверен"
-        cbrStatusLbl.TextColor3 = THEME.TextDim
-        tween(cbrCardStroke, TWEEN_FAST, { Color = THEME.Stroke, Transparency = 0.5 })
-    end)
-    task.spawn(function()
-        task.wait(0.9)
-        local k = ClientSettings.ApiKeys and ClientSettings.ApiKeys.cerebras
-        if k and #k > 8 then doCerebrasCheck() end
     end)
 end
 
@@ -10554,7 +10279,7 @@ local function ctDoSend()
                 elseif errLower:find("429") or errLower:find("rate") then
                     friendlyErr = "⚡ Rate limit — подожди немного."
                 elseif errLower:find("401") or errLower:find("invalid_api_key")
-                    or errLower:find("missinggroqkey") or errLower:find("missingcerebraskey")
+                    or errLower:find("missinggroqkey")
                     then
                     friendlyErr = "🔑 API ключ неверный или не указан. Проверь вкладку Настройки."
                 elseif errLower:find("400") or errLower:find("bad request") then
