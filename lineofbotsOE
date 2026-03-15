@@ -1,592 +1,534 @@
--- ╔══════════════════════════════════════════════════════════════════════════╗
--- ║          LineOfBots Prime Edition — UI Module                           ║
--- ║          CoreGui-based interface, full executor control                 ║
--- ╚══════════════════════════════════════════════════════════════════════════╝
+-- ╔══════════════════════════════════════════════════════════════════════╗
+-- ║  LineOfBots Prime Edition  —  UI v2                                 ║
+-- ║  CoreGui · адаптив · анимации · drag · minimize · close-confirm     ║
+-- ╚══════════════════════════════════════════════════════════════════════╝
 
--- §PRIME_INIT
-local RunService    = game:GetService("RunService")
-local Players       = game:GetService("Players")
-local HttpService   = game:GetService("HttpService")
-local TweenService  = game:GetService("TweenService")
+local Players          = game:GetService("Players")
+local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local CoreGui       = game:GetService("CoreGui")
+local CoreGui          = game:GetService("CoreGui")
+local RunService       = game:GetService("RunService")
 
 local lp = Players.LocalPlayer
 if not lp then return end
 
--- ═══════════════════════════════════════════════════════
--- §PRIME_THEME  —  Design tokens
--- ═══════════════════════════════════════════════════════
-local T = {
-    -- Backgrounds
-    BgDeep      = Color3.fromRGB(8,  9,  12),   -- почти чёрный
-    BgBase      = Color3.fromRGB(12, 13, 18),   -- основной фон окна
-    BgPanel     = Color3.fromRGB(16, 18, 26),   -- панели/сайдбар
-    BgCard      = Color3.fromRGB(20, 22, 32),   -- карточки
-    BgHover     = Color3.fromRGB(26, 29, 42),   -- ховер
-    BgInput     = Color3.fromRGB(14, 16, 22),   -- поля ввода
+-- ══════════════════════════════════════════════════════
+-- §DESTROY_OLD
+-- ══════════════════════════════════════════════════════
+pcall(function()
+    local old = CoreGui:FindFirstChild("LOBPrimeV2")
+    if old then old:Destroy() end
+end)
 
-    -- Accent — холодный электро-синий + пурпур
-    Accent      = Color3.fromRGB(82,  140, 255), -- основной акцент
-    AccentDim   = Color3.fromRGB(50,  90,  180), -- приглушённый
-    AccentGlow  = Color3.fromRGB(120, 170, 255), -- свечение
-    Purple      = Color3.fromRGB(130, 90,  240), -- вторичный акцент
-
-    -- Status
-    Green       = Color3.fromRGB(60,  210, 130),
-    Red         = Color3.fromRGB(240, 75,  90),
-    Yellow      = Color3.fromRGB(255, 195, 60),
-    Orange      = Color3.fromRGB(255, 140, 60),
-
-    -- Text
-    Text        = Color3.fromRGB(230, 235, 245),
-    TextMid     = Color3.fromRGB(160, 170, 195),
-    TextDim     = Color3.fromRGB(95,  105, 130),
-    TextTiny    = Color3.fromRGB(60,  70,  90),
-
-    -- Borders
-    StrokeHard  = Color3.fromRGB(50,  60,  90),
-    StrokeSoft  = Color3.fromRGB(30,  35,  55),
-    StrokeGlow  = Color3.fromRGB(82,  140, 255),
-
-    -- Fonts
-    Mono        = Enum.Font.Code,
-    Sans        = Enum.Font.GothamMedium,
-    SansBold    = Enum.Font.GothamBold,
-    SansThin    = Enum.Font.Gotham,
-}
-
--- ═══════════════════════════════════════════════════════
--- §PRIME_HELPERS  —  базовые строительные блоки
--- ═══════════════════════════════════════════════════════
-local tw_fast  = TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-local tw_med   = TweenInfo.new(0.28, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-local tw_slow  = TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-
-local function tw(obj, info, props)
-    TweenService:Create(obj, info, props):Play()
+-- ══════════════════════════════════════════════════════
+-- §SCREEN_SIZE  — определяем размер экрана
+-- ══════════════════════════════════════════════════════
+local function getScreenSize()
+    local camera = workspace.CurrentCamera
+    return camera and camera.ViewportSize or Vector2.new(1280, 720)
 end
 
-local function corner(p, r)
+local function getDeviceLayout()
+    local sz = getScreenSize()
+    local w, h = sz.X, sz.Y
+    local minDim = math.min(w, h)
+    if minDim < 500 then
+        return "phone",  math.min(w - 20, 400),  math.min(h - 60, 580)
+    elseif minDim < 800 then
+        return "tablet", math.min(w - 40, 640),  math.min(h - 80, 480)
+    else
+        return "desktop", 760, 500
+    end
+end
+
+-- ══════════════════════════════════════════════════════
+-- §THEME
+-- ══════════════════════════════════════════════════════
+local C = {
+    BgWin     = Color3.fromRGB(13, 14, 20),
+    BgSide    = Color3.fromRGB(17, 19, 28),
+    BgCard    = Color3.fromRGB(22, 25, 36),
+    BgHover   = Color3.fromRGB(28, 32, 46),
+    BgInput   = Color3.fromRGB(15, 17, 25),
+    Accent    = Color3.fromRGB(88, 148, 255),
+    AccentB   = Color3.fromRGB(138, 98, 255),
+    Green     = Color3.fromRGB(52, 211, 140),
+    Red       = Color3.fromRGB(239, 68,  85),
+    Yellow    = Color3.fromRGB(251, 191, 36),
+    Text      = Color3.fromRGB(228, 233, 245),
+    TextMid   = Color3.fromRGB(148, 163, 195),
+    TextDim   = Color3.fromRGB(75,  85,  110),
+    Stroke    = Color3.fromRGB(38,  44,  64),
+    StrokeAcc = Color3.fromRGB(60,  90,  180),
+    White     = Color3.fromRGB(255, 255, 255),
+}
+
+local TI = {
+    fast   = TweenInfo.new(0.14, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+    med    = TweenInfo.new(0.26, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+    slow   = TweenInfo.new(0.40, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+    bounce = TweenInfo.new(0.35, Enum.EasingStyle.Back,  Enum.EasingDirection.Out),
+    spring = TweenInfo.new(0.50, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out),
+}
+
+local function tw(o, ti, props)
+    local t = TweenService:Create(o, ti, props)
+    t:Play()
+    return t
+end
+
+-- ══════════════════════════════════════════════════════
+-- §PRIMITIVES  — базовые строительные блоки
+-- ══════════════════════════════════════════════════════
+local function newFrame(parent, bg, bgt)
+    local f = Instance.new("Frame")
+    f.BackgroundColor3    = bg  or C.BgCard
+    f.BackgroundTransparency = bgt or 0
+    f.BorderSizePixel     = 0
+    f.Parent              = parent
+    return f
+end
+
+local function newCorner(parent, r)
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(0, r or 8)
-    c.Parent = p
+    c.Parent = parent
     return c
 end
 
-local function stroke(p, thick, col, trans)
+local function newStroke(parent, thick, col, trans)
     local s = Instance.new("UIStroke")
-    s.Thickness    = thick or 1
-    s.Color        = col   or T.StrokeSoft
-    s.Transparency = trans or 0
-    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    s.Parent = p
+    s.Thickness           = thick or 1
+    s.Color               = col   or C.Stroke
+    s.Transparency        = trans or 0
+    s.ApplyStrokeMode     = Enum.ApplyStrokeMode.Border
+    s.Parent              = parent
     return s
 end
 
-local function padding(p, all, lr, tb)
-    local u = Instance.new("UIPadding")
-    if all then
-        u.PaddingTop    = UDim.new(0, all)
-        u.PaddingBottom = UDim.new(0, all)
-        u.PaddingLeft   = UDim.new(0, all)
-        u.PaddingRight  = UDim.new(0, all)
-    else
-        local h = lr or 0
-        local v = tb or 0
-        u.PaddingLeft   = UDim.new(0, h)
-        u.PaddingRight  = UDim.new(0, h)
-        u.PaddingTop    = UDim.new(0, v)
-        u.PaddingBottom = UDim.new(0, v)
-    end
-    u.Parent = p
-    return u
+local function newPad(parent, l, r, t, b)
+    local p = Instance.new("UIPadding")
+    p.PaddingLeft   = UDim.new(0, l or 0)
+    p.PaddingRight  = UDim.new(0, r or 0)
+    p.PaddingTop    = UDim.new(0, t or 0)
+    p.PaddingBottom = UDim.new(0, b or 0)
+    p.Parent = parent
+    return p
 end
 
-local function listLayout(p, dir, pad, align)
+local function newList(parent, dir, pad)
     local l = Instance.new("UIListLayout")
-    l.FillDirection     = dir   or Enum.FillDirection.Vertical
-    l.Padding           = UDim.new(0, pad or 0)
-    l.SortOrder         = Enum.SortOrder.LayoutOrder
-    l.HorizontalAlignment = align or Enum.HorizontalAlignment.Left
-    l.Parent = p
+    l.FillDirection = dir or Enum.FillDirection.Vertical
+    l.Padding       = UDim.new(0, pad or 0)
+    l.SortOrder     = Enum.SortOrder.LayoutOrder
+    l.Parent        = parent
     return l
 end
 
-local function label(p, txt, sz, font, col)
+local function newLabel(parent, txt, sz, font, col)
     local l = Instance.new("TextLabel")
     l.BackgroundTransparency = 1
-    l.Text      = txt  or ""
-    l.TextSize  = sz   or 13
-    l.Font      = font or T.Sans
-    l.TextColor3 = col or T.Text
+    l.Text       = txt   or ""
+    l.TextSize   = sz    or 13
+    l.Font       = font  or Enum.Font.GothamMedium
+    l.TextColor3 = col   or C.Text
     l.TextXAlignment = Enum.TextXAlignment.Left
-    l.RichText  = false
-    l.Parent    = p
+    l.TextTruncate   = Enum.TextTruncate.AtEnd
+    l.RichText       = false
+    l.Parent         = parent
     return l
 end
 
-local function frame(p, bg, bgt)
-    local f = Instance.new("Frame")
-    f.BackgroundColor3    = bg  or T.BgCard
-    f.BackgroundTransparency = bgt or 0
-    f.BorderSizePixel     = 0
-    f.Parent = p
-    return f
-end
-
-local function scrollFrame(p, bar)
+local function newScroll(parent)
     local s = Instance.new("ScrollingFrame")
-    s.BackgroundTransparency = 1
-    s.BorderSizePixel        = 0
-    s.CanvasSize             = UDim2.new(0,0,0,0)
-    s.ScrollBarThickness     = bar or 3
-    s.ScrollBarImageColor3   = T.AccentDim
-    s.ScrollBarImageTransparency = 0.4
-    s.AutomaticCanvasSize    = Enum.AutomaticSize.Y
-    s.Parent = p
+    s.BackgroundTransparency    = 1
+    s.BorderSizePixel           = 0
+    s.CanvasSize                = UDim2.new(0,0,0,0)
+    s.AutomaticCanvasSize       = Enum.AutomaticSize.Y
+    s.ScrollBarThickness        = 3
+    s.ScrollBarImageColor3      = C.Accent
+    s.ScrollBarImageTransparency = 0.5
+    s.ScrollingDirection        = Enum.ScrollingDirection.Y
+    s.Parent                    = parent
     return s
 end
 
--- Gradient overlay (декоративный)
-local function gradient(p, c0, c1, rot)
+local function newGradient(parent, c0, c1, rot)
     local g = Instance.new("UIGradient")
     g.Color    = ColorSequence.new(c0, c1)
     g.Rotation = rot or 90
-    g.Parent   = p
+    g.Parent   = parent
     return g
 end
 
--- ═══════════════════════════════════════════════════════
--- §PRIME_WINDOW  —  Главное окно
--- ═══════════════════════════════════════════════════════
--- Удаляем старый GUI если есть
-local old = CoreGui:FindFirstChild("LOBPrime")
-if old then old:Destroy() end
+-- ══════════════════════════════════════════════════════
+-- §ROOT  — ScreenGui
+-- ══════════════════════════════════════════════════════
+local root = Instance.new("ScreenGui")
+root.Name              = "LOBPrimeV2"
+root.ResetOnSpawn      = false
+root.ZIndexBehavior    = Enum.ZIndexBehavior.Global
+root.DisplayOrder      = 1200
+root.IgnoreGuiInset    = true
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name              = "LOBPrime"
-screenGui.ResetOnSpawn      = false
-screenGui.ZIndexBehavior    = Enum.ZIndexBehavior.Global
-screenGui.DisplayOrder      = 999
-screenGui.IgnoreGuiInset    = true
--- CoreGui — поверх всего интерфейса Roblox
-pcall(function() screenGui.Parent = CoreGui end)
-if not screenGui.Parent then screenGui.Parent = lp:WaitForChild("PlayerGui") end
+local ok = pcall(function() root.Parent = CoreGui end)
+if not ok then root.Parent = lp:WaitForChild("PlayerGui") end
 
--- Главный контейнер — по центру экрана
-local WIN_W, WIN_H = 780, 520
-local main = frame(screenGui, T.BgBase)
-main.Name    = "MainWindow"
-main.Size    = UDim2.new(0, WIN_W, 0, WIN_H)
-main.Position = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2)
-main.Active  = true
-main.Selectable = false
-corner(main, 14)
-stroke(main, 1, T.StrokeHard, 0)
+-- ══════════════════════════════════════════════════════
+-- §WINDOW_LAYOUT  — вычисляем размеры
+-- ══════════════════════════════════════════════════════
+local device, WIN_W, WIN_H = getDeviceLayout()
+local SIDE_W = device == "phone" and 0 or (device == "tablet" and 160 or 190)
+local HEADER_H = 46
 
--- Subtle gradient на фоне окна
-local bgGrad = Instance.new("UIGradient")
-bgGrad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0,   Color3.fromRGB(14, 16, 25)),
-    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(12, 13, 20)),
-    ColorSequenceKeypoint.new(1,   Color3.fromRGB(10, 11, 16)),
-})
-bgGrad.Rotation = 135
-bgGrad.Parent = main
+-- ══════════════════════════════════════════════════════
+-- §MAIN_WINDOW  — главное окно
+-- ══════════════════════════════════════════════════════
+local win = newFrame(root, C.BgWin)
+win.Name          = "Window"
+win.Size          = UDim2.new(0, WIN_W, 0, WIN_H)
+win.Position      = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2)
+win.ClipsDescendants = true
+win.Active        = true
+newCorner(win, 12)
+newStroke(win, 1, C.Stroke, 0)
 
--- Тонкая акцентная линия сверху
-local topAccent = frame(main, T.Accent)
-topAccent.Size     = UDim2.new(1, 0, 0, 2)
-topAccent.Position = UDim2.new(0, 0, 0, 0)
-corner(topAccent, 14)
-gradient(topAccent,
-    Color3.fromRGB(82, 140, 255),
-    Color3.fromRGB(130, 90, 240), 90)
+-- Фоновый градиент окна
+newGradient(win,
+    Color3.fromRGB(15, 17, 24),
+    Color3.fromRGB(11, 12, 18),
+    140)
 
--- Декоративное свечение снизу top accent
-local topGlow = frame(main, T.Accent, 0.7)
-topGlow.Size     = UDim2.new(0.6, 0, 0, 40)
-topGlow.Position = UDim2.new(0.2, 0, 0, -20)
-corner(topGlow, 20)
-local topGlowGrad = Instance.new("UIGradient")
-topGlowGrad.Transparency = NumberSequence.new({
-    NumberSequenceKeypoint.new(0, 1),
-    NumberSequenceKeypoint.new(0.5, 0.6),
-    NumberSequenceKeypoint.new(1, 1),
-})
-topGlowGrad.Rotation = 90
-topGlowGrad.Parent = topGlow
+-- Акцентная полоска сверху
+local topLine = newFrame(win, C.Accent)
+topLine.Size     = UDim2.new(1, 0, 0, 2)
+topLine.Position = UDim2.new(0, 0, 0, 0)
+topLine.ZIndex   = 5
+newGradient(topLine, C.Accent, C.AccentB, 90)
 
--- ═══════════════════════════════════════════════════════
--- §PRIME_TITLEBAR  —  Шапка
--- ═══════════════════════════════════════════════════════
-local titleBar = frame(main, T.BgPanel)
-titleBar.Name     = "TitleBar"
-titleBar.Size     = UDim2.new(1, 0, 0, 48)
-titleBar.Position = UDim2.new(0, 0, 0, 0)
-corner(titleBar, 14)
--- Скрываем нижние углы
-local titleFill = frame(titleBar, T.BgPanel)
-titleFill.Size     = UDim2.new(1, 0, 0, 14)
-titleFill.Position = UDim2.new(0, 0, 1, -14)
+-- ══════════════════════════════════════════════════════
+-- §HEADER  — шапка
+-- ══════════════════════════════════════════════════════
+local header = newFrame(win, C.BgSide)
+header.Name     = "Header"
+header.Size     = UDim2.new(1, 0, 0, HEADER_H)
+header.Position = UDim2.new(0, 0, 0, 2)
+header.ZIndex   = 4
 
--- Логотип / название
-local logoBox = frame(titleBar, T.Accent, 0)
-logoBox.Size     = UDim2.new(0, 32, 0, 32)
-logoBox.Position = UDim2.new(0, 14, 0.5, -16)
-corner(logoBox, 8)
-gradient(logoBox,
-    Color3.fromRGB(82, 140, 255),
-    Color3.fromRGB(130, 90, 240), 135)
+-- Скрываем нижние углы шапки
+local headerFill = newFrame(header, C.BgSide)
+headerFill.Size     = UDim2.new(1, 0, 0, 12)
+headerFill.Position = UDim2.new(0, 0, 1, -12)
 
--- "L" иконка
-local logoLetter = label(logoBox, "L", 18, T.SansBold, Color3.fromRGB(255,255,255))
-logoLetter.Size     = UDim2.new(1, 0, 1, 0)
-logoLetter.TextXAlignment = Enum.TextXAlignment.Center
+-- Логотип
+local logoWrap = newFrame(header, C.Accent, 0)
+logoWrap.Size     = UDim2.new(0, 30, 0, 30)
+logoWrap.Position = UDim2.new(0, 12, 0.5, -15)
+newCorner(logoWrap, 8)
+newGradient(logoWrap, C.Accent, C.AccentB, 135)
+local logoL = newLabel(logoWrap, "L", 17, Enum.Font.GothamBold, C.White)
+logoL.Size = UDim2.new(1,0,1,0)
+logoL.TextXAlignment = Enum.TextXAlignment.Center
 
-local titleName = label(titleBar, "LineOfBots", 15, T.SansBold, T.Text)
-titleName.Size     = UDim2.new(0, 120, 1, 0)
-titleName.Position = UDim2.new(0, 54, 0, 0)
+-- Название
+local titleMain = newLabel(header, "LineOfBots", 14, Enum.Font.GothamBold, C.Text)
+titleMain.Size     = UDim2.new(0, 130, 0, 18)
+titleMain.Position = UDim2.new(0, 50, 0, 8)
 
-local titleSub = label(titleBar, "Prime Edition", 11, T.Sans, T.AccentGlow)
-titleSub.Size     = UDim2.new(0, 120, 0, 14)
-titleSub.Position = UDim2.new(0, 54, 0, 26)
+local titleSub = newLabel(header, "Prime Edition", 10, Enum.Font.GothamMedium, C.Accent)
+titleSub.Size     = UDim2.new(0, 130, 0, 14)
+titleSub.Position = UDim2.new(0, 50, 0, 28)
 
--- Версия / статус
-local statusDot = frame(titleBar, T.Green)
+-- Статус
+local statusDot = newFrame(header, C.Green)
 statusDot.Size     = UDim2.new(0, 7, 0, 7)
-statusDot.Position = UDim2.new(1, -120, 0.5, -3)
-corner(statusDot, 99)
+statusDot.Position = UDim2.new(1, -108, 0.5, -3)
+newCorner(statusDot, 99)
 
-local statusLabel = label(titleBar, "ACTIVE", 11, T.Sans, T.TextDim)
-statusLabel.Size     = UDim2.new(0, 60, 0, 14)
-statusLabel.Position = UDim2.new(1, -110, 0.5, -7)
+local statusLbl = newLabel(header, "ACTIVE", 10, Enum.Font.GothamMedium, C.TextDim)
+statusLbl.Size     = UDim2.new(0, 55, 0, 14)
+statusLbl.Position = UDim2.new(1, -100, 0.5, -7)
 
--- Кнопки окна (minimise / close)
-local function winBtn(parent, xPos, col, symbol)
-    local btn = frame(parent, col, 0.85)
-    btn.Size     = UDim2.new(0, 26, 0, 26)
-    btn.Position = UDim2.new(1, xPos, 0.5, -13)
-    btn.Active   = true
-    corner(btn, 7)
-    stroke(btn, 1, col, 0.5)
-    local ico = label(btn, symbol, 13, T.SansBold, Color3.fromRGB(255,255,255))
+-- Кнопки управления окном
+local function makeWinBtn(xOff, bg, sym, alpha)
+    local b = newFrame(header, bg, alpha or 0.88)
+    b.Size     = UDim2.new(0, 24, 0, 24)
+    b.Position = UDim2.new(1, xOff, 0.5, -12)
+    b.Active   = true
+    b.ZIndex   = 10
+    newCorner(b, 6)
+    newStroke(b, 1, bg, 0.5)
+    local ico = newLabel(b, sym, 14, Enum.Font.GothamBold, C.White)
     ico.Size = UDim2.new(1,0,1,0)
     ico.TextXAlignment = Enum.TextXAlignment.Center
-    ico.TextTransparency = 0.1
-    btn.MouseEnter:Connect(function() tw(btn, tw_fast, {BackgroundTransparency=0.4}) end)
-    btn.MouseLeave:Connect(function() tw(btn, tw_fast, {BackgroundTransparency=0.85}) end)
-    return btn
+    ico.ZIndex = 11
+    b.MouseEnter:Connect(function() tw(b, TI.fast, {BackgroundTransparency=0.5}) end)
+    b.MouseLeave:Connect(function() tw(b, TI.fast, {BackgroundTransparency=alpha or 0.88}) end)
+    return b
 end
 
-local closeBtn = winBtn(titleBar, -14, T.Red, "×")
-local minBtn   = winBtn(titleBar, -48, Color3.fromRGB(50,60,80), "−")
+local btnClose = makeWinBtn(-14,  C.Red,    "X")
+local btnMin   = makeWinBtn(-46,  C.Stroke, "-")
 
--- Drag функционал
-do
-    local dragging, dragStart, winStart = false, nil, nil
-    titleBar.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = inp.Position
-            winStart  = main.Position
-        end
-    end)
-    UserInputService.InputChanged:Connect(function(inp)
-        if dragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = inp.Position - dragStart
-            main.Position = UDim2.new(
-                winStart.X.Scale, winStart.X.Offset + delta.X,
-                winStart.Y.Scale, winStart.Y.Offset + delta.Y)
-        end
-    end)
-    UserInputService.InputEnded:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
-end
+-- ══════════════════════════════════════════════════════
+-- §BODY  — область под шапкой
+-- ══════════════════════════════════════════════════════
+local BODY_Y   = HEADER_H + 2
+local BODY_H   = WIN_H - BODY_Y
 
--- ═══════════════════════════════════════════════════════
--- §PRIME_BODY  —  Основная область (сайдбар + контент)
--- ═══════════════════════════════════════════════════════
-local body = frame(main, T.BgBase, 1)
-body.Name     = "Body"
-body.Size     = UDim2.new(1, 0, 1, -48)
-body.Position = UDim2.new(0, 0, 0, 48)
+local bodyContainer = newFrame(win, C.BgWin, 1)
+bodyContainer.Name     = "Body"
+bodyContainer.Size     = UDim2.new(1, 0, 0, BODY_H)
+bodyContainer.Position = UDim2.new(0, 0, 0, BODY_Y)
+bodyContainer.ClipsDescendants = false
 
--- ── Сайдбар ────────────────────────────────────────────
-local SIDEBAR_W = 200
-local sidebar = frame(body, T.BgPanel)
+-- ══════════════════════════════════════════════════════
+-- §SIDEBAR  — левая панель (скрывается на телефоне)
+-- ══════════════════════════════════════════════════════
+local sidebar = newFrame(bodyContainer, C.BgSide)
 sidebar.Name     = "Sidebar"
-sidebar.Size     = UDim2.new(0, SIDEBAR_W, 1, 0)
+sidebar.Size     = UDim2.new(0, SIDE_W, 1, 0)
 sidebar.Position = UDim2.new(0, 0, 0, 0)
--- Правая граница сайдбара
-local sbBorder = frame(sidebar, T.StrokeSoft)
-sbBorder.Size     = UDim2.new(0, 1, 1, 0)
-sbBorder.Position = UDim2.new(1, -1, 0, 0)
+sidebar.Visible  = SIDE_W > 0
 
--- Скролл внутри сайдбара
-local sbScroll = scrollFrame(sidebar, 0)
-sbScroll.Size     = UDim2.new(1, 0, 1, -60)
-sbScroll.Position = UDim2.new(0, 0, 0, 8)
-padding(sbScroll, nil, 10, 0)
-listLayout(sbScroll, Enum.FillDirection.Vertical, 2)
+-- Граница сайдбара
+if SIDE_W > 0 then
+    local sbLine = newFrame(sidebar, C.Stroke)
+    sbLine.Size     = UDim2.new(0, 1, 1, 0)
+    sbLine.Position = UDim2.new(1, -1, 0, 0)
 
--- Блок юзера снизу сайдбара
-local sbUser = frame(sidebar, T.BgCard)
-sbUser.Size     = UDim2.new(1, -16, 0, 44)
-sbUser.Position = UDim2.new(0, 8, 1, -52)
-corner(sbUser, 10)
-padding(sbUser, nil, 10, 0)
+    -- Скролл в сайдбаре
+    local sbScroll = newScroll(sidebar)
+    sbScroll.Size     = UDim2.new(1, 0, 1, -50)
+    sbScroll.Position = UDim2.new(0, 0, 0, 8)
+    newPad(sbScroll, 8, 8, 0, 0)
+    newList(sbScroll, Enum.FillDirection.Vertical, 3)
 
-local sbUserDot = frame(sbUser, T.Green)
-sbUserDot.Size     = UDim2.new(0, 8, 0, 8)
-sbUserDot.Position = UDim2.new(0, 0, 0.5, -4)
-corner(sbUserDot, 99)
+    -- Юзер-блок внизу сайдбара
+    local sbUserWrap = newFrame(sidebar, C.BgCard)
+    sbUserWrap.Size     = UDim2.new(1, -12, 0, 40)
+    sbUserWrap.Position = UDim2.new(0, 6, 1, -46)
+    newCorner(sbUserWrap, 8)
+    newPad(sbUserWrap, 10, 8, 0, 0)
 
-local sbUserName = label(sbUser, lp.Name, 12, T.Sans, T.Text)
-sbUserName.Size     = UDim2.new(1, -20, 0, 16)
-sbUserName.Position = UDim2.new(0, 20, 0, 7)
+    local sbDot = newFrame(sbUserWrap, C.Green)
+    sbDot.Size     = UDim2.new(0, 7, 0, 7)
+    sbDot.Position = UDim2.new(0, 0, 0.5, -3)
+    newCorner(sbDot, 99)
 
-local sbUserTag = label(sbUser, "executor active", 10, T.Sans, T.TextDim)
-sbUserTag.Size     = UDim2.new(1, -20, 0, 12)
-sbUserTag.Position = UDim2.new(0, 20, 0, 23)
+    local sbName = newLabel(sbUserWrap, lp.Name, 11, Enum.Font.GothamMedium, C.Text)
+    sbName.Size     = UDim2.new(1, -16, 0, 15)
+    sbName.Position = UDim2.new(0, 16, 0, 6)
 
--- ── Контентная область ─────────────────────────────────
-local content = frame(body, T.BgBase, 1)
+    local sbTag = newLabel(sbUserWrap, "executor", 9, Enum.Font.Gotham, C.TextDim)
+    sbTag.Size     = UDim2.new(1, -16, 0, 12)
+    sbTag.Position = UDim2.new(0, 16, 0, 22)
+
+    -- Сохраняем скролл для кнопок
+    _G._LOBPrimeSBScroll = sbScroll
+end
+
+-- ══════════════════════════════════════════════════════
+-- §CONTENT  — правая область контента
+-- ══════════════════════════════════════════════════════
+local content = newFrame(bodyContainer, C.BgWin, 1)
 content.Name     = "Content"
-content.Size     = UDim2.new(1, -SIDEBAR_W, 1, 0)
-content.Position = UDim2.new(0, SIDEBAR_W, 0, 0)
-padding(content, nil, 16, 14)
+content.Size     = UDim2.new(1, -SIDE_W, 1, 0)
+content.Position = UDim2.new(0, SIDE_W, 0, 0)
+content.ClipsDescendants = true
 
--- ═══════════════════════════════════════════════════════
--- §PRIME_TABS  —  Навигация
--- ═══════════════════════════════════════════════════════
-local TABS = {
-    { id="behavior",   icon="⚙",  label="Поведение"  },
-    { id="perception", icon="👁",  label="Восприятие" },
-    { id="direct",     icon="💬",  label="Директ"     },
-    { id="advanced",   icon="🔧",  label="Настройки"  },
-    { id="moderation", icon="🛡",  label="Модерация"  },
-}
+-- ══════════════════════════════════════════════════════
+-- §TAB_SYSTEM  — система вкладок
+-- ══════════════════════════════════════════════════════
+local tabFrames  = {}
+local tabBtns    = {}
+local activeTab  = nil
+local tabBusy    = false
 
-local tabFrames   = {}
-local tabButtons  = {}
-local activeTab   = nil
-
--- Разделитель в сайдбаре
-local function sbDivider(pad)
-    local d = frame(sbScroll, T.StrokeSoft)
-    d.Size = UDim2.new(1, 0, 0, 1)
-    d.LayoutOrder = pad or 0
-    return d
+local function makeTabFrame(id)
+    local cg = Instance.new("CanvasGroup")
+    cg.Name                   = "Tab_"..id
+    cg.BackgroundTransparency = 1
+    cg.Size                   = UDim2.new(1, 0, 1, 0)
+    cg.Position               = UDim2.new(0, 0, 0, 0)
+    cg.GroupTransparency      = 1
+    cg.Visible                = false
+    cg.Parent                 = content
+    tabFrames[id]             = cg
+    return cg
 end
 
--- Заголовок группы
-local function sbGroupLabel(txt, order)
-    local l2 = label(sbScroll, txt:upper(), 9, T.Sans, T.TextTiny)
-    l2.Size        = UDim2.new(1, 0, 0, 20)
-    l2.LayoutOrder = order or 0
-    padding(l2, nil, 4, 0)
-    return l2
+local function switchTab(id)
+    if id == activeTab or tabBusy then return end
+    tabBusy = true
+
+    -- Скрываем старый таб
+    if activeTab and tabFrames[activeTab] then
+        local prev = tabFrames[activeTab]
+        tw(prev, TI.fast, {GroupTransparency=1})
+        task.delay(0.15, function()
+            if prev and prev.Parent then prev.Visible = false end
+        end)
+        -- Убираем подсветку кнопки
+        if tabBtns[activeTab] then
+            local b = tabBtns[activeTab]
+            tw(b.btn, TI.fast, {BackgroundTransparency=1, BackgroundColor3=C.BgSide})
+            tw(b.lbl, TI.fast, {TextColor3=C.TextMid})
+            tw(b.ico, TI.fast, {TextColor3=C.TextDim})
+            tw(b.bar, TI.fast, {BackgroundTransparency=1})
+        end
+    end
+
+    activeTab = id
+
+    -- Показываем новый таб
+    if tabFrames[id] then
+        local nxt = tabFrames[id]
+        nxt.GroupTransparency = 1
+        nxt.Visible = true
+        tw(nxt, TI.med, {GroupTransparency=0})
+    end
+    -- Подсвечиваем кнопку
+    if tabBtns[id] then
+        local b = tabBtns[id]
+        tw(b.btn, TI.fast, {BackgroundTransparency=0, BackgroundColor3=C.BgHover})
+        tw(b.lbl, TI.fast, {TextColor3=C.Text})
+        tw(b.ico, TI.fast, {TextColor3=C.Accent})
+        tw(b.bar, TI.fast, {BackgroundTransparency=0})
+    end
+
+    task.delay(0.28, function() tabBusy = false end)
 end
 
--- Кнопка вкладки
-local function makeTabBtn(tabDef, order)
-    local btn = frame(sbScroll, T.BgPanel, 1)
-    btn.Name        = tabDef.id
-    btn.Size        = UDim2.new(1, 0, 0, 38)
+-- Кнопка вкладки (в сайдбаре)
+local function makeTabButton(id, icon, labelTxt, order)
+    local sbScroll = _G._LOBPrimeSBScroll
+    if not sbScroll then return end
+
+    local btn = newFrame(sbScroll, C.BgSide, 1)
+    btn.Name        = "TabBtn_"..id
+    btn.Size        = UDim2.new(1, 0, 0, 36)
     btn.Active      = true
     btn.LayoutOrder = order
-
-    corner(btn, 8)
-
-    -- Иконка
-    local ico = label(btn, tabDef.icon, 14, T.Sans, T.TextMid)
-    ico.Size     = UDim2.new(0, 28, 1, 0)
-    ico.Position = UDim2.new(0, 4, 0, 0)
-    ico.TextXAlignment = Enum.TextXAlignment.Center
-
-    -- Текст
-    local lbl = label(btn, tabDef.label, 13, T.Sans, T.TextMid)
-    lbl.Size     = UDim2.new(1, -40, 1, 0)
-    lbl.Position = UDim2.new(0, 36, 0, 0)
+    newCorner(btn, 8)
 
     -- Активная полоска слева
-    local activeLine = frame(btn, T.Accent)
-    activeLine.Size     = UDim2.new(0, 3, 0, 20)
-    activeLine.Position = UDim2.new(0, 0, 0.5, -10)
-    activeLine.BackgroundTransparency = 1
-    corner(activeLine, 3)
+    local bar = newFrame(btn, C.Accent)
+    bar.Size     = UDim2.new(0, 3, 0, 18)
+    bar.Position = UDim2.new(0, 0, 0.5, -9)
+    bar.BackgroundTransparency = 1
+    newCorner(bar, 3)
 
-    -- Hover
+    local icoLbl = newLabel(btn, icon, 13, Enum.Font.GothamMedium, C.TextDim)
+    icoLbl.Size     = UDim2.new(0, 26, 1, 0)
+    icoLbl.Position = UDim2.new(0, 8, 0, 0)
+    icoLbl.TextXAlignment = Enum.TextXAlignment.Center
+
+    local lbl = newLabel(btn, labelTxt, 12, Enum.Font.GothamMedium, C.TextMid)
+    lbl.Size     = UDim2.new(1, -38, 1, 0)
+    lbl.Position = UDim2.new(0, 36, 0, 0)
+
+    tabBtns[id] = {btn=btn, lbl=lbl, ico=icoLbl, bar=bar}
+
     btn.MouseEnter:Connect(function()
-        if activeTab ~= tabDef.id then
-            tw(btn, tw_fast, {BackgroundTransparency = 0.7, BackgroundColor3 = T.BgHover})
-            tw(lbl, tw_fast, {TextColor3 = T.Text})
+        if activeTab ~= id then
+            tw(btn, TI.fast, {BackgroundTransparency=0.6, BackgroundColor3=C.BgHover})
+            tw(lbl, TI.fast, {TextColor3=C.Text})
         end
     end)
     btn.MouseLeave:Connect(function()
-        if activeTab ~= tabDef.id then
-            tw(btn, tw_fast, {BackgroundTransparency = 1})
-            tw(lbl, tw_fast, {TextColor3 = T.TextMid})
+        if activeTab ~= id then
+            tw(btn, TI.fast, {BackgroundTransparency=1})
+            tw(lbl, TI.fast, {TextColor3=C.TextMid})
         end
     end)
-
-    local function setActive(on, instant)
-        if on then
-            if instant then
-                btn.BackgroundColor3 = T.BgCard
-                btn.BackgroundTransparency = 0
-                lbl.TextColor3 = T.Text
-                ico.TextColor3 = T.Accent
-                activeLine.BackgroundTransparency = 0
-            else
-                tw(btn, tw_fast, {BackgroundTransparency = 0, BackgroundColor3 = T.BgCard})
-                tw(lbl, tw_fast, {TextColor3 = T.Text})
-                tw(ico, tw_fast, {TextColor3 = T.Accent})
-                tw(activeLine, tw_fast, {BackgroundTransparency = 0})
-            end
-        else
-            if instant then
-                btn.BackgroundTransparency = 1
-                lbl.TextColor3 = T.TextMid
-                ico.TextColor3 = T.TextMid
-                activeLine.BackgroundTransparency = 1
-            else
-                tw(btn, tw_fast, {BackgroundTransparency = 1})
-                tw(lbl, tw_fast, {TextColor3 = T.TextMid})
-                tw(ico, tw_fast, {TextColor3 = T.TextMid})
-                tw(activeLine, tw_fast, {BackgroundTransparency = 1})
-            end
+    btn.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            switchTab(id)
         end
-    end
-
-    tabButtons[tabDef.id] = {btn=btn, setActive=setActive}
-    return btn, setActive
+    end)
 end
 
--- ═══════════════════════════════════════════════════════
--- §PRIME_CONTENT_FRAME  —  фреймы вкладок
--- ═══════════════════════════════════════════════════════
-local function makeTabFrame(id)
-    local f = Instance.new("CanvasGroup")
-    f.Name                   = id
-    f.BackgroundTransparency = 1
-    f.Size                   = UDim2.new(1, 0, 1, 0)
-    f.Visible                = false
-    f.GroupTransparency      = 1
-    f.Parent                 = content
-    tabFrames[id]            = f
-    return f
+-- ══════════════════════════════════════════════════════
+-- §TAB_CONTENTS  — содержимое вкладок
+-- ══════════════════════════════════════════════════════
+
+-- ── Хелперы для контента ──────────────────────────────
+local function tabScroll(frame2)
+    local s = newScroll(frame2)
+    s.Size     = UDim2.new(1, 0, 1, 0)
+    s.Position = UDim2.new(0, 0, 0, 0)
+    newPad(s, 14, 14, 12, 12)
+    newList(s, Enum.FillDirection.Vertical, 10)
+    return s
 end
 
--- ── Функция переключения ───────────────────────────────
-local switching = false
-local function switchTab(id)
-    if id == activeTab or switching then return end
-    switching = true
-
-    -- Скрываем старый
-    if activeTab and tabFrames[activeTab] then
-        local old2 = tabFrames[activeTab]
-        tw(old2, tw_fast, {GroupTransparency = 1})
-        task.delay(0.15, function()
-            if old2 then old2.Visible = false end
-        end)
-        if tabButtons[activeTab] then tabButtons[activeTab].setActive(false) end
-    end
-
-    -- Показываем новый
-    activeTab = id
-    if tabFrames[id] then
-        local nf = tabFrames[id]
-        nf.GroupTransparency = 1
-        nf.Visible = true
-        tw(nf, tw_med, {GroupTransparency = 0})
-    end
-    if tabButtons[id] then tabButtons[id].setActive(true) end
-
-    task.delay(0.3, function() switching = false end)
+local function sectionHeader(parent, txt, order)
+    local l = newLabel(parent, txt:upper(), 9, Enum.Font.GothamBold, C.TextDim)
+    l.Size        = UDim2.new(1, 0, 0, 20)
+    l.LayoutOrder = order or 0
+    return l
 end
 
--- ═══════════════════════════════════════════════════════
--- §PRIME_UI_COMPONENTS  —  переиспользуемые компоненты
--- ═══════════════════════════════════════════════════════
-
--- Секция с заголовком
-local function makeSection(parent, title, order)
-    local sec = frame(parent, T.BgBase, 1)
-    sec.Size         = UDim2.new(1, 0, 0, 0)
-    sec.AutomaticSize = Enum.AutomaticSize.Y
-    sec.LayoutOrder  = order or 0
-
-    local hdr = label(sec, title:upper(), 10, T.Sans, T.TextDim)
-    hdr.Size     = UDim2.new(1, 0, 0, 24)
-    hdr.Position = UDim2.new(0, 0, 0, 0)
-
-    local secContent = frame(sec, T.BgCard)
-    secContent.Name           = "Content"
-    secContent.Size           = UDim2.new(1, 0, 0, 0)
-    secContent.Position       = UDim2.new(0, 0, 0, 28)
-    secContent.AutomaticSize  = Enum.AutomaticSize.Y
-    corner(secContent, 10)
-    stroke(secContent, 1, T.StrokeSoft, 0)
-    padding(secContent, nil, 14, 10)
-    listLayout(secContent, Enum.FillDirection.Vertical, 8)
-
-    return sec, secContent
+local function sectionCard(parent, order)
+    local card = newFrame(parent, C.BgCard)
+    card.Size         = UDim2.new(1, 0, 0, 0)
+    card.AutomaticSize = Enum.AutomaticSize.Y
+    card.LayoutOrder  = order or 0
+    newCorner(card, 10)
+    newStroke(card, 1, C.Stroke, 0)
+    newPad(card, 14, 14, 10, 10)
+    newList(card, Enum.FillDirection.Vertical, 8)
+    return card
 end
 
--- Тогл-ряд
-local function makeToggleRow(parent, labelTxt, desc, initState, onChange)
-    local row = frame(parent, T.BgBase, 1)
-    row.Size         = UDim2.new(1, 0, 0, 0)
-    row.AutomaticSize = Enum.AutomaticSize.Y
+local function toggleRow(parent, labelTxt, desc, initState, onChange)
+    local row = newFrame(parent, C.BgCard, 1)
+    row.Size          = UDim2.new(1, 0, 0, desc ~= "" and 38 or 26)
+    row.AutomaticSize = Enum.AutomaticSize.None
 
-    local lbl = label(row, labelTxt, 13, T.Sans, T.Text)
-    lbl.Size     = UDim2.new(1, -52, 0, 18)
-    lbl.Position = UDim2.new(0, 0, 0, 0)
+    local lbl = newLabel(row, labelTxt, 12, Enum.Font.GothamMedium, C.Text)
+    lbl.Size     = UDim2.new(1, -52, 0, 16)
+    lbl.Position = UDim2.new(0, 0, 0, 2)
 
-    if desc and desc ~= "" then
-        local dsc = label(row, desc, 11, T.Sans, T.TextDim)
-        dsc.Size     = UDim2.new(1, -52, 0, 14)
+    if desc ~= "" then
+        local dsc = newLabel(row, desc, 10, Enum.Font.Gotham, C.TextDim)
+        dsc.Size     = UDim2.new(1, -52, 0, 13)
         dsc.Position = UDim2.new(0, 0, 0, 20)
-        row.Size = UDim2.new(1, 0, 0, 38)
-    else
-        row.Size = UDim2.new(1, 0, 0, 22)
     end
 
-    -- Toggle pill
     local state = initState == true
-    local pill = frame(row, state and T.Accent or T.BgInput)
-    pill.Size     = UDim2.new(0, 40, 0, 20)
-    pill.Position = UDim2.new(1, -40, 0.5, -10)
-    corner(pill, 10)
-    stroke(pill, 1, state and T.Accent or T.StrokeHard, state and 0.6 or 0)
+    local pill = newFrame(row, state and C.Accent or C.BgInput)
+    pill.Size     = UDim2.new(0, 38, 0, 20)
+    pill.Position = UDim2.new(1, -38, 0.5, -10)
+    newCorner(pill, 10)
+    newStroke(pill, 1, state and C.StrokeAcc or C.Stroke, 0)
 
-    local knob = frame(pill, Color3.fromRGB(255,255,255))
+    local knob = newFrame(pill, C.White)
     knob.Size     = UDim2.new(0, 14, 0, 14)
-    knob.Position = UDim2.new(0, state and 23 or 3, 0.5, -7)
-    corner(knob, 7)
+    knob.Position = UDim2.new(0, state and 21 or 3, 0.5, -7)
+    newCorner(knob, 7)
 
     local function setState(on, silent)
         state = on
-        tw(pill, tw_fast, {
-            BackgroundColor3 = on and T.Accent or T.BgInput,
-        })
-        tw(knob, tw_fast, {
-            Position = UDim2.new(0, on and 23 or 3, 0.5, -7)
-        })
-        pill.UIStroke.Color = on and T.Accent or T.StrokeHard
-        pill.UIStroke.Transparency = on and 0.6 or 0
-        if not silent and onChange then onChange(on) end
+        tw(pill, TI.fast, {BackgroundColor3 = on and C.Accent or C.BgInput})
+        tw(knob, TI.fast, {Position = UDim2.new(0, on and 21 or 3, 0.5, -7)})
+        pill.UIStroke.Color = on and C.StrokeAcc or C.Stroke
+        if not silent and onChange then
+            pcall(onChange, on)
+        end
     end
 
     pill.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            setState(not state)
+        end
+    end)
+    row.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
             setState(not state)
         end
     end)
@@ -594,605 +536,590 @@ local function makeToggleRow(parent, labelTxt, desc, initState, onChange)
     return row, setState
 end
 
--- Слайдер
-local function makeSlider(parent, lbl2, minV, maxV, initV, onChange)
-    local row = frame(parent, T.BgBase, 1)
-    row.Size = UDim2.new(1, 0, 0, 42)
+local function sliderRow(parent, labelTxt, minV, maxV, initV, fmt, onChange)
+    local row = newFrame(parent, C.BgCard, 1)
+    row.Size = UDim2.new(1, 0, 0, 46)
 
-    local lblEl = label(row, lbl2, 13, T.Sans, T.Text)
-    lblEl.Size     = UDim2.new(0.6, 0, 0, 16)
-    lblEl.Position = UDim2.new(0, 0, 0, 0)
+    local lbl = newLabel(row, labelTxt, 12, Enum.Font.GothamMedium, C.Text)
+    lbl.Size     = UDim2.new(0.65, 0, 0, 16)
+    lbl.Position = UDim2.new(0, 0, 0, 0)
 
-    local valLbl = label(row, tostring(initV), 12, T.Mono, T.Accent)
-    valLbl.Size     = UDim2.new(0.35, 0, 0, 16)
-    valLbl.Position = UDim2.new(0.65, 0, 0, 0)
+    local fmt2 = fmt or function(v) return tostring(v) end
+    local valLbl = newLabel(row, fmt2(initV), 11, Enum.Font.Code, C.Accent)
+    valLbl.Size     = UDim2.new(0.34, 0, 0, 16)
+    valLbl.Position = UDim2.new(0.66, 0, 0, 0)
     valLbl.TextXAlignment = Enum.TextXAlignment.Right
 
-    local track = frame(row, T.BgInput)
-    track.Size     = UDim2.new(1, 0, 0, 6)
-    track.Position = UDim2.new(0, 0, 0, 28)
-    corner(track, 3)
-    stroke(track, 1, T.StrokeSoft, 0)
+    local track = newFrame(row, C.BgInput)
+    track.Size     = UDim2.new(1, 0, 0, 5)
+    track.Position = UDim2.new(0, 0, 0, 32)
+    newCorner(track, 3)
 
-    local fill = frame(track, T.Accent)
-    fill.Size     = UDim2.new((initV - minV)/(maxV - minV), 0, 1, 0)
-    fill.Position = UDim2.new(0, 0, 0, 0)
-    corner(fill, 3)
-    gradient(fill, T.Accent, T.Purple, 90)
+    local pct0 = math.clamp((initV-minV)/(maxV-minV), 0, 1)
+    local fill = newFrame(track, C.Accent)
+    fill.Size     = UDim2.new(pct0, 0, 1, 0)
+    newCorner(fill, 3)
+    newGradient(fill, C.Accent, C.AccentB, 90)
 
-    local knob2 = frame(track, Color3.fromRGB(255,255,255))
-    knob2.Size     = UDim2.new(0, 14, 0, 14)
-    knob2.Position = UDim2.new((initV - minV)/(maxV - minV), -7, 0.5, -7)
-    corner(knob2, 7)
-    stroke(knob2, 1.5, T.Accent, 0)
+    local handle = newFrame(track, C.White)
+    handle.Size     = UDim2.new(0, 14, 0, 14)
+    handle.Position = UDim2.new(pct0, -7, 0.5, -7)
+    newCorner(handle, 7)
+    newStroke(handle, 1.5, C.Accent, 0)
 
-    local dragging2 = false
-    local function updateSlider(mx)
+    local dragging = false
+    local function update(mx)
         local abs = track.AbsolutePosition
         local wid = track.AbsoluteSize.X
-        local pct = math.clamp((mx - abs.X) / wid, 0, 1)
-        local val = math.floor(minV + pct * (maxV - minV) + 0.5)
-        local p   = (val - minV) / (maxV - minV)
-        fill.Size     = UDim2.new(p, 0, 1, 0)
-        knob2.Position = UDim2.new(p, -7, 0.5, -7)
-        valLbl.Text   = tostring(val)
-        if onChange then onChange(val) end
+        if wid <= 0 then return end
+        local p   = math.clamp((mx - abs.X) / wid, 0, 1)
+        local val = math.floor(minV + p*(maxV-minV) + 0.5)
+        local realP = (val-minV)/(maxV-minV)
+        fill.Size      = UDim2.new(realP, 0, 1, 0)
+        handle.Position = UDim2.new(realP, -7, 0.5, -7)
+        valLbl.Text    = fmt2(val)
+        if onChange then pcall(onChange, val) end
     end
-
     track.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging2 = true
-            updateSlider(inp.Position.X)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; update(inp.Position.X)
         end
     end)
     UserInputService.InputChanged:Connect(function(inp)
-        if dragging2 and inp.UserInputType == Enum.UserInputType.MouseMovement then
-            updateSlider(inp.Position.X)
+        if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement
+        or inp.UserInputType == Enum.UserInputType.Touch) then
+            update(inp.Position.X)
         end
     end)
     UserInputService.InputEnded:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging2 = false
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
         end
     end)
-
     return row
 end
 
--- Текстбокс
-local function makeInput(parent, placeholder, initText)
-    local wrap = frame(parent, T.BgInput)
-    wrap.Size = UDim2.new(1, 0, 0, 34)
-    corner(wrap, 8)
-    stroke(wrap, 1, T.StrokeHard, 0)
+local function inputRow(parent, labelTxt, placeholder, initText)
+    local row = newFrame(parent, C.BgCard, 1)
+    row.Size = UDim2.new(1, 0, 0, 54)
+
+    local lbl = newLabel(row, labelTxt, 11, Enum.Font.Gotham, C.TextMid)
+    lbl.Size     = UDim2.new(1, 0, 0, 14)
+    lbl.Position = UDim2.new(0, 0, 0, 0)
+
+    local wrap = newFrame(row, C.BgInput)
+    wrap.Size     = UDim2.new(1, 0, 0, 32)
+    wrap.Position = UDim2.new(0, 0, 0, 18)
+    newCorner(wrap, 7)
+    local s2 = newStroke(wrap, 1, C.Stroke, 0)
 
     local box = Instance.new("TextBox")
     box.BackgroundTransparency = 1
     box.Size     = UDim2.new(1, -16, 1, 0)
     box.Position = UDim2.new(0, 8, 0, 0)
-    box.Font     = T.Mono
-    box.TextSize = 13
-    box.TextColor3 = T.Text
+    box.Font     = Enum.Font.Code
+    box.TextSize = 12
+    box.TextColor3      = C.Text
     box.PlaceholderText  = placeholder or ""
-    box.PlaceholderColor3 = T.TextDim
+    box.PlaceholderColor3 = C.TextDim
     box.TextXAlignment   = Enum.TextXAlignment.Left
     box.ClearTextOnFocus = false
     box.Text = initText or ""
     box.Parent = wrap
 
     box.Focused:Connect(function()
-        tw(wrap, tw_fast, {BackgroundColor3 = T.BgHover})
-        wrap.UIStroke.Color = T.Accent
-        wrap.UIStroke.Transparency = 0.3
+        tw(wrap, TI.fast, {BackgroundColor3=C.BgHover})
+        s2.Color = C.Accent; s2.Transparency = 0.3
     end)
     box.FocusLost:Connect(function()
-        tw(wrap, tw_fast, {BackgroundColor3 = T.BgInput})
-        wrap.UIStroke.Color = T.StrokeHard
-        wrap.UIStroke.Transparency = 0
+        tw(wrap, TI.fast, {BackgroundColor3=C.BgInput})
+        s2.Color = C.Stroke; s2.Transparency = 0
     end)
-
-    return wrap, box
+    return row, box
 end
 
--- Кнопка
-local function makeBtn(parent, txt, scheme)
-    scheme = scheme or "primary"
-    local bg = scheme == "primary" and T.Accent
-            or scheme == "danger"  and T.Red
-            or T.BgCard
+-- ── Вкладка ПОВЕДЕНИЕ ─────────────────────────────────
+do
+    local f = makeTabFrame("behavior")
+    local s = tabScroll(f)
 
-    local btn = frame(parent, bg, scheme == "ghost" and 0.9 or 0.1)
-    btn.Size   = UDim2.new(1, 0, 0, 34)
-    btn.Active = true
-    corner(btn, 8)
+    local title = newLabel(s, "Поведение", 18, Enum.Font.GothamBold, C.Text)
+    title.Size = UDim2.new(1,0,0,26); title.LayoutOrder=0
 
-    if scheme == "primary" then
-        gradient(btn, T.Accent, T.Purple, 90)
-        stroke(btn, 1, T.Accent, 0.4)
-    elseif scheme == "ghost" then
-        stroke(btn, 1, T.StrokeHard, 0)
-    else
-        stroke(btn, 1, T.Red, 0.4)
+    sectionHeader(s, "Чат", 1)
+    local chatCard = sectionCard(s, 2)
+    toggleRow(chatCard, "Автоответ в чат",    "Бот отвечает в общий чат",          false, nil)
+    toggleRow(chatCard, "Память диалога",      "ИИ помнит предыдущие сообщения",    true,  nil)
+    toggleRow(chatCard, "Память по игрокам",   "Отдельная история для каждого",     false, nil)
+    toggleRow(chatCard, "Передавать ник",      "ИИ знает имя игрока",               true,  nil)
+    toggleRow(chatCard, "Антиспам",            "Игнорировать повторы за 12 сек",    true,  nil)
+    toggleRow(chatCard, "Реакция на упоминание","Отвечать когда упомянули ник бота", true,  nil)
+
+    sectionHeader(s, "Параметры генерации", 3)
+    local paramCard = sectionCard(s, 4)
+    sliderRow(paramCard, "Температура", 0, 20, 7,
+        function(v) return string.format("%.1f", v/10) end, nil)
+    sliderRow(paramCard, "Макс. токенов", 1, 64, 8,
+        function(v) return tostring(v*64) end, nil)
+    sliderRow(paramCard, "Глубина памяти", 1, 30, 10,
+        function(v) return v.." пар" end, nil)
+
+    makeTabButton("behavior", "⚙", "Поведение", 1)
+end
+
+-- ── Вкладка ВОСПРИЯТИЕ ────────────────────────────────
+do
+    local f = makeTabFrame("perception")
+    local s = tabScroll(f)
+
+    local title = newLabel(s, "Восприятие", 18, Enum.Font.GothamBold, C.Text)
+    title.Size = UDim2.new(1,0,0,26); title.LayoutOrder=0
+
+    sectionHeader(s, "Мир и реакции", 1)
+    local worldCard = sectionCard(s, 2)
+    toggleRow(worldCard, "Реакции на мир",    "Прыжки, взгляды, смерть рядом", true, nil)
+    toggleRow(worldCard, "Сознание места",    "ИИ знает название игры",        true, nil)
+    toggleRow(worldCard, "Сознание игроков",  "Видит кто стоит рядом",         true, nil)
+    toggleRow(worldCard, "Поворот к игроку",  "Поворачивается к говорящему",   true, nil)
+
+    sectionHeader(s, "Дальность", 3)
+    local rangeCard = sectionCard(s, 4)
+    toggleRow(rangeCard, "Радиус ответа",    "Отвечать только в радиусе",   false, nil)
+    sliderRow(rangeCard, "Радиус (studs)", 5, 200, 50,
+        function(v) return v.."st" end, nil)
+    toggleRow(rangeCard, "Игнорировать стены", "Отвечать через стены", false, nil)
+
+    sectionHeader(s, "Дополнительно", 5)
+    local extraCard = sectionCard(s, 6)
+    toggleRow(extraCard, "Веб-поиск",         "Актуальные новости и мемы 2026", false, nil)
+    toggleRow(extraCard, "Команды и эмоции",  "Анимации через [DO:tag]",        true,  nil)
+    toggleRow(extraCard, "Экономия токенов",  "Сокращает промпт",               false, nil)
+
+    makeTabButton("perception", "👁", "Восприятие", 2)
+end
+
+-- ── Вкладка ДИРЕКТ ────────────────────────────────────
+do
+    local f = makeTabFrame("direct")
+    newPad(f, 12, 12, 10, 10)
+
+    local titleLbl = newLabel(f, "Директ-чат", 18, Enum.Font.GothamBold, C.Text)
+    titleLbl.Size     = UDim2.new(1,0,0,26)
+    titleLbl.Position = UDim2.new(0,0,0,0)
+
+    -- История
+    local msgScroll = newScroll(f)
+    msgScroll.Size     = UDim2.new(1, 0, 1, -84)
+    msgScroll.Position = UDim2.new(0, 0, 0, 34)
+    newList(msgScroll, Enum.FillDirection.Vertical, 6)
+    newPad(msgScroll, 0, 0, 4, 4)
+
+    local function addMsg(txt, isBot)
+        local wrap = newFrame(msgScroll, C.BgCard, 1)
+        wrap.AutomaticSize = Enum.AutomaticSize.Y
+        wrap.Size          = UDim2.new(0.82, 0, 0, 0)
+        wrap.AnchorPoint   = Vector2.new(isBot and 0 or 1, 0)
+        wrap.Position      = isBot
+            and UDim2.new(0, 0, 0, 0)
+            or  UDim2.new(1, 0, 0, 0)
+        newCorner(wrap, 9)
+        newPad(wrap, 10, 10, 6, 6)
+
+        if isBot then
+            newStroke(wrap, 1, C.Stroke, 0)
+        else
+            wrap.BackgroundColor3 = C.AccentB
+            wrap.BackgroundTransparency = 0.7
+        end
+
+        local sender = newLabel(wrap, isBot and "🤖  Бот" or "👤  Ты",
+            9, Enum.Font.GothamBold, isBot and C.Accent or C.AccentB)
+        sender.Size = UDim2.new(1,0,0,13)
+
+        local msgLbl = newLabel(wrap, txt, 12, Enum.Font.GothamMedium, C.Text)
+        msgLbl.Size      = UDim2.new(1,0,0,0)
+        msgLbl.Position  = UDim2.new(0,0,0,16)
+        msgLbl.AutomaticSize = Enum.AutomaticSize.Y
+        msgLbl.TextWrapped   = true
+
+        wrap.BackgroundTransparency = 1
+        tw(wrap, TI.med, {BackgroundTransparency = isBot and 0 or 0.7})
+        return wrap
     end
 
-    local lbl3 = label(btn, txt, 13, T.SansBold, Color3.fromRGB(255,255,255))
-    lbl3.Size = UDim2.new(1,0,1,0)
-    lbl3.TextXAlignment = Enum.TextXAlignment.Center
+    addMsg("Привет! LineOfBots Prime готов к работе.", true)
 
-    btn.MouseEnter:Connect(function()
-        tw(btn, tw_fast, {BackgroundTransparency = 0})
+    -- Поле ввода
+    local inputWrap = newFrame(f, C.BgCard)
+    inputWrap.Size     = UDim2.new(1, 0, 0, 42)
+    inputWrap.Position = UDim2.new(0, 0, 1, -42)
+    newCorner(inputWrap, 10)
+    newStroke(inputWrap, 1, C.Stroke, 0)
+    newPad(inputWrap, 8, 8, 0, 0)
+
+    local dirBox = Instance.new("TextBox")
+    dirBox.BackgroundTransparency = 1
+    dirBox.Size     = UDim2.new(1, -44, 1, -8)
+    dirBox.Position = UDim2.new(0, 0, 0, 4)
+    dirBox.Font     = Enum.Font.GothamMedium
+    dirBox.TextSize = 12
+    dirBox.TextColor3    = C.Text
+    dirBox.PlaceholderText  = "Напиши сообщение..."
+    dirBox.PlaceholderColor3 = C.TextDim
+    dirBox.TextXAlignment    = Enum.TextXAlignment.Left
+    dirBox.ClearTextOnFocus  = false
+    dirBox.Parent = inputWrap
+
+    local sendBtn2 = newFrame(inputWrap, C.Accent, 0.15)
+    sendBtn2.Size     = UDim2.new(0, 34, 0, 28)
+    sendBtn2.Position = UDim2.new(1, -36, 0.5, -14)
+    sendBtn2.Active   = true
+    newCorner(sendBtn2, 7)
+    newGradient(sendBtn2, C.Accent, C.AccentB, 135)
+    local sndIco = newLabel(sendBtn2, ">", 15, Enum.Font.GothamBold, C.White)
+    sndIco.Size = UDim2.new(1,0,1,0)
+    sndIco.TextXAlignment = Enum.TextXAlignment.Center
+
+    sendBtn2.MouseEnter:Connect(function() tw(sendBtn2, TI.fast, {BackgroundTransparency=0}) end)
+    sendBtn2.MouseLeave:Connect(function() tw(sendBtn2, TI.fast, {BackgroundTransparency=0.15}) end)
+
+    local function doSend()
+        local msg = dirBox.Text:match("^%s*(.-)%s*$")
+        if msg == "" then return end
+        addMsg(msg, false)
+        dirBox.Text = ""
+    end
+
+    sendBtn2.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then doSend() end
     end)
-    btn.MouseLeave:Connect(function()
-        tw(btn, tw_fast, {BackgroundTransparency = scheme == "ghost" and 0.9 or 0.1})
+    dirBox.FocusLost:Connect(function(enter) if enter then doSend() end end)
+
+    makeTabButton("direct", "💬", "Директ", 3)
+end
+
+-- ── Вкладка НАСТРОЙКИ ─────────────────────────────────
+do
+    local f = makeTabFrame("advanced")
+    local s = tabScroll(f)
+
+    local title = newLabel(s, "Настройки", 18, Enum.Font.GothamBold, C.Text)
+    title.Size = UDim2.new(1,0,0,26); title.LayoutOrder=0
+
+    sectionHeader(s, "Groq API (3 слота · авто-ротация)", 1)
+    local groqCard = sectionCard(s, 2)
+    inputRow(groqCard, "Слот 1 — основной", "gsk_...", "")
+    inputRow(groqCard, "Слот 2 — резервный", "gsk_...", "")
+    inputRow(groqCard, "Слот 3 — резервный", "gsk_...", "")
+
+    sectionHeader(s, "Gemini API", 3)
+    local gemCard = sectionCard(s, 4)
+    inputRow(gemCard, "Google Gemini ключ", "AI...", "")
+
+    sectionHeader(s, "Модель", 5)
+    local mdCard = sectionCard(s, 6)
+
+    local models = {
+        "llama-3.1-8b-instant","llama-3.3-70b-versatile",
+        "openai/gpt-oss-20b","openai/gpt-oss-120b",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "moonshotai/kimi-k2-instruct-0905",
+        "qwen/qwen3-32b",
+        "gemini-2.5-flash","gemini-2.5-flash-lite",
+        "gemini-3-flash-preview","compound-beta","compound-beta-mini",
+    }
+    -- Простой текстбокс для выбора модели
+    inputRow(mdCard, "Текущая модель", "llama-3.1-8b-instant", "llama-3.1-8b-instant")
+
+    makeTabButton("advanced", "🔧", "Настройки", 4)
+end
+
+-- ── Вкладка МОДЕРАЦИЯ ─────────────────────────────────
+do
+    local f = makeTabFrame("moderation")
+    local s = tabScroll(f)
+
+    local title = newLabel(s, "Модерация", 18, Enum.Font.GothamBold, C.Text)
+    title.Size = UDim2.new(1,0,0,26); title.LayoutOrder=0
+
+    sectionHeader(s, "Игроки на сервере", 1)
+    local plCard = sectionCard(s, 2)
+
+    local playerCount = 0
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= lp then
+            playerCount += 1
+            local row = newFrame(plCard, C.BgCard, 1)
+            row.Size = UDim2.new(1,0,0,40)
+
+            local av = newFrame(row, C.AccentB, 0.6)
+            av.Size     = UDim2.new(0,26,0,26)
+            av.Position = UDim2.new(0,0,0.5,-13)
+            newCorner(av, 6)
+            local avL = newLabel(av, p.Name:sub(1,1):upper(), 13, Enum.Font.GothamBold, C.White)
+            avL.Size = UDim2.new(1,0,1,0)
+            avL.TextXAlignment = Enum.TextXAlignment.Center
+
+            local nm = newLabel(row, p.Name, 12, Enum.Font.GothamMedium, C.Text)
+            nm.Size     = UDim2.new(0.5,0,0,16)
+            nm.Position = UDim2.new(0,34,0.5,-8)
+
+            local blk = newFrame(row, C.Red, 0.85)
+            blk.Size     = UDim2.new(0,54,0,22)
+            blk.Position = UDim2.new(1,-54,0.5,-11)
+            blk.Active   = true
+            newCorner(blk, 6)
+            local bl = newLabel(blk, "Блок", 10, Enum.Font.GothamBold, Color3.fromRGB(255,200,200))
+            bl.Size = UDim2.new(1,0,1,0)
+            bl.TextXAlignment = Enum.TextXAlignment.Center
+            blk.MouseEnter:Connect(function() tw(blk,TI.fast,{BackgroundTransparency=0.5}) end)
+            blk.MouseLeave:Connect(function() tw(blk,TI.fast,{BackgroundTransparency=0.85}) end)
+        end
+    end
+
+    if playerCount == 0 then
+        local empty = newLabel(plCard, "На сервере нет других игроков", 12, Enum.Font.Gotham, C.TextDim)
+        empty.Size = UDim2.new(1,0,0,30)
+        empty.TextXAlignment = Enum.TextXAlignment.Center
+    end
+
+    makeTabButton("moderation", "🛡", "Модерация", 5)
+end
+
+-- ══════════════════════════════════════════════════════
+-- §DRAG  — перетаскивание окна
+-- ══════════════════════════════════════════════════════
+do
+    local dragging  = false
+    local dragStart = Vector2.zero
+    local winStart  = Vector2.zero
+
+    local function startDrag(inp)
+        -- Не начинаем drag если кликнули на кнопки
+        dragging  = true
+        dragStart = Vector2.new(inp.Position.X, inp.Position.Y)
+        local pos = win.Position
+        winStart  = Vector2.new(pos.X.Offset, pos.Y.Offset)
+    end
+
+    header.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            -- Проверяем что не нажали на кнопки управления
+            local rx = inp.Position.X - header.AbsolutePosition.X
+            if rx < header.AbsoluteSize.X - 80 then
+                startDrag(inp)
+            end
+        end
     end)
 
+    UserInputService.InputChanged:Connect(function(inp)
+        if not dragging then return end
+        if inp.UserInputType ~= Enum.UserInputType.MouseMovement
+        and inp.UserInputType ~= Enum.UserInputType.Touch then return end
+
+        local delta = Vector2.new(inp.Position.X, inp.Position.Y) - dragStart
+        local sz    = getScreenSize()
+
+        -- Клампируем чтобы окно не уходило за экран
+        local newX = math.clamp(winStart.X + delta.X, 0, sz.X - WIN_W)
+        local newY = math.clamp(winStart.Y + delta.Y, 0, sz.Y - WIN_H)
+
+        win.Position = UDim2.new(0, newX, 0, newY)
+    end)
+
+    UserInputService.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+-- ══════════════════════════════════════════════════════
+-- §MINIMIZE  — сворачивание
+-- ══════════════════════════════════════════════════════
+local minimized    = false
+local savedWinSize = UDim2.new(0, WIN_W, 0, WIN_H)
+
+local function setMinimized(on)
+    minimized = on
+    if on then
+        -- Сохраняем текущий размер
+        savedWinSize = win.Size
+        -- Анимация сворачивания
+        tw(bodyContainer, TI.med, {Size = UDim2.new(1, 0, 0, 0)})
+        task.delay(0.1, function()
+            tw(win, TI.med, {Size = UDim2.new(0, WIN_W, 0, HEADER_H + 4)})
+        end)
+        btnMin.TextLabel.Text = "o"
+    else
+        -- Разворачиваем
+        tw(win, TI.med, {Size = savedWinSize})
+        task.delay(0.1, function()
+            tw(bodyContainer, TI.med, {Size = UDim2.new(1, 0, 0, BODY_H)})
+        end)
+        btnMin.TextLabel.Text = "-"
+    end
+end
+
+-- Исправляем: кнопки хранят TextLabel иначе
+-- Переделываем поиск TextLabel в кнопках
+local function getLabel(b)
+    for _, c in ipairs(b:GetChildren()) do
+        if c:IsA("TextLabel") then return c end
+    end
+end
+
+btnMin.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        setMinimized(not minimized)
+    end
+end)
+
+-- ══════════════════════════════════════════════════════
+-- §CLOSE_CONFIRM  — диалог подтверждения закрытия
+-- ══════════════════════════════════════════════════════
+local confirmOpen = false
+
+local confirmOverlay = newFrame(win, Color3.fromRGB(0,0,0), 0.4)
+confirmOverlay.Name    = "ConfirmOverlay"
+confirmOverlay.Size    = UDim2.new(1, 0, 1, 0)
+confirmOverlay.Visible = false
+confirmOverlay.ZIndex  = 20
+
+local confirmBox = newFrame(confirmOverlay, C.BgCard)
+confirmBox.Name     = "ConfirmBox"
+confirmBox.Size     = UDim2.new(0, 260, 0, 130)
+confirmBox.Position = UDim2.new(0.5, -130, 0.5, -65)
+confirmBox.ZIndex   = 21
+newCorner(confirmBox, 12)
+newStroke(confirmBox, 1, C.Stroke, 0)
+newPad(confirmBox, 20, 20, 16, 16)
+
+local confirmTitle2 = newLabel(confirmBox, "Закрыть LOB Prime?", 14, Enum.Font.GothamBold, C.Text)
+confirmTitle2.Size     = UDim2.new(1, 0, 0, 18)
+confirmTitle2.ZIndex   = 22
+
+local confirmSub = newLabel(confirmBox, "Бот перестанет отвечать.", 11, Enum.Font.Gotham, C.TextMid)
+confirmSub.Size     = UDim2.new(1, 0, 0, 14)
+confirmSub.Position = UDim2.new(0, 0, 0, 22)
+confirmSub.ZIndex   = 22
+
+-- Кнопки подтверждения
+local function makeConfirmBtn(txt, bg, yPos, action)
+    local btn = newFrame(confirmBox, bg, 0.12)
+    btn.Size     = UDim2.new(0.46, 0, 0, 32)
+    btn.Position = UDim2.new(yPos, 0, 1, -42)
+    btn.Active   = true
+    btn.ZIndex   = 23
+    newCorner(btn, 8)
+    newStroke(btn, 1, bg, 0.4)
+    local lbl2 = newLabel(btn, txt, 12, Enum.Font.GothamBold, C.White)
+    lbl2.Size = UDim2.new(1,0,1,0)
+    lbl2.TextXAlignment = Enum.TextXAlignment.Center
+    lbl2.ZIndex = 24
+
+    btn.MouseEnter:Connect(function() tw(btn, TI.fast, {BackgroundTransparency=0}) end)
+    btn.MouseLeave:Connect(function() tw(btn, TI.fast, {BackgroundTransparency=0.12}) end)
+    btn.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            action()
+        end
+    end)
     return btn
 end
 
--- Дропдаун (простой)
-local function makeDropdown(parent, options, initVal, onChange)
-    local current = initVal or (options[1] or "")
-    local open    = false
-
-    local wrap = frame(parent, T.BgInput)
-    wrap.Size      = UDim2.new(1, 0, 0, 34)
-    wrap.ClipsDescendants = false
-    corner(wrap, 8)
-    stroke(wrap, 1, T.StrokeHard, 0)
-
-    local valLbl2 = label(wrap, current, 13, T.Mono, T.Text)
-    valLbl2.Size     = UDim2.new(1, -30, 1, 0)
-    valLbl2.Position = UDim2.new(0, 10, 0, 0)
-
-    local arrow = label(wrap, "▾", 12, T.Sans, T.TextMid)
-    arrow.Size     = UDim2.new(0, 20, 1, 0)
-    arrow.Position = UDim2.new(1, -24, 0, 0)
-    arrow.TextXAlignment = Enum.TextXAlignment.Center
-
-    -- Выпадающий список
-    local dropdown = frame(wrap, T.BgCard)
-    dropdown.Name    = "Dropdown"
-    dropdown.Size    = UDim2.new(1, 0, 0, 0)
-    dropdown.Position = UDim2.new(0, 0, 1, 4)
-    dropdown.ClipsDescendants = true
-    dropdown.ZIndex  = 10
-    dropdown.Visible = false
-    corner(dropdown, 8)
-    stroke(dropdown, 1, T.StrokeHard, 0)
-
-    local ddList = scrollFrame(dropdown, 2)
-    ddList.Size = UDim2.new(1, 0, 1, 0)
-    ddList.ZIndex = 10
-    listLayout(ddList, Enum.FillDirection.Vertical, 2)
-    padding(ddList, nil, 6, 4)
-
-    local optBtns = {}
-    for _, opt in ipairs(options) do
-        local ob = frame(ddList, T.BgCard, 1)
-        ob.Size     = UDim2.new(1, 0, 0, 28)
-        ob.Active   = true
-        ob.ZIndex   = 11
-        corner(ob, 6)
-
-        local ol = label(ob, opt, 12, T.Mono, T.TextMid)
-        ol.Size     = UDim2.new(1, -12, 1, 0)
-        ol.Position = UDim2.new(0, 8, 0, 0)
-        ol.ZIndex   = 12
-
-        ob.MouseEnter:Connect(function()
-            tw(ob, tw_fast, {BackgroundTransparency=0.5, BackgroundColor3=T.BgHover})
-            tw(ol, tw_fast, {TextColor3=T.Text})
-        end)
-        ob.MouseLeave:Connect(function()
-            local isCurrent = (ol.Text == current)
-            tw(ob, tw_fast, {BackgroundTransparency=isCurrent and 0.6 or 1})
-            tw(ol, tw_fast, {TextColor3=isCurrent and T.Accent or T.TextMid})
-        end)
-        ob.InputBegan:Connect(function(inp)
-            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-                current = opt
-                valLbl2.Text = opt
-                -- Закрываем
-                open = false
-                tw(dropdown, tw_fast, {Size=UDim2.new(1,0,0,0)})
-                task.delay(0.15, function() dropdown.Visible = false end)
-                tw(arrow, tw_fast, {Rotation=0})
-                if onChange then onChange(opt) end
-            end
-        end)
-        table.insert(optBtns, {frame=ob, label=ol})
-    end
-
-    -- Размер дропдауна
-    local DD_ITEM_H = 30
-    local DD_PAD    = 8
-    local DD_MAX    = math.min(#options, 6)
-    local DD_H      = DD_MAX * DD_ITEM_H + DD_PAD
-
-    local function toggleDropdown()
-        open = not open
-        dropdown.Visible = true
-        if open then
-            tw(dropdown, tw_med, {Size=UDim2.new(1,0,0,DD_H)})
-            tw(arrow, tw_fast, {Rotation=180})
-        else
-            tw(dropdown, tw_fast, {Size=UDim2.new(1,0,0,0)})
-            tw(arrow, tw_fast, {Rotation=0})
-            task.delay(0.15, function() dropdown.Visible = false end)
-        end
-    end
-
-    wrap.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            toggleDropdown()
-        end
-    end)
-
-    local function setValue(v)
-        current = v
-        valLbl2.Text = v
-    end
-
-    return wrap, setValue
-end
-
--- ═══════════════════════════════════════════════════════
--- §PRIME_TAB_BEHAVIOR  —  Вкладка Поведение
--- ═══════════════════════════════════════════════════════
-local bhvFrame = makeTabFrame("behavior")
-local bhvScroll = scrollFrame(bhvFrame, 3)
-bhvScroll.Size = UDim2.new(1, 0, 1, 0)
-listLayout(bhvScroll, Enum.FillDirection.Vertical, 12)
-
--- Заголовок
-local bhvTitle = label(bhvScroll, "Поведение", 20, T.SansBold, T.Text)
-bhvTitle.Size = UDim2.new(1, 0, 0, 28)
-bhvTitle.LayoutOrder = 0
-
-local bhvSub = label(bhvScroll, "Основные параметры бота", 12, T.Sans, T.TextDim)
-bhvSub.Size = UDim2.new(1, 0, 0, 18)
-bhvSub.LayoutOrder = 1
-
--- Секция Чат
-local _, chatSec = makeSection(bhvScroll, "Чат", 2)
-makeToggleRow(chatSec, "Автоответ в чат", "Бот отвечает в общий чат", false, function(v)
-    -- TODO: ClientSettings.AutoReply = v
-end)
-makeToggleRow(chatSec, "Память диалога", "ИИ помнит предыдущие сообщения", true, function(v) end)
-makeToggleRow(chatSec, "Память по игрокам", "Отдельная история для каждого", false, function(v) end)
-makeToggleRow(chatSec, "Передавать ник", "ИИ знает имя игрока", true, function(v) end)
-makeToggleRow(chatSec, "Антиспам", "Игнорировать повторы в 12 сек", true, function(v) end)
-makeToggleRow(chatSec, "Реакция на имя", "Отвечать когда упоминают ник бота", true, function(v) end)
-
--- Секция Параметры
-local _, paramSec = makeSection(bhvScroll, "Параметры генерации", 3)
-makeSlider(paramSec, "Температура", 0, 20, 7, function(v)
-    -- ClientSettings.Temperature = v/10
-end)
-makeSlider(paramSec, "Макс. токенов", 1, 64, 8, function(v)
-    -- ClientSettings.MaxTokens = v * 64
-end)
-makeSlider(paramSec, "Глубина памяти", 1, 30, 10, function(v) end)
-
--- ═══════════════════════════════════════════════════════
--- §PRIME_TAB_ADVANCED  —  Вкладка Настройки
--- ═══════════════════════════════════════════════════════
-local advFrame = makeTabFrame("advanced")
-local advScroll = scrollFrame(advFrame, 3)
-advScroll.Size = UDim2.new(1, 0, 1, 0)
-listLayout(advScroll, Enum.FillDirection.Vertical, 12)
-
-local advTitle = label(advScroll, "Настройки", 20, T.SansBold, T.Text)
-advTitle.Size = UDim2.new(1, 0, 0, 28)
-advTitle.LayoutOrder = 0
-
--- API ключи
-local _, apiSec = makeSection(advScroll, "API ключи Groq", 1)
-
-local function apiKeyRow(lbl4, placeholder, order)
-    local row = frame(apiSec, T.BgBase, 1)
-    row.Size = UDim2.new(1, 0, 0, 56)
-    row.LayoutOrder = order
-
-    local lbl5 = label(row, lbl4, 11, T.Sans, T.TextDim)
-    lbl5.Size = UDim2.new(1, 0, 0, 14)
-
-    local _, box2 = makeInput(row, placeholder, "")
-    box2.Parent.Position = UDim2.new(0, 0, 0, 18)
-    box2.Parent.Parent = row
-    return row
-end
-apiKeyRow("Основной ключ", "gsk_...", 1)
-apiKeyRow("Резервный ключ 1", "gsk_...", 2)
-apiKeyRow("Резервный ключ 2", "gsk_...", 3)
-
-local _, geminiSec = makeSection(advScroll, "API ключ Gemini", 2)
-apiKeyRow("Google Gemini", "AI...", 1)
-
--- Модели
-local _, modelSec = makeSection(advScroll, "Модель", 3)
-local groqModels = {
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-    "meta-llama/llama-4-maverick-17b-128e-instruct",
-    "moonshotai/kimi-k2-instruct-0905",
-    "qwen/qwen3-32b",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-3-flash-preview",
-    "compound-beta",
-    "compound-beta-mini",
-}
-local modelDd = frame(modelSec, T.BgBase, 1)
-modelDd.Size = UDim2.new(1, 0, 0, 34)
-makeDropdown(modelDd, groqModels, "llama-3.1-8b-instant", function(v) end)
-modelDd.Parent = modelSec
-
--- ═══════════════════════════════════════════════════════
--- §PRIME_TAB_DIRECT  —  Директ чат
--- ═══════════════════════════════════════════════════════
-local dirFrame = makeTabFrame("direct")
-
-local dirTitle = label(dirFrame, "Директ-чат", 20, T.SansBold, T.Text)
-dirTitle.Size     = UDim2.new(1, 0, 0, 28)
-dirTitle.Position = UDim2.new(0, 0, 0, 0)
-
--- История сообщений
-local msgArea = scrollFrame(dirFrame, 3)
-msgArea.Size     = UDim2.new(1, 0, 1, -90)
-msgArea.Position = UDim2.new(0, 0, 0, 36)
-listLayout(msgArea, Enum.FillDirection.Vertical, 6)
-padding(msgArea, nil, 0, 4)
-
--- Добавить сообщение в чат
-local function addMsg(txt, isBot)
-    local bubble = frame(msgArea, isBot and T.BgCard or T.AccentDim, isBot and 0 or 0.7)
-    bubble.Size = UDim2.new(0.8, 0, 0, 0)
-    bubble.AutomaticSize = Enum.AutomaticSize.Y
-    if isBot then
-        bubble.Position = UDim2.new(0, 0, 0, 0)
-    else
-        bubble.Position = UDim2.new(0.2, 0, 0, 0)
-        bubble.AnchorPoint = Vector2.new(0, 0)
-    end
-    corner(bubble, 10)
-    if isBot then
-        stroke(bubble, 1, T.StrokeSoft, 0)
-    end
-    padding(bubble, nil, 10, 8)
-
-    local sender = label(bubble, isBot and "🤖 Бот" or "👤 Ты", 10, T.Sans, isBot and T.Accent or T.AccentGlow)
-    sender.Size = UDim2.new(1, 0, 0, 14)
-
-    local msgLbl = label(bubble, txt, 13, T.Sans, T.Text)
-    msgLbl.Size = UDim2.new(1, 0, 0, 0)
-    msgLbl.Position = UDim2.new(0, 0, 0, 18)
-    msgLbl.AutomaticSize = Enum.AutomaticSize.Y
-    msgLbl.TextWrapped = true
-
-    bubble.BackgroundTransparency = 1
-    tw(bubble, tw_med, {BackgroundTransparency = isBot and 0 or 0.7})
-end
-
--- Приветствие
-addMsg("Привет! Я LineOfBots Prime. Готов к работе.", true)
-
--- Поле ввода
-local inputRow = frame(dirFrame, T.BgCard)
-inputRow.Size     = UDim2.new(1, 0, 0, 46)
-inputRow.Position = UDim2.new(0, 0, 1, -46)
-corner(inputRow, 10)
-stroke(inputRow, 1, T.StrokeSoft, 0)
-padding(inputRow, nil, 8, 0)
-
-local _, dirInput = makeInput(inputRow, "Напиши сообщение...", "")
-dirInput.Parent.Size     = UDim2.new(1, -48, 1, -8)
-dirInput.Parent.Position = UDim2.new(0, 0, 0, 4)
-dirInput.Parent.Parent   = inputRow
-
-local sendBtn = frame(inputRow, T.Accent, 0.1)
-sendBtn.Size     = UDim2.new(0, 36, 0, 28)
-sendBtn.Position = UDim2.new(1, -40, 0.5, -14)
-sendBtn.Active   = true
-corner(sendBtn, 8)
-gradient(sendBtn, T.Accent, T.Purple, 135)
-local sendIco = label(sendBtn, "→", 15, T.SansBold, Color3.fromRGB(255,255,255))
-sendIco.Size = UDim2.new(1,0,1,0)
-sendIco.TextXAlignment = Enum.TextXAlignment.Center
-
-sendBtn.MouseEnter:Connect(function() tw(sendBtn, tw_fast, {BackgroundTransparency=0}) end)
-sendBtn.MouseLeave:Connect(function() tw(sendBtn, tw_fast, {BackgroundTransparency=0.1}) end)
-sendBtn.InputBegan:Connect(function(inp)
-    if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-        local msg = dirInput.Text:match("^%s*(.-)%s*$")
-        if msg ~= "" then
-            addMsg(msg, false)
-            dirInput.Text = ""
-        end
-    end
-end)
-
--- ═══════════════════════════════════════════════════════
--- §PRIME_TAB_PERCEPTION  —  Восприятие
--- ═══════════════════════════════════════════════════════
-local percFrame = makeTabFrame("perception")
-local percScroll = scrollFrame(percFrame, 3)
-percScroll.Size = UDim2.new(1, 0, 1, 0)
-listLayout(percScroll, Enum.FillDirection.Vertical, 12)
-
-local percTitle = label(percScroll, "Восприятие", 20, T.SansBold, T.Text)
-percTitle.Size = UDim2.new(1, 0, 0, 28)
-percTitle.LayoutOrder = 0
-
-local _, worldSec = makeSection(percScroll, "Мир", 1)
-makeToggleRow(worldSec, "Реакции на мир", "Прыжки, взгляды, смерть рядом", true, function(v) end)
-makeToggleRow(worldSec, "Сознание места", "ИИ знает название игры", true, function(v) end)
-makeToggleRow(worldSec, "Сознание игроков", "Видит кто стоит рядом", true, function(v) end)
-makeToggleRow(worldSec, "Поворот к игроку", "Плавно поворачивается к говорящему", true, function(v) end)
-
-local _, rangeSec = makeSection(percScroll, "Дальность", 2)
-makeToggleRow(rangeSec, "Радиус ответа", "Отвечать только в радиусе", false, function(v) end)
-makeSlider(rangeSec, "Радиус (studs)", 5, 200, 50, function(v) end)
-makeToggleRow(rangeSec, "Игнорировать стены", "Отвечать через стены", false, function(v) end)
-
-local _, featureSec = makeSection(percScroll, "Дополнительно", 3)
-makeToggleRow(featureSec, "Веб-поиск", "Актуальные мемы и новости 2026", false, function(v) end)
-makeToggleRow(featureSec, "Команды и эмоции", "Анимации через [DO:tag]", true, function(v) end)
-makeToggleRow(featureSec, "Экономия токенов", "Сокращает промпт", false, function(v) end)
-
--- ═══════════════════════════════════════════════════════
--- §PRIME_TAB_MODERATION  —  Модерация
--- ═══════════════════════════════════════════════════════
-local modFrame = makeTabFrame("moderation")
-local modTitle = label(modFrame, "Модерация", 20, T.SansBold, T.Text)
-modTitle.Size     = UDim2.new(1, 0, 0, 28)
-modTitle.Position = UDim2.new(0, 0, 0, 0)
-
-local modSub = label(modFrame, "Список игроков сервера", 12, T.Sans, T.TextDim)
-modSub.Size     = UDim2.new(1, 0, 0, 16)
-modSub.Position = UDim2.new(0, 0, 0, 30)
-
--- Поиск
-local _, searchBox = makeInput(modFrame, "🔍  Поиск игрока...", "")
-searchBox.Parent.Size     = UDim2.new(1, 0, 0, 34)
-searchBox.Parent.Position = UDim2.new(0, 0, 0, 54)
-searchBox.Parent.Parent   = modFrame
-
--- Список
-local modScroll = scrollFrame(modFrame, 3)
-modScroll.Size     = UDim2.new(1, 0, 1, -98)
-modScroll.Position = UDim2.new(0, 0, 0, 98)
-listLayout(modScroll, Enum.FillDirection.Vertical, 4)
-
--- Пример строк
-local function modRow(name, id)
-    local row = frame(modScroll, T.BgCard)
-    row.Size = UDim2.new(1, 0, 0, 44)
-    corner(row, 8)
-    stroke(row, 1, T.StrokeSoft, 0)
-    padding(row, nil, 12, 0)
-
-    local avatar = frame(row, T.AccentDim, 0.6)
-    avatar.Size     = UDim2.new(0, 28, 0, 28)
-    avatar.Position = UDim2.new(0, 0, 0.5, -14)
-    corner(avatar, 6)
-    local av = label(avatar, name:sub(1,1):upper(), 14, T.SansBold, T.Text)
-    av.Size = UDim2.new(1,0,1,0)
-    av.TextXAlignment = Enum.TextXAlignment.Center
-
-    local nm = label(row, name, 13, T.Sans, T.Text)
-    nm.Size     = UDim2.new(0.5, 0, 0, 16)
-    nm.Position = UDim2.new(0, 36, 0.5, -8)
-
-    local blockBtn = frame(row, T.Red, 0.85)
-    blockBtn.Size     = UDim2.new(0, 60, 0, 24)
-    blockBtn.Position = UDim2.new(1, -60, 0.5, -12)
-    blockBtn.Active   = true
-    corner(blockBtn, 6)
-    local bl = label(blockBtn, "Блок", 11, T.SansBold, Color3.fromRGB(255,200,200))
-    bl.Size = UDim2.new(1,0,1,0)
-    bl.TextXAlignment = Enum.TextXAlignment.Center
-
-    blockBtn.MouseEnter:Connect(function() tw(blockBtn, tw_fast, {BackgroundTransparency=0.5}) end)
-    blockBtn.MouseLeave:Connect(function() tw(blockBtn, tw_fast, {BackgroundTransparency=0.85}) end)
-end
-
--- Заполняем текущими игроками
-for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= lp then modRow(p.Name, p.UserId) end
-end
-if #Players:GetPlayers() <= 1 then
-    local empty = label(modScroll, "На сервере нет других игроков", 13, T.Sans, T.TextDim)
-    empty.Size = UDim2.new(1, 0, 0, 40)
-    empty.TextXAlignment = Enum.TextXAlignment.Center
-end
-
--- ═══════════════════════════════════════════════════════
--- §PRIME_SIDEBAR_BUILD  —  Строим кнопки сайдбара
--- ═══════════════════════════════════════════════════════
-sbGroupLabel("МЕНЮ", 0)
-
-for i, tab in ipairs(TABS) do
-    local btn, setActive = makeTabBtn(tab, i)
-    btn.MouseButton1Click = nil -- уже через InputBegan
-    btn.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            switchTab(tab.id)
-        end
+local function closeConfirm()
+    confirmOpen = false
+    tw(confirmBox, TI.fast, {Size = UDim2.new(0, 260, 0, 0), Position = UDim2.new(0.5,-130,0.5,0)})
+    tw(confirmOverlay, TI.fast, {BackgroundTransparency = 1})
+    task.delay(0.2, function()
+        confirmOverlay.Visible = false
+        confirmOverlay.BackgroundTransparency = 0.4
+        confirmBox.Size     = UDim2.new(0, 260, 0, 130)
+        confirmBox.Position = UDim2.new(0.5,-130,0.5,-65)
     end)
 end
 
-sbDivider(#TABS + 1)
-sbGroupLabel("ИНСТРУМЕНТЫ", #TABS + 2)
+local function openConfirm()
+    if confirmOpen then return end
+    confirmOpen = true
+    confirmOverlay.Visible = true
+    confirmBox.Size     = UDim2.new(0, 260, 0, 0)
+    confirmBox.Position = UDim2.new(0.5,-130,0.5,0)
+    confirmOverlay.BackgroundTransparency = 1
+    tw(confirmOverlay, TI.med, {BackgroundTransparency=0.4})
+    tw(confirmBox, TI.bounce, {
+        Size     = UDim2.new(0, 260, 0, 130),
+        Position = UDim2.new(0.5,-130,0.5,-65)
+    })
+end
 
--- Кнопка сброса памяти в сайдбаре
-local resetBtn = frame(sbScroll, T.Red, 0.9)
-resetBtn.Name        = "ResetMemory"
-resetBtn.Size        = UDim2.new(1, 0, 0, 34)
-resetBtn.Active      = true
-resetBtn.LayoutOrder = #TABS + 3
-corner(resetBtn, 8)
-stroke(resetBtn, 1, T.Red, 0.5)
-local resetLbl = label(resetBtn, "🗑  Сбросить память", 12, T.Sans, T.Text)
-resetLbl.Size     = UDim2.new(1, 0, 1, 0)
-resetLbl.Position = UDim2.new(0, 10, 0, 0)
-resetBtn.MouseEnter:Connect(function() tw(resetBtn, tw_fast, {BackgroundTransparency=0.5}) end)
-resetBtn.MouseLeave:Connect(function() tw(resetBtn, tw_fast, {BackgroundTransparency=0.9}) end)
+makeConfirmBtn("Отмена", C.Stroke, 0,    closeConfirm)
+makeConfirmBtn("Закрыть", C.Red,   0.54, function()
+    -- Анимация закрытия всего окна
+    tw(win, TI.med, {
+        Size     = UDim2.new(0, WIN_W, 0, 0),
+        Position = UDim2.new(win.Position.X.Scale, win.Position.X.Offset + WIN_W/2,
+                             win.Position.Y.Scale, win.Position.Y.Offset + WIN_H/2),
+        BackgroundTransparency = 1
+    })
+    task.delay(0.35, function()
+        pcall(function() root:Destroy() end)
+        _G._LOBPrimeSBScroll = nil
+    end)
+end)
 
--- ═══════════════════════════════════════════════════════
--- §PRIME_CLOSE_MIN  —  Закрытие / минимизация
--- ═══════════════════════════════════════════════════════
-local minimized = false
-local savedPos  = main.Position
-
-closeBtn.InputBegan:Connect(function(inp)
-    if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-        tw(main, tw_med, {Size=UDim2.new(0,0,0,0), Position=UDim2.new(0.5,0,0.5,0)})
-        task.delay(0.3, function()
-            screenGui:Destroy()
-        end)
+btnClose.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        openConfirm()
     end
 end)
 
-minBtn.InputBegan:Connect(function(inp)
-    if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-        minimized = not minimized
-        if minimized then
-            savedPos = main.Position
-            tw(main, tw_med, {Size=UDim2.new(0, WIN_W, 0, 48)})
-            body.Visible = false
-        else
-            body.Visible = true
-            tw(main, tw_med, {Size=UDim2.new(0, WIN_W, 0, WIN_H)})
-        end
+-- Клик по оверлею = отмена
+confirmOverlay.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        closeConfirm()
     end
 end)
 
--- ═══════════════════════════════════════════════════════
--- §PRIME_HOTKEY  —  Toggle горячая клавиша (RightAlt)
--- ═══════════════════════════════════════════════════════
+-- ══════════════════════════════════════════════════════
+-- §HOTKEY  — RightAlt toggle
+-- ══════════════════════════════════════════════════════
 UserInputService.InputBegan:Connect(function(inp, gp)
     if gp then return end
     if inp.KeyCode == Enum.KeyCode.RightAlt then
-        main.Visible = not main.Visible
+        if win.Visible then
+            tw(win, TI.fast, {BackgroundTransparency=1})
+            task.delay(0.15, function() win.Visible = false end)
+        else
+            win.Visible = true
+            win.BackgroundTransparency = 1
+            tw(win, TI.med, {BackgroundTransparency=0})
+        end
     end
 end)
 
--- ═══════════════════════════════════════════════════════
--- §PRIME_LAUNCH  —  Запуск
--- ═══════════════════════════════════════════════════════
--- Открываем первую вкладку
+-- ══════════════════════════════════════════════════════
+-- §LAUNCH  — открываем первую вкладку + анимация появления
+-- ══════════════════════════════════════════════════════
 switchTab("behavior")
 
--- Анимация появления окна
-main.Size = UDim2.new(0, WIN_W, 0, 0)
-main.BackgroundTransparency = 1
-tw(main, tw_slow, {
-    Size = UDim2.new(0, WIN_W, 0, WIN_H),
+-- Появление окна
+win.Size     = UDim2.new(0, WIN_W, 0, 0)
+win.BackgroundTransparency = 0.95
+tw(win, TI.bounce, {
+    Size     = UDim2.new(0, WIN_W, 0, WIN_H),
     BackgroundTransparency = 0
 })
 
-print("[LOB PRIME] Interface loaded. RightAlt = toggle.")
+print("[LOB PRIME v2] Loaded · device="..device.." · "..WIN_W.."X"..WIN_H.." · RightAlt=toggle")
