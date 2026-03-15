@@ -43,7 +43,7 @@
 --  9773     §LAUNCH        createInterface() — точка запуска скрипта
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v19.8.8 LOADED")
+print("LOB VERSION: v19.9.1 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -1107,8 +1107,10 @@ function GeminiProvider:chatCompletions(payload)
             -- Убираем все служебные теги из user text
             userText = userText:gsub("%[LANG:[A-Z]+%]%s*", "")
             userText = userText:gsub("%[NAME:[^%]]+%]%s*", "")
-            -- [SYSTEM: ...] world-events: передаём как есть, Gemini понимает контекст
-            userText = userText:gsub("^%[SYSTEM:%s*", ""):gsub("%]%s*$", "")
+            -- [SYSTEM: ...] world-events: убираем только если строка НАЧИНАЕТСЯ с [SYSTEM:
+            if userText:match("^%[SYSTEM:") then
+                userText = userText:gsub("^%[SYSTEM:%s*", ""):gsub("%]%s*$", "")
+            end
             userText = userText:match("^%s*(.-)%s*$") or userText
             if userText == "" then userText = "..." end
             table.insert(contents, { role = "user", parts = {{ text = userText }} })
@@ -1166,7 +1168,8 @@ function GeminiProvider:chatCompletions(payload)
     -- gemini-2.5-flash НЕ поддерживает thinkingConfig — передавать нельзя
     local isGemini3x = model:find("^gemini%-3") ~= nil
     -- temperature: для gemini-3.x Google рекомендует 1.0, для остальных — из настроек
-    local geminiTemp = isGemini3x and 1.0 or math.max(0, math.min(2.0, payload.temperature or 0.7))
+    -- Gemini 2.5 Flash при очень низкой temperature (<0.5) может отказываться отвечать
+    local geminiTemp = isGemini3x and 1.0 or math.max(0.5, math.min(2.0, payload.temperature or 0.7))
     local genConfig = {
         maxOutputTokens = payload.max_tokens or 300,
         temperature     = geminiTemp,
@@ -1192,6 +1195,10 @@ function GeminiProvider:chatCompletions(payload)
     if #systemParts > 0 then
         local combined = table.concat(systemParts, "\n\n")
         body.systemInstruction = { parts = {{ text = combined }} }
+    end
+    -- Если нет systemInstruction — добавляем минимальный
+    if #systemParts == 0 then
+        body.systemInstruction = { parts = {{ text = "You are a helpful assistant in a Roblox game. Reply briefly and naturally." }} }
     end
 
     local res, statusCode, statusMsg, rawBody, respHeaders = postJson(url, {
@@ -1468,20 +1475,6 @@ local function makeSystemPrompt(settings)
     local custom = settings.CustomSystemPrompt
     local hasCustom = type(custom) == "string" and custom:gsub("%s+","") ~= ""
 
-    if hasCustom then
-        table.insert(parts, custom)
-    elseif type(personalityId) == "string" and Personalities[personalityId] then
-        local fullPersonality = tostring(Personalities[personalityId].system or "")
-        if settings.TokenEconomy then
-            local short = fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1,300)
-            table.insert(parts, short)
-        else
-            table.insert(parts, fullPersonality)
-        end
-    else
-        table.insert(parts, "You are a player in a Roblox game. Chat naturally and briefly.")
-    end
-
     -- ── 2. ДЕЙСТВИЯ / ЭМОЦИИ ─────────────────────────────────────────────
     if settings.ActionsEnabled then
         if settings.TokenEconomy then
@@ -1506,6 +1499,21 @@ local function makeSystemPrompt(settings)
                 "\n      [DO:dizzy]=wtf  [DO:sit]=sit  [DO:point]=look there" ..
                 "\nExamples: посмейся→[DO:laugh]хаха  да→[DO:agree]конечно  прыгни 3→[DO:jump3]ок  подойди→[DO:goto]иду")
         end
+    end
+
+    -- ── 2б. ЛИЧНОСТЬ (после тегов — чтобы не блокировала)
+    if hasCustom then
+        table.insert(parts, custom)
+    elseif type(personalityId) == "string" and Personalities[personalityId] then
+        local fullPersonality = tostring(Personalities[personalityId].system or "")
+        if settings.TokenEconomy then
+            local short = fullPersonality:match("^(.-)\n\n") or fullPersonality:sub(1,300)
+            table.insert(parts, short)
+        else
+            table.insert(parts, fullPersonality)
+        end
+    else
+        table.insert(parts, "You are a player in a Roblox game. Chat naturally and briefly.")
     end
 
     -- ── 3. ЯЗЫК ───────────────────────────────────────────────────────────
@@ -2546,32 +2554,32 @@ local ACTION_HANDLERS = {
     sorry    = function(_) playEmote("point",  3) end,
     cry      = function(_) playEmote("point",  4) end,
     -- ЗАМЕШАТЕЛЬСТВО / РЕАКЦИЯ
-    shrug    = function(_) playEmote("dance2", 3) end,  -- dance2 = покачивание
-    eyeroll  = function(_) playEmote("dance2", 2) end,
-    facepalm = function(_) playEmote("dance2", 3) end,
-    dizzy    = function(_) playEmote("laugh",  2) end,  -- смеётся от дичи
-    tilt     = function(_) playEmote("dance2", 2) end,
-    surprised = function(_) playEmote("cheer", 2) end,  -- вскидывает руки
-    angry    = function(_) playEmote("point",  3) end,  -- указывает агрессивно
+    shrug    = function(_) playEmote("wave",   3) end,
+    eyeroll  = function(_) playEmote("point",  2) end,
+    facepalm = function(_) playEmote("point",  3) end,
+    dizzy    = function(_) playEmote("laugh",  2) end,
+    tilt     = function(_) playEmote("point",  2) end,
+    surprised = function(_) playEmote("cheer", 2) end,
+    angry    = function(_) playEmote("point",  3) end,
     -- СПОКОЙСТВИЕ / ОТДЫХ
     sit      = function(_) playEmote("sit",   nil) end,
     tired    = function(_) playEmote("sit",   nil) end,
     sleep    = function(_) playEmote("sit",    8) end,
     bored    = function(_) playEmote("sit",    6) end,
     -- СТЕСНЕНИЕ / НЕРВЫ
-    shy      = function(_) playEmote("dance3", 4) end,  -- dance3 = мягкое движение
-    nervous  = function(_) playEmote("dance3", 3) end,
+    shy      = function(_) playEmote("wave",   4) end,
+    nervous  = function(_) playEmote("wave",   3) end,
     -- РАЗНОЕ
     greet    = function(_)
-        local v = {"wave","cheer"}
+        local v = {"wave", "cheer"}
         playEmote(v[math.random(1,#v)], 4)
     end,
     excited  = function(_)
-        local v = {"cheer","dance","dance2"}
+        local v = {"cheer", "dance", "laugh"}
         playEmote(v[math.random(1,#v)], 5)
     end,
     celebrate = function(_)
-        local v = {"cheer","dance3","dance2"}
+        local v = {"cheer", "dance", "laugh"}
         playEmote(v[math.random(1,#v)], 6)
     end,
 }
@@ -3238,7 +3246,7 @@ local function handleQueuedChat(item)
     -- Gemini 2.5 flash/lite → 45 сек, Groq → 20 сек
     local isGemini = model:find("^gemini")
     local isGemini3x = model:find("^gemini%-3")
-    local timeoutSec = isGemini3x and 30 or (isGemini and 25 or 15)
+    local timeoutSec = isGemini3x and 20 or (isGemini and 20 or 8)
     local text, err
     do
         local done = false
@@ -3278,9 +3286,7 @@ local function handleQueuedChat(item)
     -- compound-beta: [Sources] / Sources: может быть многострочным → убираем всё после маркера
     text = text:gsub("[\n]?%[Sources?%][%s%S]*$", "")
     text = text:gsub("[\n]?Sources?:%s*%d+%.[%s%S]*$", "")
-    -- deepseek-reasoner иногда пропускает <think>...</think> в content — убираем
     text = text:gsub("<think>.-</think>%s*", "")
-    -- убираем жирный markdown-заголовок который DeepSeek ставит первой строкой
     text = text:gsub("^%*%*[^%*]+%*%*:?%s*", "")
     text = text:match("^%s*(.-)%s*$") or text
 
@@ -3441,7 +3447,7 @@ task.delay(5, function()
                     player=p, userId=uid, name=p.Name,
                     displayName=name, cleaned=msgs[math.random(#msgs)],
                     isWorld=true,
-                }, 2)
+                }, 1)
                 runChatQueue(wKey)
             end
             prevAir[uid] = inAir
