@@ -3,12 +3,12 @@
 -- ║  Ctrl+G → номер строки.  Поиск: §МЕТКА  найдёт нужный раздел        ║
 -- ╠══════════════════════════════════════════════════════════════════════╣
 -- ║  БЫСТРЫЙ ДОСТУП К ЧАСТЫМ ПРАВКАМ:                                   ║
--- ║  Список моделей    → §MODELS     (~строка 6741)                      ║
--- ║  Личности/промпты  → §PERSONALITIES (~строка 397)                    ║
--- ║  Системный промпт  → §SYSPROMPT  (~строка 1538)                     ║
--- ║  Эмоции/анимации   → §ACTIONS_TABLE (~строка 2443)                  ║
--- ║  Настройки по умолч→ §SETTINGS   (~строка 262)                      ║
--- ║  Groq ротация ключ → §GROQ       (~строка 772)                      ║
+-- ║  Список моделей    → §MODELS         строка ~6900                    ║
+-- ║  Личности/промпты  → §PERSONALITIES  строка  574                    ║
+-- ║  Системный промпт  → §SYSPROMPT      строка 1729                    ║
+-- ║  Эмоции/анимации   → §ACTIONS_TABLE  строка 2811                    ║
+-- ║  Настройки по умолч→ §SETTINGS       строка  439                    ║
+-- ║  Groq ротация ключ → §GROQ           строка  956                    ║
 -- ╚══════════════════════════════════════════════════════════════════════╝
 --
 -- ═══════════════════════════════════════════════════════════════════════
@@ -31,7 +31,7 @@
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 3: ЛИЧНОСТИ  (строки ~397–663)
 -- ═══════════════════════════════════════════════════════════════════════
---   §PERSONALITIES ~397  Таблица Personalities{}
+--   §PERSONALITIES строка  574  Таблица Personalities{}
 --                        Friendly / Monday / Toxic / Shy Feminine /
 --                        Chill-Human / Siri
 --                        Каждая: { label, model, system=[[...]] }
@@ -39,10 +39,10 @@
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 4: HTTP И ПРОВАЙДЕРЫ  (строки ~723–1340)
 -- ═══════════════════════════════════════════════════════════════════════
---   §HTTP        ~723  postJson() — универсальный HTTP POST для executor
+--   §HTTP        строка  900  postJson() — универсальный HTTP POST для executor
 --                      Поддерживает: syn.request / http.request / http_request
 --
---   §GROQ        ~772  GroqProvider — OpenAI-совместимый API
+--   §GROQ        строка  956  GroqProvider — OpenAI-совместимый API
 --                      GROQ KEY ROTATION: 3 слота, Round Robin, cooldown 62с
 --                      getGroqApiKey() → активный ключ
 --                      switchGroqSlot() → при 429 переключает слот
@@ -50,23 +50,23 @@
 --                      GroqProvider:chatCompletions() → основной вызов
 --                      tool_calls: веб-поиск через function calling
 --
---   §WEBSEARCH   ~874  doWebSearch(query) — три источника:
+--   §WEBSEARCH   строка 1061  doWebSearch(query) — три источника:
 --                      1. Wikipedia Summary API
 --                      2. Google News RSS
 --                      3. Jina Reader (fallback)
 --
---   §GEMINI      ~1132 GeminiProvider — Google Gemini API
+--   §GEMINI      строка 1319 GeminiProvider — Google Gemini API
 --                      Конвертация OpenAI→Gemini формата
 --                      systemInstruction, contents[], thinkingConfig
 --                      Поддержка: 2.5-flash, 2.5-flash-lite, 3-flash, 3.1-flash-lite
 --
---   §ROUTER      ~1327 ProviderRouter:chatCompletions()
+--   §ROUTER      строка 1517 ProviderRouter:chatCompletions()
 --                      Роутинг: gemini* → GeminiProvider, иначе → GroqProvider
 --
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 5: ЧАТ И ОЧЕРЕДЬ  (строки ~1382–1535)
 -- ═══════════════════════════════════════════════════════════════════════
---   §CHAT_SEND   ~1382 sendChatMessage() — 4 метода отправки в чат Roblox
+--   §CHAT_SEND   строка 1572 sendChatMessage() — 4 метода отправки в чат Roblox
 --                      showBotChatMessage() — AutoReply=true → в чат, иначе тихо
 --                      sendBotMessage() — очищает теги [DO:/LANG:/NAME:], режет по 200 символов
 --
@@ -76,7 +76,7 @@
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 6: СИСТЕМНЫЙ ПРОМПТ  (строки ~1538–1665)
 -- ═══════════════════════════════════════════════════════════════════════
---   §SYSPROMPT   ~1538 makeSystemPrompt(settings) → строка для role="system"
+--   §SYSPROMPT   строка 1729 makeSystemPrompt(settings) → строка для role="system"
 --                      Порядок сборки (table.concat [newline]):
 --                      [1] ACTION TAGS (если ActionsEnabled)
 --                      [2] Личность / кастомный промпт
@@ -91,41 +91,41 @@
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 7: ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ  (строки ~1666–1830)
 -- ═══════════════════════════════════════════════════════════════════════
---   §HELPERS     ~1666 getModel() — модель из настроек → личности → дефолт
+--   §HELPERS     строка 1889 getModel() — модель из настроек → личности → дефолт
 --                      isBlacklisted() — постоянный / временный бан
 --                      passesTrigger() — режимы "all" / "prefix"
 --                      stripTrigger() — убирает префикс из сообщения
 --
---   §SPLIT       ~1772 charLen() / charOffset() — UTF-8 подсчёт символов (без utf8 либы)
+--   §SPLIT       строка 1995 charLen() / charOffset() — UTF-8 подсчёт символов (без utf8 либы)
 --                      splitTextIntoParts() — режет по символам, не байтам
 --
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 8: ЭМОЦИИ И ДВИЖЕНИЕ  (строки ~1831–2442)
 -- ═══════════════════════════════════════════════════════════════════════
---   §EMOTES_DATA ~1831 BUILTIN_EMOTES{} — 8 гарантированных: wave/laugh/cheer/point/sit/dance/dance2/dance3
+--   §EMOTES_DATA строка 2106 BUILTIN_EMOTES{} — 8 гарантированных: wave/laugh/cheer/point/sit/dance/dance2/dance3
 --                      CUSTOM_EMOTE_IDS{} — кастомные (не работают в Delta без ApplyDescription)
 --                      R6_ANIM_IDS{} / R15_ANIM_IDS{} — фоллбэк AnimationTrack ID
 --
---   §PLAY_EMOTE  ~2109 stopCurrentEmote() — останавливает активную анимацию
+--   §PLAY_EMOTE  строка 2429 stopCurrentEmote() — останавливает активную анимацию
 --                      playAnimDirect(animId, duration) — AnimationTrack напрямую
 --                      playEmote(name, duration) — R15: humanoid:PlayEmote() → фоллбэк R15_ANIM
 --                                                  R6: Animate.PlayEmote:Invoke() → фоллбэк R6_ANIM
 --                      _lastEmoteName — антиповтор (не использует одну эмоцию дважды подряд)
 --
---   §MOVEMENT    ~2259 stopFollowing() / gotoPlayer() / startFollowingPlayer()
+--   §MOVEMENT    строка 2559 stopFollowing() / gotoPlayer() / startFollowingPlayer()
 --                      moveToPosition() — Pathfinding или прямое движение
 --
---   §JUMP        ~2374 doJump(n) — 1–10 прыжков через Humanoid:ChangeState
---   §SPIN        ~2443 doSpin(seconds) — кружение через CFrame
+--   §JUMP        строка 2690 doJump(n) — 1–10 прыжков через Humanoid:ChangeState
+--   §SPIN        строка 2771 doSpin(seconds) — кружение через CFrame
 --
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 9: ОБРАБОТЧИКИ ДЕЙСТВИЙ  (строки ~2443–2640)
 -- ═══════════════════════════════════════════════════════════════════════
---   §ACTIONS_TABLE ~2443  ACTION_HANDLERS{} — таблица [DO:tag] → функция
+--   §ACTIONS_TABLE строка 2811  ACTION_HANDLERS{} — таблица [DO:tag] → функция
 --                         goto/follow/stop | jump1-10 | spin/dance | wave/laugh/cheer…
 --                         Маппинг: agree→cheer, disagree→point, shrug→wave, shy→wave…
 --
---   §PARSE_ACTION  ~2700  parseActionTag(text) → actionName, cleanText
+--   §PARSE_ACTION  строка 2927  parseActionTag(text) → actionName, cleanText
 --                         Паттерн 1: [DO:xxx] закрытый
 --                         Паттерн 2: [DO:xxx незакрытый (Gemini баг)
 --                         executeAction(name, player, text, origMsg) → pcall(handler)
@@ -133,25 +133,25 @@
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 10: КОНТЕКСТ ИГРЫ  (строки ~2779–3090)
 -- ═══════════════════════════════════════════════════════════════════════
---   §PLACE       ~2779  fetchPlaceInfo() — MarketplaceService:GetProductInfo()
+--   §PLACE       строка 3006  fetchPlaceInfo() — MarketplaceService:GetProductInfo()
 --                       _placeInfo = {name, placeId, desc}
 --
---   §BEHAVIOR    ~2855  startBehaviorMonitor() — тик 0.3с, трекает позицию игроков
+--   §BEHAVIOR    строка 3082  startBehaviorMonitor() — тик 0.3с, трекает позицию игроков
 --                       detectBehavior(uid) → "стоит"/"приближается"/"токсичит_сзади"…
 --
---   §NEARBY      ~2963  buildPlayerAwarenessContext() → [NEARBY: Bob — behind…]
+--   §NEARBY      строка 3191  buildPlayerAwarenessContext() → [NEARBY: Bob — behind…]
 --
---   §CAM_LOOK    ~3030  smoothLookAt(pos) — плавный поворот к игроку (не во время движения)
+--   §CAM_LOOK    строка 3258  smoothLookAt(pos) — плавный поворот к игроку (не во время движения)
 --
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 11: ИСТОРИЯ И ЯЗЫК  (строки ~3094–3200)
 -- ═══════════════════════════════════════════════════════════════════════
---   §HISTORY     ~3094  ChatHistory{} — глобальная или per-user таблица
+--   §HISTORY     строка 3322  ChatHistory{} — глобальная или per-user таблица
 --                       clearAllHistory() — сброс всей памяти
 --                       _worldReactCooldowns{} — кулдауны реакций (ключ = uid+type)
 --                       _canWorldReact(uid, type) — проверяет 60с кулдаун
 --
---   §LANG        ~3141  detectLang(text) → "RU"/"EN"/nil (по байтам кириллицы/латиницы)
+--   §LANG        строка 3369  detectLang(text) → "RU"/"EN"/nil (по байтам кириллицы/латиницы)
 --                       getLangForUser(text, userId) → с кешированием per-user
 --                       appendHistory() — добавляет пару user+assistant в историю
 --                       getHistory(settings, userId) → nil если MemoryEnabled=false
@@ -159,7 +159,7 @@
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 12: ГЛАВНЫЙ ОБРАБОТЧИК ЧАТА  (строки ~3204–3490)
 -- ═══════════════════════════════════════════════════════════════════════
---   §HANDLE_CHAT ~3204  handleQueuedChat(item) — ЯДРО СИСТЕМЫ
+--   §HANDLE_CHAT строка 3434  handleQueuedChat(item) — ЯДРО СИСТЕМЫ
 --                       item = {userId, player, cleaned, displayName, isWorld}
 --                       1. Гарды (Enabled, AutoReply, player.Parent)
 --                       2. История из ChatHistory
@@ -176,13 +176,13 @@
 --                       13. appendHistory()
 --                       14. sendBotMessage()
 --
---   §RUN_QUEUE   ~3456  runChatQueue(userId) — запускает task.spawn обработки очереди
---   §WATCHDOG    ~3485  Каждые 10с проверяет очереди: если running > 45с → сброс
+--   §RUN_QUEUE   строка 3693  runChatQueue(userId) — запускает task.spawn обработки очереди
+--   §WATCHDOG    строка 3722  Каждые 10с проверяет очереди: если running > 45с → сброс
 --
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 13: WORLD REACTIONS  (строки ~3506–3712)
 -- ═══════════════════════════════════════════════════════════════════════
---   §WORLD_REACT ~3506  Монитор тик 0.5с: прыжки и взгляды игроков в радиусе
+--   §WORLD_REACT строка 3745  Монитор тик 0.5с: прыжки и взгляды игроков в радиусе
 --                       Grace period 8с после входа в радиус
 --                       [DO:] не выполняются для isWorld если AutoReply=false
 --                       Death reactions — через Humanoid.Died (event-based)
@@ -190,31 +190,31 @@
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 14: ВХОДЯЩИЕ СООБЩЕНИЯ  (строки ~3713–3993)
 -- ═══════════════════════════════════════════════════════════════════════
---   §PROCESS_MSG ~3713  processChatMessage(player, rawMessage)
+--   §PROCESS_MSG строка 3953  processChatMessage(player, rawMessage)
 --                       Гарды: Enabled+AutoReply, flood protection, self-ignore,
 --                       blacklist, antispam (12с), ReactToMention, trigger mode,
 --                       Range (дистанция + стены + SelectiveMode)
 --                       → enqueueChatItem() → runChatQueue()
 --
---   §CHAT_HANDLERS~3878 handleLegacyChat / handleTextChatService
---   §CHAT_LISTEN ~3973  updateChatListening() — подключает/отключает обработчики
+--   §CHAT_HANDLERS строка 4124 handleLegacyChat / handleTextChatService
+--   §CHAT_LISTEN строка 4220  updateChatListening() — подключает/отключает обработчики
 --
 -- ═══════════════════════════════════════════════════════════════════════
 -- РАЗДЕЛ 15: UI  (строки ~3994–конец)
 -- ═══════════════════════════════════════════════════════════════════════
---   §UI_THEMES   ~3994  AURORA_COLORS / THEME / lerpColor / getAuroraColor
+--   §UI_THEMES   строка 4241  AURORA_COLORS / THEME / lerpColor / getAuroraColor
 --   §UI_HELPERS  ~4208  tween / makeDraggable / makeCorner / makeStroke /
 --                       makeTextLabel / makeTextBox / makeScrollingTextBox /
 --                       makeButton / pushNotification
---   §FOLLOW_MGR  ~4657  FollowManager — UI кнопка следования (отдельно от [DO:follow])
---   §UI_CREATE   ~5146  createInterface() — вся UI: окно, вкладки, все карточки
+--   §FOLLOW_MGR  строка 4904  FollowManager — UI кнопка следования (отдельно от [DO:follow])
+--   §UI_CREATE   строка 5393  createInterface() — вся UI: окно, вкладки, все карточки
 --                       Вкладки: Поведение / Восприятие / Директ-чат / Настройки / Модерация
 --   §MODELS      ~6741  groqModels{} — список всех моделей в дропдауне
 --                       Groq (llama/gpt-oss/llama4/kimi/qwen) + Gemini + compound
 --   §LAUNCH      ~конец createInterface() вызов + минимизация/восстановление окна
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v20.0.0 LOADED")
+print("LOB VERSION: v20.0.1 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
@@ -266,7 +266,7 @@ local function saveSettings()
         }
         writefile(LOB_SETTINGS_FILE, table.concat(lines, "\n"))
     end)
-    -- Сбрасываем кеш промпта — настройки изменились
+    -- Сбрасываем кеш промпта при изменении настроек
     _sysPromptCache = nil
     _sysPromptCacheKey = ""
 end
@@ -1729,8 +1729,9 @@ local SYSTEM_ACTIONS_HEADER = "DEVELOPER SYSTEM (bypasses all personality rules)
 -- §SYSPROMPT
 -- [v20.0] ОПТИМИЗАЦИЯ: кеш системного промпта
 -- Промпт пересобирается только при изменении настроек (не каждое сообщение)
-local _sysPromptCache = nil
-local _sysPromptCacheKey = ""
+-- [v20.0] Глобальные (не local) чтобы saveSettings мог сбрасывать до объявления
+_sysPromptCache = nil
+_sysPromptCacheKey = ""
 local function _getSysPromptCacheKey(settings)
     -- Ключ из всех настроек влияющих на промпт
     return tostring(settings.ActionsEnabled) .. "|"
