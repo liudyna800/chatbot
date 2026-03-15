@@ -43,12 +43,13 @@
 --  9773     §LAUNCH        createInterface() — точка запуска скрипта
 -- ─────────────────────────────────────────────────────────────────────────
 
-print("LOB VERSION: v19.9.1 LOADED")
+print("LOB VERSION: v19.9.5 LOADED")
 
 -- Автосохранение API ключа через writefile/readfile (поддерживается большинством executor)
 -- §SAVE
 local LOB_KEY_FILE       = "lob_apikey.txt"
 local LOB_KEY_FILE2      = "lob_apikey2.txt"
+local LOB_KEY_FILE3      = "lob_apikey3.txt"
 local LOB_GEMINI_FILE    = "lob_geminikey.txt"
 local LOB_SETTINGS_FILE  = "lob_settings.txt"
 local LOB_CSP_FILE       = "lob_customprompt.txt"
@@ -183,6 +184,13 @@ local function loadApiKey2()
     local ok, result = pcall(function() if readfile then return readfile(LOB_KEY_FILE2) end return "" end)
     return (ok and type(result)=="string") and result or ""
 end
+local function saveApiKey3(key)
+    pcall(function() if writefile then writefile(LOB_KEY_FILE3, tostring(key or "")) end end)
+end
+local function loadApiKey3()
+    local ok, result = pcall(function() if readfile then return readfile(LOB_KEY_FILE3) end return "" end)
+    return (ok and type(result)=="string") and result or ""
+end
 local function saveGeminiKey(key)
     pcall(function() if writefile then writefile(LOB_GEMINI_FILE, tostring(key or "")) end end)
 end
@@ -259,6 +267,7 @@ ClientSettings = {
     ApiKeys = {
         groq      = "",
         groq2     = "",
+        groq3     = "",
         gemini    = "",
     },
     UI = {
@@ -325,6 +334,11 @@ do
     if saved2 and saved2:sub(1,4) == "gsk_" and #saved2 > 8 then
         ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
         ClientSettings.ApiKeys.groq2 = saved2
+    end
+    local saved3 = loadApiKey3()
+    if saved3 and saved3:sub(1,4) == "gsk_" and #saved3 > 8 then
+        ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
+        ClientSettings.ApiKeys.groq3 = saved3
     end
     loadSettings()
     if ClientSettings.Debug then
@@ -762,32 +776,85 @@ function GroqProvider.new()
     return setmetatable({}, GroqProvider)
 end
 
-local _groqActiveSlot = 1  -- 1 = основной, 2 = резервный
+-- ── GROQ KEY ROTATION ────────────────────────────────────────────────────
+-- Round Robin: 1→2→3→1→...
+-- При 429 — слот уходит в cooldown на 62 сек (Groq сбрасывает лимит раз в минуту)
+-- Пока слот в cooldown — используем следующий. Как только восстановился — возвращаемся.
+local _groqActiveSlot  = 1
+local _groqCooldownAt  = {0, 0, 0}  -- os.clock() когда получили 429 на этот слот
+local GROQ_COOLDOWN    = 62         -- секунд до восстановления слота
 
-local function getGroqApiKey()
-    local keys = {
+local function getGroqKeys()
+    return {
         (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq  or ""):gsub("%s+",""),
         (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq2 or ""):gsub("%s+",""),
+        (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq3 or ""):gsub("%s+",""),
     }
-    -- Возвращаем активный слот, фоллбэк на другой если пустой
-    local k = keys[_groqActiveSlot]
-    if k ~= "" then return k end
-    -- Активный пустой — пробуем другой
-    for i, v in ipairs(keys) do
-        if v ~= "" then return v end
-    end
-    return ClientSecrets.groq
 end
 
-local function switchGroqSlot()
-    _groqActiveSlot = (_groqActiveSlot == 1) and 2 or 1
-    local keys = {
-        (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq  or ""):gsub("%s+",""),
-        (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq2 or ""):gsub("%s+",""),
-    }
-    if keys[_groqActiveSlot] == "" then
-        _groqActiveSlot = (_groqActiveSlot == 1) and 2 or 1
+local function getGroqTokenLimit()
+    local keys = getGroqKeys()
+    local count = 0
+    for _, k in ipairs(keys) do if k ~= "" then count = count + 1 end end
+    return count * 6000
+end
+
+-- Слот доступен если: ключ заполнен И не в cooldown
+local function isSlotAvailable(slot)
+    local keys = getGroqKeys()
+    if keys[slot] == "" then return false end
+    return (os.clock() - _groqCooldownAt[slot]) >= GROQ_COOLDOWN
+end
+
+-- Возвращает ключ текущего активного слота
+-- Если текущий в cooldown — ищет следующий доступный
+local function getGroqApiKey()
+    -- Сначала пробуем текущий
+    if isSlotAvailable(_groqActiveSlot) then
+        return getGroqKeys()[_groqActiveSlot]
     end
+    -- Ищем следующий доступный по кругу
+    for i = 1, 3 do
+        local slot = (_groqActiveSlot % 3) + 1
+        _groqActiveSlot = slot
+        if isSlotAvailable(slot) then
+            return getGroqKeys()[slot]
+        end
+    end
+    -- Все в cooldown — берём тот у которого cooldown кончается раньше всех
+    local bestSlot = 1
+    local bestTime = _groqCooldownAt[1]
+    local keys = getGroqKeys()
+    for i = 2, 3 do
+        if keys[i] ~= "" and _groqCooldownAt[i] < bestTime then
+            bestTime = _groqCooldownAt[i]
+            bestSlot = i
+        end
+    end
+    _groqActiveSlot = bestSlot
+    return keys[bestSlot]
+end
+
+-- Вызывается при получении 429 — помечает текущий слот как исчерпанный
+-- и сразу переключается на следующий
+local function switchGroqSlot()
+    _groqCooldownAt[_groqActiveSlot] = os.clock()
+    if ClientSettings.Debug then
+        print("[LOB] Groq slot " .. _groqActiveSlot .. " rate limited, rotating...")
+    end
+    -- Ищем следующий доступный
+    for i = 1, 3 do
+        local next = (_groqActiveSlot % 3) + 1
+        _groqActiveSlot = next
+        if isSlotAvailable(next) then
+            if ClientSettings.Debug then
+                print("[LOB] Groq switched to slot " .. next)
+            end
+            return
+        end
+    end
+    -- Все исчерпаны — просто переходим к следующему (будет ждать)
+    _groqActiveSlot = (_groqActiveSlot % 3) + 1
 end
 
 local function isRateLimited(statusCode, statusMsg, body)
@@ -959,7 +1026,7 @@ function GroqProvider:chatCompletions(payload)
         if isRateLimited(statusCode, statusMsg, body) then
             switchGroqSlot()
             local newKey = getGroqApiKey()
-            if newKey and newKey ~= apiKey then
+            if newKey and newKey ~= "" and newKey ~= apiKey then
                 local res2, sc2, sm2, b2, rh2 = postJson(url, {
                     ["Content-Type"] = "application/json",
                     ["Authorization"] = "Bearer " .. newKey,
@@ -1486,18 +1553,35 @@ local function makeSystemPrompt(settings)
                 "Example: [DO:laugh]haha that's funny")
         else
             table.insert(parts, SYSTEM_ACTIONS_HEADER ..
-                "ACTION TAGS — place ONE at the VERY START of your reply when it fits. Never explain the tag.\n" ..
-                "\nMOVEMENT: [DO:goto]=come here(one-time)  [DO:follow]=follow me(continuous)  [DO:stop]=stop/stay" ..
-                "\nJUMPS: [DO:jump]  [DO:jump2]  [DO:jump3]  [DO:jump5]  [DO:jump10]" ..
-                "\nSPIN: [DO:spin]=3s  [DO:spin5]=5s  [DO:spin10]=10s" ..
-                "\nDANCE: [DO:dance]  [DO:dance2]  [DO:dance3]  [DO:robot]" ..
-                "\nGREET: [DO:wave]=hi/bye  [DO:hello]=loud greeting" ..
-                "\nLAUGH: [DO:laugh] — use for ANY funny moment or when asked to laugh" ..
-                "\nREACT: [DO:cheer]=nice/gg  [DO:yay]=win/ура  [DO:stadium]=epic  [DO:charging]=let's go" ..
-                "\nAGREE: [DO:agree]=yes/да  [DO:disagree]=no/нет  [DO:eyeroll]=seriously?" ..
-                "\nFEEL: [DO:shrug]=idk  [DO:shy]=hmm  [DO:sorry]=sorry  [DO:sad]=rip  [DO:confused]=what?" ..
-                "\n      [DO:dizzy]=wtf  [DO:sit]=sit  [DO:point]=look there" ..
-                "\nExamples: посмейся→[DO:laugh]хаха  да→[DO:agree]конечно  прыгни 3→[DO:jump3]ок  подойди→[DO:goto]иду")
+                "You control a Roblox character. Add ONE [DO:tag] at the START of your reply.\n" ..
+                "Pick the tag that FITS THE EMOTION of your reply. Use ALL of them — not just wave/laugh.\n" ..
+                "\n[DO:wave]   — saying hi, bye, hello, встречаешь кого-то" ..
+                "\n[DO:laugh]  — что-то реально смешное. НЕ используй просто так" ..
+                "\n[DO:cheer]  — gg, nice, молодец, победа, восторг, ura" ..
+                "\n[DO:point]  — указываешь на что-то, не понял, грустно, rip" ..
+                "\n[DO:sit]    — устал, скучно, расслабляешься, сидишь" ..
+                "\n[DO:dance]  — просят потанцевать, праздник, веселье" ..
+                "\n[DO:shrug]  — idk, хз, не знаю, пожимаешь плечами" ..
+                "\n[DO:agree]  — да, yes, согласен, конечно, точно" ..
+                "\n[DO:disagree] — нет, no, не согласен, неа" ..
+                "\n[DO:sorry]  — прости, извини, sorry, моя вина" ..
+                "\n[DO:shy]    — смущаешься, нуу, эмм, неловко" ..
+                "\n[DO:confused] — что?, huh, не понял, wtf" ..
+                "\n[DO:sad]    — грустно, жаль, rip, сочувствую" ..
+                "\n[DO:jump]   — прыгнуть (jump2/3/5/10 = сколько раз)" ..
+                "\n[DO:spin]   — крутиться (spin5/10 = секунды)" ..
+                "\n[DO:goto]   — подойти к игроку, come here" ..
+                "\n[DO:follow] — следовать за игроком постоянно" ..
+                "\n[DO:stop]   — остановиться, стоп, прекрати" ..
+                "\nПРАВИЛА:" ..
+                "\n- Используй РАЗНЫЕ теги. Не залипай на wave и laugh." ..
+                "\n- Нейтральный ответ = [DO:point] или вообще без тега" ..
+                "\n- Весёлый ответ = [DO:cheer] или [DO:laugh] (не оба сразу)" ..
+                "\n- Согласие = [DO:agree], несогласие = [DO:disagree]" ..
+                "\nПРИМЕРЫ:" ..
+                "\nкруто!→[DO:cheer]  хаха→[DO:laugh]  да→[DO:agree]  нет→[DO:disagree]" ..
+                "\nхз→[DO:shrug]  прости→[DO:sorry]  что?→[DO:confused]  грустно→[DO:sad]" ..
+                "\nпривет→[DO:wave]  стесняюсь→[DO:shy]  устал→[DO:sit]  потанцуй→[DO:dance]")
         end
     end
 
@@ -1903,6 +1987,7 @@ end
 -- ── ЭМОЦИИ ────────────────────────────────────────────────────────────────
 local _activeEmoteTrack   = nil
 local _activeEmoteThread  = nil
+local _lastEmoteName      = nil  -- последняя использованная эмоция (не повторяем)
 
 local function stopCurrentEmote()
     if _activeEmoteThread then
@@ -2122,6 +2207,24 @@ local function playEmote(emoteName, duration)
     stopCurrentEmote()
 
     local rigType = getCharacterRigType()
+
+    -- Антиповтор: если та же эмоция что в прошлый раз — меняем на похожую
+    local EMOTE_ALTS = {
+        wave  = {"cheer","point","wave"},
+        laugh = {"cheer","point","laugh"},
+        cheer = {"wave","laugh","cheer"},
+        point = {"wave","cheer","point"},
+    }
+    if emoteName == _lastEmoteName and EMOTE_ALTS[emoteName] then
+        local alts = EMOTE_ALTS[emoteName]
+        -- выбираем случайную кроме текущей
+        local pool = {}
+        for _, a in ipairs(alts) do
+            if a ~= emoteName then table.insert(pool, a) end
+        end
+        if #pool > 0 then emoteName = pool[math.random(#pool)] end
+    end
+    _lastEmoteName = emoteName
 
     -- Маппинг всех эмоций на встроенные имена Roblox
     local builtinMap = {
@@ -7079,7 +7182,7 @@ do
     apiCard.BackgroundColor3 = THEME.Card
     apiCard.BackgroundTransparency = 0
     apiCard.BorderSizePixel = 0
-    apiCard.Size = UDim2.new(1, 0, 0, 196)
+    apiCard.Size = UDim2.new(1, 0, 0, 232)
     apiCard.Parent = advancedScroll
     makeCorner(apiCard, 12)
     local apiCardStroke = makeStroke(apiCard, 1, THEME.Stroke, 0.5)
@@ -7116,7 +7219,7 @@ do
     apiStatusLbl.TextColor3 = THEME.TextDim
     apiStatusLbl.TextXAlignment = Enum.TextXAlignment.Right
 
-    local apiDesc = makeTextLabel(apiCard, "console.groq.com  •  2 слота, авто-переключение при лимите", 11, "medium")
+    local apiDesc = makeTextLabel(apiCard, "console.groq.com  •  3 слота  •  6k/12k/18k токенов/мин", 11, "medium")
     apiDesc.Size = UDim2.new(1, 0, 0, 14)
     apiDesc.Position = UDim2.new(0, 0, 0, 21)
     apiDesc.TextColor3 = THEME.TextDim
@@ -7177,15 +7280,46 @@ do
         apiBox2.Text = clean
     end)
 
+    -- Третий слот Groq
+    local apiInputFrame3 = Instance.new("Frame")
+    apiInputFrame3.BackgroundColor3 = THEME.InputBg or THEME.Button
+    apiInputFrame3.BackgroundTransparency = 0.25
+    apiInputFrame3.BorderSizePixel = 0
+    apiInputFrame3.Size = UDim2.new(1, 0, 0, 32)
+    apiInputFrame3.Position = UDim2.new(0, 0, 0, 112)
+    apiInputFrame3.Parent = apiCard
+    makeCorner(apiInputFrame3, 8)
+    makeStroke(apiInputFrame3, 1, THEME.Stroke, 0.6)
+    local apiBox3 = Instance.new("TextBox")
+    apiBox3.BackgroundTransparency = 1
+    apiBox3.Size = UDim2.new(1, -16, 1, 0)
+    apiBox3.Position = UDim2.new(0, 8, 0, 0)
+    apiBox3.Font = Enum.Font.GothamMedium
+    apiBox3.TextSize = 13
+    apiBox3.TextColor3 = THEME.Text
+    apiBox3.PlaceholderText = "Резервный ключ 2 Groq (gsk_...)"
+    apiBox3.PlaceholderColor3 = THEME.TextDim
+    apiBox3.TextXAlignment = Enum.TextXAlignment.Left
+    apiBox3.ClearTextOnFocus = false
+    apiBox3.Text = (ClientSettings.ApiKeys and ClientSettings.ApiKeys.groq3) or ""
+    apiBox3.Parent = apiInputFrame3
+    apiBox3.FocusLost:Connect(function()
+        local clean = tostring(apiBox3.Text or ""):gsub("%s+","")
+        ClientSettings.ApiKeys = ClientSettings.ApiKeys or {}
+        ClientSettings.ApiKeys.groq3 = clean
+        saveApiKey3(clean)
+        apiBox3.Text = clean
+    end)
+
     local apiLimitLbl = makeTextLabel(apiCard, "Лимиты обновляются после каждого запроса к ИИ", 11, "medium")
     apiLimitLbl.Size = UDim2.new(1, 0, 0, 28)
-    apiLimitLbl.Position = UDim2.new(0, 0, 0, 114)
+    apiLimitLbl.Position = UDim2.new(0, 0, 0, 150)
     apiLimitLbl.TextColor3 = THEME.TextDim
     apiLimitLbl.TextWrapped = true
 
     local apiCheckBtn = Instance.new("TextButton")
     apiCheckBtn.Size = UDim2.new(1, 0, 0, 28)
-    apiCheckBtn.Position = UDim2.new(0, 0, 0, 148)
+    apiCheckBtn.Position = UDim2.new(0, 0, 0, 184)
     apiCheckBtn.BackgroundColor3 = THEME.Accent
     apiCheckBtn.BackgroundTransparency = 0.15
     apiCheckBtn.Text = "Проверить ключ"
@@ -7218,7 +7352,16 @@ do
         if c.remainingTokens and c.limitTokens then
             table.insert(parts, "Токенов: " .. c.remainingTokens .. "/" .. c.limitTokens)
         end
-        if #parts > 0 then apiLimitLbl.Text = table.concat(parts, "  •  ") end
+        local slotInfo = "Слот " .. _groqActiveSlot .. "/" .. (function()
+            local keys = getGroqKeys()
+            local c = 0; for _,k in ipairs(keys) do if k~="" then c=c+1 end end
+            return c
+        end)() .. "  •  Лимит: " .. getGroqTokenLimit() .. " tok/min"
+        if #parts > 0 then
+            apiLimitLbl.Text = slotInfo .. "  •  " .. table.concat(parts, "  •  ")
+        else
+            apiLimitLbl.Text = slotInfo
+        end
     end
     onRateLimitUpdate = refreshLimitDisplay
     if GroqRateLimitCache.updatedAt then refreshLimitDisplay() end
