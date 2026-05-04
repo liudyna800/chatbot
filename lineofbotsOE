@@ -2727,66 +2727,69 @@ task.delay(5, function()
             if inRadius and not prevRadius[uid] then
                 enterTime[uid] = os.clock()
             end
+
             if not inRadius then
                 prevRadius[uid] = false
                 prevAir[uid]    = false
-                continue
-            end
-            prevRadius[uid] = true
+            else
+                prevRadius[uid] = true
 
-            local timeInRadius = os.clock() - (enterTime[uid] or 0)
-            if timeInRadius < GRACE then
-                local hum2 = char:FindFirstChildOfClass("Humanoid")
-                local st2  = hum2 and hum2:GetState()
-                prevAir[uid] = (st2 == Enum.HumanoidStateType.Jumping or st2 == Enum.HumanoidStateType.Freefall)
-                continue
-            end
+                local timeInRadius = os.clock() - (enterTime[uid] or 0)
+                local _skipRest = false
+                if timeInRadius < GRACE then
+                    local hum2 = char:FindFirstChildOfClass("Humanoid")
+                    local st2  = hum2 and hum2:GetState()
+                    prevAir[uid] = (st2 == Enum.HumanoidStateType.Jumping or st2 == Enum.HumanoidStateType.Freefall)
+                    _skipRest = true
+                end
+                if not _skipRest then
+                    local reacted = false
+                    local hum     = char:FindFirstChildOfClass("Humanoid")
+                    local humState = hum and hum:GetState()
+                    local inAir   = humState == Enum.HumanoidStateType.Jumping
+                                 or humState == Enum.HumanoidStateType.Freefall
 
-            local reacted = false
-            local hum     = char:FindFirstChildOfClass("Humanoid")
-            local humState = hum and hum:GetState()
-            local inAir   = humState == Enum.HumanoidStateType.Jumping
-                         or humState == Enum.HumanoidStateType.Freefall
-
-            if inAir and not prevAir[uid] and _canWorldReact(uid, "jump") then
-                reacted = true
-                local name = p.DisplayName or p.Name
-                local msgs = {
-                    "[SYSTEM: "..name.." just jumped near you. React naturally in 1 short sentence.]",
-                    "[SYSTEM: "..name.." is jumping around next to you. Notice it briefly.]",
-                }
-                local wKey = uid + 20000000
-                enqueueChatItem(wKey, {
-                    player=p, userId=uid, name=p.Name,
-                    displayName=name, cleaned=msgs[math.random(#msgs)],
-                    isWorld=true,
-                }, 1)
-                runChatQueue(wKey)
-            end
-            prevAir[uid] = inAir
-
-            if not reacted then
-                local toUs     = myPos - root.Position
-                local stareDist = toUs.Magnitude
-                if stareDist > 1 and root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 then
-                    if _canWorldReact(uid, "stare") then
+                    if inAir and not prevAir[uid] and _canWorldReact(uid, "jump") then
+                        reacted = true
                         local name = p.DisplayName or p.Name
                         local msgs = {
-                            "[SYSTEM: "..name.." is staring right at you. React naturally in 1 short sentence, stay in character.]",
-                            "[SYSTEM: "..name.." keeps looking at you. React briefly, stay in character.]",
+                            "[SYSTEM: "..name.." just jumped near you. React naturally in 1 short sentence.]",
+                            "[SYSTEM: "..name.." is jumping around next to you. Notice it briefly.]",
                         }
                         local wKey = uid + 20000000
                         enqueueChatItem(wKey, {
                             player=p, userId=uid, name=p.Name,
                             displayName=name, cleaned=msgs[math.random(#msgs)],
                             isWorld=true,
-                        }, 2)
+                        }, 1)
                         runChatQueue(wKey)
                     end
-                end
-            end
-        end
-    end
+                    prevAir[uid] = inAir
+
+                    if not reacted then
+                        local toUs      = myPos - root.Position
+                        local stareDist = toUs.Magnitude
+                        if stareDist > 1 and root.CFrame.LookVector:Dot(toUs.Unit) > 0.93 then
+                            if _canWorldReact(uid, "stare") then
+                                local name = p.DisplayName or p.Name
+                                local msgs = {
+                                    "[SYSTEM: "..name.." is staring right at you. React naturally in 1 short sentence, stay in character.]",
+                                    "[SYSTEM: "..name.." keeps looking at you. React briefly, stay in character.]",
+                                }
+                                local wKey = uid + 20000000
+                                enqueueChatItem(wKey, {
+                                    player=p, userId=uid, name=p.Name,
+                                    displayName=name, cleaned=msgs[math.random(#msgs)],
+                                    isWorld=true,
+                                }, 2)
+                                runChatQueue(wKey)
+                            end
+                        end
+                    end
+                end -- if not _skipRest
+            end -- else (inRadius)
+        end -- for players
+    end -- while
 end)
 
 -- Death reactions (event-based)
