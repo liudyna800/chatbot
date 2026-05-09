@@ -9,6 +9,43 @@ local LOB_SETTINGS_FILE  = "lob_settings.txt"
 local LOB_CSP_FILE       = "lob_customprompt.txt"
 local LOB_MODEL_FILE     = "lob_model.txt"
 
+-- Проверка и создание функций-заглушек для task
+if not task then
+    task = {}
+end
+if not task.spawn then
+    task.spawn = function(f, ...)
+        local args = {...}
+        coroutine.wrap(function() f(table.unpack(args)) end)()
+    end
+end
+if not task.wait then
+    task.wait = function(t)
+        local start = os.clock()
+        while os.clock() - start < (t or 0) do
+            -- busy wait fallback
+        end
+    end
+end
+if not task.delay then
+    task.delay = function(t, f, ...)
+        local args = {...}
+        task.spawn(function()
+            task.wait(t)
+            f(table.unpack(args))
+        end)
+    end
+end
+if not task.defer then
+    task.defer = function(f, ...)
+        local args = {...}
+        task.spawn(function()
+            task.wait(0)
+            f(table.unpack(args))
+        end)
+    end
+end
+
 local function saveSettings()
     pcall(function()
         if not writefile then return end
@@ -55,7 +92,8 @@ end
 
 local function loadSettings()
     pcall(function()
-        if not readfile then return end
+        if not readfile or not isfile then return end
+        if not isfile(LOB_SETTINGS_FILE) then return end
         local data
         local ok, result = pcall(readfile, LOB_SETTINGS_FILE)
         if ok and type(result) == "string" and result ~= "" then
