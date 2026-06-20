@@ -2801,43 +2801,41 @@ local function firePiggyTrigger()
         local root = getLocalRootPart()
         if not root then return end
 
-        -- Запоминаем откуда пришли
         local originCF = root.CFrame
 
-        -- Шаг 1: телепорт на позицию тригера
+        -- Шаг 1: телепорт
         pcall(function() root.CFrame = CFrame.new(33, 107, -52) end)
         task.wait(0.1)
 
-        -- Шаг 2: ищем ProximityPrompt рядом (радиус 15 студ) и активируем
+        -- Шаг 2: ищем ВСЕ ProximityPrompt в workspace и печатаем дебаг
+        local trigPos = Vector3.new(33, 107, -52)
+        local best, bestDist = nil, 9999
+        local found = 0
         pcall(function()
-            local best, bestDist = nil, 15
             for _, desc in ipairs(workspace:GetDescendants()) do
-                if desc:IsA("ProximityPrompt") and desc.Enabled then
+                if desc:IsA("ProximityPrompt") then
+                    found = found + 1
                     local part = desc.Parent
                     if part and part:IsA("BasePart") then
-                        local d = (part.Position - Vector3.new(33, 107, -52)).Magnitude
+                        local d = (part.Position - trigPos).Magnitude
+                        print("[PIGGY] ProximityPrompt найден: " .. desc:GetFullName() .. " дист=" .. math.floor(d) .. " enabled=" .. tostring(desc.Enabled))
                         if d < bestDist then bestDist = d; best = desc end
                     end
                 end
             end
-            if best then
-                -- fireproximityprompt — Delta поддерживает напрямую
-                local ok = pcall(fireproximityprompt, best)
-                if not ok then
-                    -- фоллбэк: VirtualInputManager (нажать E)
-                    pcall(function()
-                        local VIM = game:GetService("VirtualInputManager")
-                        VIM:SendKeyEvent(true,  Enum.KeyCode.E, false, game)
-                        task.wait(0.05)
-                        VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-                    end)
-                end
-            end
         end)
+        print("[PIGGY] Всего ProximityPrompt: " .. found .. " | Лучший дист: " .. math.floor(bestDist))
+
+        if best then
+            print("[PIGGY] Пробуем активировать: " .. best:GetFullName())
+            -- Метод 1: fireproximityprompt
+            local ok1, err1 = pcall(function() fireproximityprompt(best) end)
+            print("[PIGGY] fireproximityprompt: " .. tostring(ok1) .. " " .. tostring(err1))
+        else
+            print("[PIGGY] ПРОМПТ НЕ НАЙДЕН — проверь координаты или название объекта")
+        end
 
         task.wait(0.15)
-
-        -- Шаг 3: возврат на исходную позицию
         pcall(function() root.CFrame = originCF end)
     end)
 end
